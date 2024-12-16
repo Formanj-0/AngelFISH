@@ -7,3 +7,5 @@ config_cluster.yml
 config_nas.yml
 *.tif
 *.zip
+*.txt
+*.sld
