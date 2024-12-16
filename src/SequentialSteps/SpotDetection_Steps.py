@@ -95,7 +95,7 @@ class SpotDetection(SequentialStepsClass):
                 print("\r dtype: {0}".format(spots_out.dtype))
 
             # extract fov results
-            cell_mask = cell_mask.astype("uint16") if cell_mask is not None else nuc_mask.astype("uint16")
+            cell_mask = cell_mask.astype("uint16") if cell_mask is not None else None # nuc_mask.astype("uint16")
             nuc_mask = nuc_mask.astype("uint16") if nuc_mask is not None else None
             rna = rna.astype("uint16")
             other_images = {}
@@ -112,6 +112,8 @@ class SpotDetection(SequentialStepsClass):
             if verbose:
                 print("number of cells identified: {0}".format(len(fov_results)))
 
+            cell_label = cell_mask
+            nuc_label = nuc_mask
             # cycle through cells and save the results
             for i, cell_results in enumerate(fov_results):
                 # get cell results
@@ -144,8 +146,8 @@ class SpotDetection(SequentialStepsClass):
             df['FISH_Channel'] = [FISHChannel]*len(df)
 
             ##### Update spots to include cells
-            c_list = [cell_mask[s[1], s[2]] for s in spots] # TODO make this work for and 3D
-            n_list = [nuc_mask[s[1], s[2]] for s in spots]
+            c_list = [cell_label[s[1], s[2]] for s in spots] # TODO make this work for and 3D
+            n_list = [nuc_label[s[1], s[2]] for s in spots]
             cell_label = c_list
             is_nuc = [(n>0 and c==0) for n,c in zip(n_list,c_list)]
             errors = [(n>0 and c>0 and n!=c) for n,c in zip(n_list,c_list)]
@@ -435,7 +437,7 @@ class BIGFISH_SpotDetection(SpotDetection):
 
         threshold = self._establish_threshold(FISHChannel, bigfish_threshold, kwargs)
 
-
+        self.dim_3D = len(rna.shape) == 3
         voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna.shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
         spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna.shape) == 3 else (int(spot_yx), int(spot_yx))
 
@@ -610,7 +612,7 @@ class BIGFISH_SpotDetection(SpotDetection):
 
     def standardize_df(self, df_cellresults, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params, **kwargs):
             # merge spots_px and spots_um
-            if spots_px.shape[1] == 6:
+            if self.dim_3D:
                 if sub_pixel_fitting:
                     spots = np.concatenate([spots_px, spots_subpx], axis=1)
                     df_spotresults = pd.DataFrame(spots, columns=['z_px', 'y_px', 'x_px', 'cluster_index', 'z_nm', 'y_nm', 'x_nm', 'is_nuc', 'cell_label', 'snr', 'signal'])
