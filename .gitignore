@@ -9,3 +9,4 @@ config_nas.yml
 *.zip
 *.txt
 *.sld
+*.npy

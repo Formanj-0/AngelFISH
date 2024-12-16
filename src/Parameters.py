@@ -232,7 +232,7 @@ class DataContainer(Parameters):
 
     def __post_init__(self):
         if self.temp is None:
-            self.temp = tempfile.TemporaryDirectory()
+            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd())
         self.load_temp_data()
 
     def __setattr__(self, name, value):
