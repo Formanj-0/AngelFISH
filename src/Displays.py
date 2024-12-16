@@ -3,12 +3,13 @@ import numpy as np
 import h5py
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-from src.Parameters import Parameters
+from src.Parameters import Parameters, DataContainer
 
 
 
 class Display:
     def displayImage(self, position: int = 0, timepoint: int = 0, channel: int = 0, zslice: int = 0):
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         images = params['images']
         image = images[position, timepoint, channel, zslice]
@@ -19,6 +20,7 @@ class Display:
         return image
 
     def displayMask(self, position: int = 0, timepoint: int = 0, channel: int = 0, zslice: int = 0, label: int = None):
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         masks = params['masks']
         mask = masks[position, timepoint, channel, zslice]
@@ -31,6 +33,7 @@ class Display:
 
     def displayImage_maxProject(self, position: int = 0, timepoint: int = 0, channel: int = 0):
         # TODO: time these parts
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         images = params['images']
         image = np.max(images[position, timepoint, channel, :, :, :].compute(), axis=0)
@@ -42,6 +45,7 @@ class Display:
         return image
 
     def displayGrid_Images(self, positions: list[int] = [0, 1, 2]):
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         images = params['images']
         fig, axs = plt.subplots(len(positions), images.shape[2], figsize=(20, 20))
@@ -52,6 +56,7 @@ class Display:
         plt.show()
 
     def displayGrid_Masks(self, positions: list[int] = [0, 1, 2]):
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         masks = params['masks']
         fig, axs = plt.subplots(len(positions), masks.shape[2], figsize=(20, 20))

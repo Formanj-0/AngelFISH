@@ -21,8 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 from src import IndependentStepClass, DataContainer
 from src.Parameters import Parameters
-from src.Util import Utilities, NASConnection
-from src.GeneralOutput import OutputClass
+from src.NASConnection import NASConnection
 
 
 #%% Useful Functions
@@ -43,13 +42,6 @@ def get_first_executing_folder():
 
 
 #%% Abstract Class
-
-# Loading in data from multiple locations
-class New_Parameters(OutputClass):
-    def append(self, new_params):
-        Parameters.update_parameters(new_params)
-
-
 class DataTypeBridge(IndependentStepClass):
     def main(self, initial_data_location, connection_config_location, 
             load_in_mask, nucChannel, cytoChannel, 
@@ -92,7 +84,7 @@ class DataTypeBridge(IndependentStepClass):
                 self.convert_folder_to_H5(folder, h5_name, nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
-        self.load_in_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location)
+        return self.load_in_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location)
 
     def download_folder_from_NAS(self, remote_folder_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
@@ -162,15 +154,9 @@ class DataTypeBridge(IndependentStepClass):
                 else:
                     print('Something is broken')
 
-
-        DataContainer(local_dataset_location = H5_locations,
-                             h5_file = h5_files,
-                            total_num_chunks = num_chuncks,
-                            images = images,
-                            masks = masks)
-        
-        New_Parameters({'independent_params': ip, 'position_indexs': position_indexs})
-
+        return {'local_dataset_location':H5_locations, 'h5_file': h5_files, 'total_num_chunks': num_chuncks, 'images': images, 'masks': masks,
+                'independent_params': ip, 'position_indexs': position_indexs}
+    
     def delete_folder(self, folder):
         shutil.rmtree(folder)
 
@@ -346,7 +332,4 @@ class Avg_Parameters(IndependentStepClass):
         # average the values
         avg_values = np.mean(values_to_average, axis=1)
 
-        # make this to a dictionary
-        avg_params = dict(zip(params_to_avg, avg_values))
-
-        return New_Parameters(avg_params)
+        return dict(zip(params_to_avg, avg_values))

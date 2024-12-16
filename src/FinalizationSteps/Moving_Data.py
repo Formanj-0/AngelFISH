@@ -14,9 +14,7 @@ from abc import abstractmethod
 
 from src.GeneralStep import FinalizingStepClass
 from src.Parameters import Parameters, DataContainer
-from src.GeneralOutput import OutputClass
-
-from src.Util.NASConnection import NASConnection
+from src.NASConnection import NASConnection
 
 
 
@@ -54,7 +52,8 @@ class remove_local_data_but_keep_h5(Moving_Data):
 
 class remove_temp(Moving_Data):
     def main(self, **kwargs):
-        DataContainer().delete_temp()
+        if os.path.exists(DataContainer().temp.name):
+            DataContainer().delete_temp()
 
 class remove_all_temp(Moving_Data):
     def main(self, temp_name, **kwargs):

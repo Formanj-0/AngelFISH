@@ -12,8 +12,10 @@ from dask_image import imread
 import h5py
 from dataclasses import asdict
 import gc
+import pandas as pd
 from skimage.io import imsave
 import tempfile
+import json
 
 @dataclass
 class Parameters(ABC):
@@ -220,19 +222,18 @@ class DataContainer(Parameters):
     total_num_chunks: int = None
     images: da = None
     masks: da = None
-    temp_h5: h5py.File = None
+    temp: tempfile.TemporaryDirectory = None
 
     def __init__(self, **kwargs):
-        if not hasattr(self, 'temp_name'):
-            self.temp_name = f'temp_{np.random.randint(0, 100000)}'
-
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
+        self.__post_init__()
 
     def __post_init__(self):
-        self.save_temp()
-        self.load_temp()
+        if self.temp is None:
+            self.temp = tempfile.TemporaryDirectory()
+        self.load_temp_data()
 
     def __setattr__(self, name, value):
         if name == 'total_num_chunks':
@@ -249,61 +250,134 @@ class DataContainer(Parameters):
             
         super().__setattr__(name, value)
 
+    def save_results(self, kwargs: dict, p:int = None, t:int = None):
+        if kwargs is not None:
+            for name, value in kwargs.items():
+                # check if it a mask
+                if 'mask' in name:
+                    self.save_masks(name, value, p, t)
 
-    def save_temp(self):
-        if not hasattr(self, 'temp_masks'):
-            self.temp_masks = tempfile.TemporaryDirectory()
+                # check if it a image
+                elif 'image' in name:
+                    self.save_images(name, value, p, t)
 
-        if not hasattr(self, 'temp_images'):
-            self.temp_images = tempfile.TemporaryDirectory()
 
-        if not hasattr(self, '_images_modified'):
-            self._images_modified = False
+                elif isinstance(value, pd.DataFrame):
+                    # check the type:
+                    # if pd.df save as csv
+                    self.save_df(name, value)
 
-        if not hasattr(self, '_masks_modified'):
-            self._masks_modified = False
+                elif isinstance(value, np.ndarray):
+                    self.save_np(name, value)
 
-        self.images = self.images.compute()
-        self.masks = self.masks.compute()
-        self.temp_masks.cleanup()
-        self.temp_images.cleanup()
+                elif name in Parameters().get_parameters().keys():
+                    Parameters().update_parameters({name: value})
 
-        if self.images is not None and self._images_modified:
-            self.images = da.rechunk(da.from_array(self.images), (1, 1, -1, -1,-1,-1))
-            da.to_npy_stack(self.temp_images.name, self.images) 
-            self._images_modified = False
+                else:
+                    # else save as json
+                    self.save_extra(name, value)
 
-        if self.masks is not None and self._masks_modified:
-            self.masks = da.rechunk(da.from_array(self.masks), (1, 1, -1, -1,-1,-1))
-            da.to_npy_stack(self.temp_masks.name, self.masks) 
-            self._masks_modified = False
+    def save_masks(self, name, mask, p:int = None, t:int = None):
+        params = Parameters().get_parameters()
+        if p is None and t is None:
+            masks = da.rechunk(da.asarray(mask), (1, -1, -1, -1,-1,-1))
+            da.to_npy_stack(os.path.join(self.temp.name, 'masks'), masks) 
 
-        del self.images
-        del self.masks
-        gc.collect()
+        elif p is not None and t is not None and 'nuc' in name:
+            old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
+            old[0, t, params['nucChannel'], :, :, :] = mask
+            np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
+
+        elif p is not None and t is not None and 'cell' in name:
+            old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
+            old[0, t, params['cytoChannel'], :, :, :] = mask
+            np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
+
+    def save_images(self, name, image, p:int = None, t:int = None):
+        if p is None and t is None:
+            images = da.rechunk(da.asarray(image), (1, -1, -1, -1,-1,-1))
+            da.to_npy_stack(os.path.join(self.temp.name, 'images'), images) 
         
-        self.images = da.from_npy_stack(self.temp_images.name) 
-        self.masks = da.from_npy_stack(self.temp_masks.name)
+        elif p is not None and t is not None:
+            np.save(os.path.join(self.temp.name, 'images', f'{p}.npy'), image)
 
+    def save_df(self, name, value):
+        folder_path = os.path.join(self.temp.name, name)
+        os.makedirs(folder_path, exist_ok=True)
+        existing_files = [f for f in os.listdir(folder_path)]
+        file_index = len(existing_files) + 1
+        value.to_csv(os.path.join(folder_path, f'{name}_{file_index}.csv'), index=False)
 
-    def load_temp(self):
-        # if hasattr(self, 'temp_name'):
-        #     if os.path.exists(f'{self.temp_name}_images'):
-        #         self.images = da.from_npy_stack(f'{self.temp_name}_images') 
-        #         self._images_modified = False
-        #     if os.path.exists(f'{self.temp_name}_masks'):
-        #         da.from_npy_stack(f'{self.temp_name}_masks')
-        #         self._masks_modified = False
-        pass
+    def save_extra(self, name, value):
+        folder_path = os.path.join(self.temp.name, name)
+        os.makedirs(folder_path, exist_ok=True)
+        existing_files = [f for f in os.listdir(folder_path)]
+        file_index = len(existing_files) + 1
+        with open(os.path.join(folder_path, f'{name}_{file_index}.json'), 'w') as f:
+            json.dump(value, f)
+
+    def save_np(self, name, value):
+        folder_path = os.path.join(self.temp.name, name)
+        os.makedirs(folder_path, exist_ok=True)
+        existing_files = [f for f in os.listdir(folder_path) if f.startswith(name) and f.endswith('.csv')]
+        file_index = len(existing_files) + 1
+        np.save(os.path.join(folder_path, f'{name}_{file_index}.npy'), value)
+
+    def load_temp_data(self):
+        # Load masks and images
+        if self.images is not None:
+            del self.images
+        if self.masks is not None:
+            del self.masks
+        gc.collect()
+
+        # Load everything else:
+        # go through all remaining folders in temp
+        data = {}
+        for folder in os.listdir(self.temp.name):
+            folder_path = os.path.join(self.temp.name, folder)
+            files = os.listdir(folder_path)
+            csv_files = [f for f in files if f.endswith('.csv')]
+            json_files = [f for f in files if f.endswith('.json')]
+            npy_files = [f for f in files if f.endswith('.npy')]
+            if 'images' in folder:
+                self.images = da.from_npy_stack(folder_path)
+
+            elif 'masks' in folder:
+                self.masks = da.from_npy_stack(folder_path)
+
+            # load folders with csvs as a pandas df
+            elif len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
+                df = []
+                for c in csv_files:
+                    df.append(pd.read_csv(os.path.join(folder_path, c)))
+                concatenated_df = pd.concat(df, axis=0)
+                setattr(self, folder, concatenated_df)
+                data[folder] = concatenated_df
+
+            elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
+                json_data = []
+                for j in json_files:
+                    with open(os.path.join(folder_path, j), 'r') as f:
+                        json_data.append(json.load(f))
+                concatenated_data = pd.json_normalize(json_data)
+                setattr(self, folder, concatenated_data)
+                data[folder] = concatenated_data
+
+            elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
+                npy_data = []
+                for n in npy_files:
+                    npy_data.append(np.load(os.path.join(folder_path, n)))
+                concatenated_data = np.concatenate(npy_data, axis=0)
+                setattr(self, folder, concatenated_data)
+                data[folder] = concatenated_data
+
+            else:
+                raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+        return data
 
     def delete_temp(self):
-        if hasattr(self, 'temp_masks'):
-            self.temp_masks.cleanup()
-            del self.temp_masks
-
-        if hasattr(self, 'temp_images'):
-            self.temp_images.cleanup()
-            del self.temp_images
+        self.temp.cleanup()
 
 repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 @dataclass

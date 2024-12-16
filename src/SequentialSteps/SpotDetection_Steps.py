@@ -17,43 +17,13 @@ from abc import abstractmethod
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src.GeneralOutput import OutputClass
 from src import SequentialStepsClass, IndependentStepClass
-from src.Util import Plots, SpotDetection
 from src.Parameters import Parameters
-
-
-#%% Output Classes
-class SpotDetectionOutputClass(OutputClass):
-    def append(self, df_cellresults, df_spotresults, df_clusterresults, threshold):
-        if not hasattr(self, 'df_cellresults'):
-            self.df_cellresults = df_cellresults
-        if self.df_cellresults is not None:
-            self.df_cellresults = pd.concat([self.df_cellresults, df_cellresults])
-        
-        if not hasattr(self, 'df_spotresults'):
-            self.df_spotresults = df_spotresults
-        if self.df_spotresults is not None:
-            self.df_spotresults = pd.concat([self.df_spotresults, df_spotresults])
-        
-        if not hasattr(self, 'df_clusterresults'):
-            self.df_clusterresults = df_clusterresults
-        if self.df_clusterresults is not None:
-            self.df_clusterresults = pd.concat([self.df_clusterresults, df_clusterresults])
-
-        if not hasattr(self, 'bigfish_threshold'):
-            self.bigfish_threshold = [threshold]
-        if threshold is not None:
-            self.bigfish_threshold = [*self.bigfish_threshold, threshold]
-
-class New_Parameters(OutputClass):
-    def append(self, new_params):
-        Parameters.update_parameters(new_params)
 
 #%% Abstract Class
 class SpotDetection(SequentialStepsClass):
     def main(self, image, nuc_mask, cell_mask, nucChannel, cytoChannel, FISHChannel, timepoint, fov, verbose, display_plots,
-             voxel_size_yx, voxel_size_z, spot_yx, spot_z, **kwargs) -> SpotDetectionOutputClass:
+             voxel_size_yx, voxel_size_z, spot_yx, spot_z, **kwargs):
         for c in range(len(FISHChannel)):
             rna = image[FISHChannel[c], :, :, :]
             rna = rna.squeeze()
@@ -68,7 +38,7 @@ class SpotDetection(SequentialStepsClass):
 
             spots, cell_results, clusters = self.add_ind_params(spots, cell_results, clusters, timepoint, fov, c)
 
-        return SpotDetectionOutputClass(cell_results, spots, clusters)
+        return {'df_cellresults':cell_results ,'df_spotresults':spots, 'df_clusterresults':clusters}
 
 
     @abstractmethod
@@ -420,8 +390,8 @@ class BIGFISH_SpotDetection(SpotDetection):
 
             spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params)
 
-            output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
-        return output
+            # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
+        return {'df_cellresults': cell_results, 'df_spotresults': spots, 'df_clusterresults': clusters, 'bigfish_threshold': threshold}
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
             # check if a threshold is provided

@@ -4,7 +4,21 @@ import inspect
 from copy import copy
 
 from .Parameters import Parameters, DataContainer
-# from . import Settings, Experiment, ScopeClass, DataContainer
+from functools import wraps
+import traceback
+
+def handle_errors(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            DataContainer().delete_temp()
+            print("An error occurred. Temp data deleted.")
+            traceback.print_exc()
+            raise e
+    return wrapper
+
 
 
 class StepClass(ABC):
@@ -142,12 +156,13 @@ class StepClass(ABC):
     def main(self, **kwargs):
         pass
 
+    @handle_errors
     def run(self, p: int = None, t:int = None):
-        DataContainer().load_temp()
         kwargs = self.load_in_parameters(p, t)
         results = self.main(**kwargs) 
-        DataContainer().save_temp()
-        return 
+        DataContainer().save_results(results, p, t)
+        DataContainer().load_temp_data()
+        return results
 
 class SequentialStepsClass(StepClass):
     order = 'pt'
@@ -157,6 +172,7 @@ class SequentialStepsClass(StepClass):
         self.is_first_run = True
 
     def execute(self):
+        DataContainer().load_temp_data()
         params = Parameters.get_parameters()
         number_of_chunks = params['num_chunks_to_run']
         count = 0
@@ -190,8 +206,9 @@ class SequentialStepsClass(StepClass):
         else:
             raise ValueError('Order must be either "pt" or "tp"')
 
+    @handle_errors
     def run(self, p:int = None, t:int = None):
-        DataContainer().load_temp()
+        DataContainer().load_temp_data()
         if p is None and t is None:
             params = Parameters.get_parameters()
             number_of_chunks = params['num_chunks_to_run']
@@ -212,7 +229,10 @@ class SequentialStepsClass(StepClass):
                         print(' ###################### ')
                         params = self.load_in_parameters(p, t)
                         output = self.main(**params)
+                        DataContainer().save_results(output, p, t)
                         count += 1
+                return DataContainer().load_temp_data()
+            
             elif SequentialStepsClass.order == 'pt':
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', self)
@@ -229,9 +249,10 @@ class SequentialStepsClass(StepClass):
                         print(' ###################### ')
                         params = self.load_in_parameters(p, t)
                         output = self.main(**params)
+                        DataContainer().save_results(output, p, t)
                         count += 1
-                        if count >= number_of_chunks:
-                            break
+                return DataContainer().load_temp_data()
+
         elif p is not None and t is not None:
             print('')
             print(' ###################### ')
@@ -239,8 +260,8 @@ class SequentialStepsClass(StepClass):
             print(' ###################### ')
             params = self.load_in_parameters(p, t)
             output = self.main(**params)
-        DataContainer().save_temp()
-        return output
+            DataContainer().save_results(output, p, t)
+            return output
 
     def main(self, **kwargs):
         pass

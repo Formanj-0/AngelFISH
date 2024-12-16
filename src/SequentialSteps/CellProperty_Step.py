@@ -8,18 +8,11 @@ from skimage.io import imread
 import skimage as sk
 import dask.array as da
 from copy import copy, deepcopy
-
-from src.Util import Utilities, Plots, CellSegmentation, SpotDetection
-from src.GeneralOutput import OutputClass
-from src.GeneralStep import SequentialStepsClass
 import pandas as pd
 
-class CellPropertyOutput(OutputClass):
-    def append(self, df):
-        if hasattr(self, 'cell_properties'):
-            self.cell_properties = pd.concat([self.cell_properties, df], axis=0)
-        else:
-            self.cell_properties = df
+from src.GeneralStep import SequentialStepsClass
+
+
 
 class CellProperties(SequentialStepsClass):
     def __init__(self):
@@ -64,7 +57,7 @@ class CellProperties(SequentialStepsClass):
         combined_df['fov'] = [fov]*len(combined_df)
         combined_df['timepoint'] = [timepoint]*len(combined_df)
 
-        CellPropertyOutput(combined_df)
+        return {'cell_properties': combined_df}
 
 
 

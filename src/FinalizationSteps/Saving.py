@@ -12,15 +12,11 @@ import dask.array as da
 from datetime import datetime
 from abc import abstractmethod
 import gc
+from typing import List, Dict, Any, Union
 
 from src.GeneralStep import FinalizingStepClass
-from src.Parameters import Parameters
-from src.GeneralOutput import OutputClass
-from src.Util.Plots import Plots
-from src.Util.Metadata import Metadata
-from src.Util.ReportPDF import ReportPDF
-from src.Util.Utilities import Utilities
-from src.Util.NASConnection import NASConnection
+from src.Parameters import Parameters, DataContainer, ScopeClass, Settings, Experiment
+from src.NASConnection import NASConnection
 
 def close_h5_files():
     for obj in gc.get_objects():
@@ -80,7 +76,69 @@ class Save_Outputs(Saving):
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
 
-        OutputClass.save_all_outputs(local_dataset_location, h5_file, f'Analysis_{Analysis_name}_{date}', position_indexs, independent_params)
+        data = DataContainer().load_temp_data()
+
+        self.save(data, local_dataset_location, h5_file, f'Analysis_{Analysis_name}_{date}', position_indexs, independent_params)
+
+    def save(self, attributes, locations, h5_file: str, group_name: str, position_indexs: list[int], independent_params: dict[str, Any] ):
+        # get all the attributes of the class
+
+        def handle_df(df):
+            for col in df.columns:
+                if df[col].dtype == 'O':  # Object type
+                    if df[col].map(type).nunique() == 1 and isinstance(df[col].iloc[0], str):
+                        df[col] = df[col].astype(str)  # Convert to string
+                    else:
+                        df[col] = pd.to_numeric(df[col], errors='ignore')  # Convert to numeric, if possible
+            
+            # add the independent params to the dataframe
+            if 'fov' in df.columns:
+                if independent_params is not None:
+                    for name in independent_params[0].keys():
+                        if name in df.columns:
+                            pass
+                        else:
+                            df[name] =[independent_params[fov][name] for fov in df['fov'].astype(int).tolist()]
+                df = df.sort_values(by='fov')
+                df['fov'] = pd.Categorical(df['fov']).codes
+            return df
+        
+        def split_df(df, lower, upper):
+            if 'fov' not in df.columns:
+                return df
+            else:
+                positions = df['fov'].unique()
+                positions = positions[positions >= lower]
+                positions = positions[positions <= upper]
+
+                df = df[df['fov'].isin(positions)]
+            return df
+        
+        close_h5_files()
+        
+        for i, location in enumerate(locations):
+            for key, data in attributes.items():
+                if key not in ['_initialized', 'independent_params']:
+                    if data is not None:
+                        if isinstance(data, pd.DataFrame):
+                            data = handle_df(data)
+                            data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
+                            data.to_hdf(location, f'{group_name}/{key}', mode='a', format='table', data_columns=True)
+
+                        else:
+                            h5_file = h5py.File(location, 'a')
+
+                            if group_name in h5_file:
+                                group = h5_file[group_name]
+                            else:
+                                group = h5_file.create_group(group_name)
+
+                            if key in group:
+                                del group[key]
+                            
+                            group.create_dataset(key, data=data)
+
+                            h5_file.close()
 
 
 class Save_Parameters(Saving):
@@ -91,11 +149,11 @@ class Save_Parameters(Saving):
                     recursively_save_dict_contents_to_group(h5file, f"{path}/{key}", item)
                 else:
                     h5file[f"{path}/{key}"] = item
-
-        params = Parameters.get_parameters()
+        
+        params = {**Settings.get_parameters(), **ScopeClass.get_parameters(), **Experiment.get_parameters()}
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks']
 
-        h5_file = params['h5_file']
+        h5_file = DataContainer().h5_file
         Analysis_name = params['name']
         local_dataset_location = params['local_dataset_location']
 
