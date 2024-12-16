@@ -407,8 +407,8 @@ class BIGFISH_SpotDetection(SpotDetection):
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
             # check if a threshold is provided
-            if type(bigfish_threshold) == int:
-                threshold = bigfish_threshold
+            if isinstance(bigfish_threshold[c], (int, float)):
+                threshold = bigfish_threshold[c]
             elif bigfish_threshold == 'mean':
                 threshold = kwargs['bigfish_mean_threshold'][c]
             elif bigfish_threshold == 'min':
@@ -845,7 +845,7 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
             print("Threshold: ", t)
             print()
 
-        New_Parameters({'bigfish_threshold': thresholds})
+        return {'bigfish_threshold': thresholds}
 
 
 

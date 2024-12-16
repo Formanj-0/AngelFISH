@@ -26,8 +26,7 @@ class CellProperties(SequentialStepsClass):
     
         nuc_mask = nuc_mask[0, :, :].compute()
         cell_mask = cell_mask[0, :, :].compute()
-        plt.imshow(cell_mask)
-        plt.show()
+
         nuc_mask = nuc_mask.squeeze()
         cell_mask = cell_mask.squeeze()
 
@@ -35,15 +34,29 @@ class CellProperties(SequentialStepsClass):
         cyto_mask = copy(cell_mask)
         cyto_mask[nuc_mask > 0] = 0
 
-        plt.imshow(cyto_mask)
-        plt.show()
+        def touching_border(region):
+            """
+            Checks if the region touches any border of the image.
+            
+            Parameters:
+            - region: A regionprops object.
+            - image_shape: Shape of the original image (height, width).
+            
+            Returns:
+            - True if the region touches any border, False otherwise.
+            """
+            a = np.where(region !=0)
 
-        plt.imshow(cell_mask)
-        plt.show()
+            minr, maxr, minc, maxc = np.min(a[0]), np.max(a[0]), np.min(a[1]), np.max(a[1])
+            if minr == 0 or minc == 0 or maxr == image.shape[0] or maxc == image.shape[1]:
+                return True
+            return False
 
-        nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure)
-        cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure)
-        cyto_props = sk.measure.regionprops_table(cyto_mask.astype(int), image, properties=props_to_measure)
+
+
+        nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
+        cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
+        cyto_props = sk.measure.regionprops_table(cyto_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
 
         nuc_df = pd.DataFrame(nuc_props)
         cell_df = pd.DataFrame(cell_props)

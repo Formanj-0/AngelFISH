@@ -223,6 +223,7 @@ class DataContainer(Parameters):
     images: da = None
     masks: da = None
     temp: tempfile.TemporaryDirectory = None
+    clear_after_error: bool = True
 
     def __init__(self, **kwargs):
         if kwargs is not None:
@@ -232,7 +233,7 @@ class DataContainer(Parameters):
 
     def __post_init__(self):
         if self.temp is None:
-            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd())
+            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
         self.load_temp_data()
 
     def __setattr__(self, name, value):
@@ -261,7 +262,6 @@ class DataContainer(Parameters):
                 elif 'image' in name:
                     self.save_images(name, value, p, t)
 
-
                 elif isinstance(value, pd.DataFrame):
                     # check the type:
                     # if pd.df save as csv
@@ -279,16 +279,16 @@ class DataContainer(Parameters):
 
     def save_masks(self, name, mask, p:int = None, t:int = None):
         params = Parameters().get_parameters()
-        if p is None and t is None:
-            masks = da.rechunk(da.asarray(mask), (1, -1, -1, -1,-1,-1))
+        if p is None and t is None and mask is not None:
+            masks = da.rechunk(da.asarray(mask, dtype=np.int8), (1, -1, -1, -1,-1,-1))
             da.to_npy_stack(os.path.join(self.temp.name, 'masks'), masks) 
 
-        elif p is not None and t is not None and 'nuc' in name:
+        elif p is not None and t is not None and 'nuc' in name and mask is not None and params['nucChannel'] is not None:
             old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
             old[0, t, params['nucChannel'], :, :, :] = mask
             np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
 
-        elif p is not None and t is not None and 'cell' in name:
+        elif p is not None and t is not None and 'cell' in name and mask is not None and params['cytoChannel'] is not None:
             old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
             old[0, t, params['cytoChannel'], :, :, :] = mask
             np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
@@ -348,29 +348,38 @@ class DataContainer(Parameters):
 
             # load folders with csvs as a pandas df
             elif len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
-                df = []
-                for c in csv_files:
-                    df.append(pd.read_csv(os.path.join(folder_path, c)))
-                concatenated_df = pd.concat(df, axis=0)
-                setattr(self, folder, concatenated_df)
-                data[folder] = concatenated_df
+                if len(csv_files) == 1:
+                    df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
+                else:
+                    df = []
+                    for c in csv_files:
+                        df.append(pd.read_csv(os.path.join(folder_path, c)))
+                    df = pd.concat(df, axis=0)
+                setattr(self, folder, df)
+                data[folder] = df
 
             elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
-                json_data = []
-                for j in json_files:
-                    with open(os.path.join(folder_path, j), 'r') as f:
-                        json_data.append(json.load(f))
-                concatenated_data = pd.json_normalize(json_data)
-                setattr(self, folder, concatenated_data)
-                data[folder] = concatenated_data
+                if len(json_files) == 1:
+                    with open(os.path.join(folder_path, json_files[0]), 'r') as f:
+                        json_data = json.load(f)
+                else:
+                    json_data = []
+                    for j in json_files:
+                        with open(os.path.join(folder_path, j), 'r') as f:
+                            json_data.append(json.load(f))
+                setattr(self, folder, json_data)
+                data[folder] = json_data
 
             elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
-                npy_data = []
-                for n in npy_files:
-                    npy_data.append(np.load(os.path.join(folder_path, n)))
-                concatenated_data = np.concatenate(npy_data, axis=0)
-                setattr(self, folder, concatenated_data)
-                data[folder] = concatenated_data
+                if len(npy_files) == 1:
+                    npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                else:
+                    npy_data = []
+                    for n in npy_files:
+                        npy_data.append(np.load(os.path.join(folder_path, n)))
+                    npy_data = np.concatenate(npy_data, axis=0)
+                setattr(self, folder, npy_data)
+                data[folder] = npy_data
 
             else:
                 raise ValueError('All temp files must either be csv, json, or npy and not a mix')

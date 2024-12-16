@@ -13,8 +13,9 @@ def handle_errors(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            DataContainer().delete_temp()
-            print("An error occurred. Temp data deleted.")
+            if DataContainer().clear_after_error:
+                DataContainer().delete_temp()
+                print("An error occurred. Temp data deleted.")
             traceback.print_exc()
             raise e
     return wrapper
