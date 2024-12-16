@@ -59,7 +59,7 @@ class Parameters(ABC):
             raise ValueError(f"Experiment must be initialized")
         # makes sure DataContainer is in _instances
         if not any(isinstance(instance, DataContainer) for instance in cls._instances):
-            raise ValueError(f"DataContainer must be initialized")
+            print(f"DataContainer must be initialized")
         # makes sure Settings is in _instances
         if not any(isinstance(instance, Settings) for instance in cls._instances):
             raise ValueError(f"Settings must be initialized")

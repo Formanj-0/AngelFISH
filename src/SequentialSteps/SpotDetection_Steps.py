@@ -391,7 +391,7 @@ class BIGFISH_SpotDetection(SpotDetection):
             spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params)
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
-        return {'df_cellresults': cell_results, 'df_spotresults': spots, 'df_clusterresults': clusters, 'bigfish_threshold': threshold}
+        return {'df_cellresults': cell_results, 'df_spotresults': spots, 'df_clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
             # check if a threshold is provided

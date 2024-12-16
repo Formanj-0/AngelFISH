@@ -147,7 +147,13 @@ class Pipeline:
     def save_pipeline(self, name: str):
         # save params as a dictionary
         if self.parameters is None:
-            params = [Parameters.get_parameters()]
+            params = [{**Settings.get_parameters(), **ScopeClass.get_parameters(), **Experiment.get_parameters()}]
+
+        # Remove specified keys from params
+        keys_to_remove = ['temp']  # specify the keys to remove
+        for param in params:
+            for key in keys_to_remove:
+                param.pop(key, None)
 
         # save save steps as a dictionary
         if self.steps is None:
@@ -163,6 +169,9 @@ class Pipeline:
         parent_dir = os.path.dirname(file_path)
 
         pipeline_dir = os.path.join(parent_dir, 'Pipelines')
+        
+        if not os.path.exists(pipeline_dir):
+            os.makedirs(pipeline_dir)
         
         self.pipeline_dictionary_location = os.path.join(pipeline_dir, f'{name}.txt')
         with open(self.pipeline_dictionary_location, 'w') as f:
