@@ -556,6 +556,8 @@ class BIGFISH_SpotDetection(SpotDetection):
                                                 gamma=gamma)
         except RuntimeError:
             spots_post_decomposition = canidate_spots
+            dense_regions = None
+            reference_spot = None
 
         # TODO: define ts by some other metric for ts
         #         
