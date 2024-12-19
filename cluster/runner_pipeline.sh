@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1                # Request 1 GPU
-#SBATCH --partition=all         # Use the GPU partition
+#SBATCH --exclude=gpu1              # Exclude node gpu1
+#SBATCH --partition=all              # Use the GPU partition
 #SBATCH --job-name=Image_Processing          # Job name
 #SBATCH --ntasks=1                  # Number of tasks
 #SBATCH --output=job_output_%j.log     # Redirect output to a file with job ID

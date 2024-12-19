@@ -824,23 +824,35 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
     def main(self, images, FISHChannel: list[int], voxel_size_yx, voxel_size_z, spot_yx, spot_z, 
             MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD:int = 50,
             use_log_hook:bool =False, verbose:bool = False, 
-            display_plots: bool = False, **kwargs):
-        voxel_size = (float(voxel_size_z), float(voxel_size_yx), float(voxel_size_yx))
-        spot_size = (float(spot_z), float(spot_yx), float(spot_yx))
+            display_plots: bool = False, bigfish_minDistance: Union[list, float] = None, **kwargs): #TODO minDistance not implemented
         self.verbose = verbose
         self.display_plots = display_plots
 
         thresholds = []
-
-
         for c in FISHChannel:
             rna = images[:min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]), 0, c, :, :, :].compute()
             rna = [rna[r].astype(np.float32) for r in range(rna.shape[0])]
-            spots, t = detection.detect_spots(images=rna, 
-                                                        return_threshold=True, 
-                                                        voxel_size=voxel_size,
-                                                        spot_radius=spot_size if not use_log_hook else None)
 
+       
+            self.dim_3D = len(rna.shape) == 3
+            voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna.shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
+            spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna.shape) == 3 else (int(spot_yx), int(spot_yx))
+
+            if use_log_hook:
+                spot_radius_px = detection.get_object_radius_pixel(
+                        voxel_size_nm=voxel_size_nm, 
+                        object_radius_nm=spot_size_nm, 
+                        ndim=len(rna.shape))
+            else:
+                spot_radius_px = None
+
+            spots, t = detection.detect_spots(
+                                            images=rna, 
+                                            return_threshold=True,
+                                            voxel_size=voxel_size_nm if not use_log_hook else None,
+                                            spot_radius=spot_size_nm if not use_log_hook else None,
+                                            log_kernel_size=spot_radius_px if use_log_hook else None,
+                                            minimum_distance=bigfish_minDistance if use_log_hook and bigfish_minDistance is None else spot_radius_px,)
             thresholds.append(t)
             
             print("Channel: ", c)
