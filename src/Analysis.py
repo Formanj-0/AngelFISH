@@ -276,6 +276,84 @@ class GR_Confirmation(Analysis):
         plt.show()
 
 
+        print(
+            self.validate_measurements(np.max(self.masks[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
+                                       np.max(self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :], axis=0), 
+                                       np.max(self.images[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
+                                       cell_label, row)
+              )
+
+    def validate_measurements(self, cell_mask, nuc_mask, image, label, measurements):
+        # calculate cell area
+        cell_area = np.sum(cell_mask == label).compute()
+        nuc_area = np.sum(nuc_mask == label).compute()
+
+        # calculate average intensity
+        cell_avgInt = np.mean(image[cell_mask == label]).compute()
+        nuc_avgInt = np.mean(image[nuc_mask == label]).compute()
+
+        # calculate std intensity
+        cell_stdInt = np.std(image[cell_mask == label]).compute()
+        nuc_stdInt = np.std(image[nuc_mask == label]).compute()
+
+        # calculate max intensity
+        cell_maxInt = np.max(image[cell_mask == label]).compute()
+        nuc_maxInt = np.max(image[nuc_mask == label]).compute()
+
+        # calculate min intensity
+        cell_minInt = np.min(image[cell_mask == label]).compute()
+        nuc_minInt = np.min(image[nuc_mask == label]).compute()
+
+        # compare
+        r = []
+        r.append(
+            ['cell_area', cell_area, float(measurements['cell_area']), np.isclose(cell_area, float(measurements['cell_area']))]
+        )
+
+        r.append(
+            ['nuc_area', nuc_area, float(measurements['nuc_area']), np.isclose(nuc_area, float(measurements['nuc_area']))]
+        )
+
+        r.append(
+            ['cyto_area', cyto_area := cell_area - nuc_area, float(measurements['cyto_area']), np.isclose(cyto_area, float(measurements['cyto_area']))]
+        )
+
+        r.append(
+            ['cell_avgInt', cell_avgInt, float(measurements['cell_intensity_mean-0']), np.isclose(cell_avgInt, float(measurements['cell_intensity_mean-0']))]
+        )
+
+        r.append(
+            ['nuc_avgInt', nuc_avgInt, float(measurements['nuc_intensity_mean-0']), np.isclose(nuc_avgInt, float(measurements['nuc_intensity_mean-0']))]
+        )
+
+        r.append(
+            ['cell_stdInt', cell_stdInt, float(measurements['cell_intensity_std-0']), np.isclose(cell_stdInt, float(measurements['cell_intensity_std-0']))]
+        )
+
+        r.append(
+            ['nuc_stdInt', nuc_stdInt, float(measurements['nuc_intensity_std-0']), np.isclose(nuc_stdInt, float(measurements['nuc_intensity_std-0']))]
+        )
+
+        r.append(
+            ['cell_maxInt', cell_maxInt, float(measurements['cell_intensity_max-0']), np.isclose(cell_maxInt, float(measurements['cell_intensity_max-0']))]
+        )
+
+        r.append(
+            ['nuc_maxInt', nuc_maxInt, float(measurements['nuc_intensity_max-0']), np.isclose(nuc_maxInt, float(measurements['nuc_intensity_max-0']))]
+        )
+
+        r.append(
+            ['cell_minInt', cell_minInt, float(measurements['cell_intensity_min-0']), np.isclose(cell_minInt, float(measurements['cell_intensity_min-0']))]
+        )
+
+        r.append(
+            ['nuc_minInt', nuc_minInt, float(measurements['nuc_intensity_min-0']), np.isclose(nuc_minInt, float(measurements['nuc_intensity_min-0']))]
+        )
+
+        results = pd.DataFrame(r, columns=['measurement', 'numpy calculated', 'step calculated', 'are close?'])
+        return results
+
+
 
 
 

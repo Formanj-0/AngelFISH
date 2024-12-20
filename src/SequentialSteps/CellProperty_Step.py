@@ -34,7 +34,7 @@ class CellProperties(SequentialStepsClass):
         cyto_mask = copy(cell_mask)
         cyto_mask[nuc_mask > 0] = 0
 
-        def touching_border(region):
+        def touching_border(df, image):
             """
             Checks if the region touches any border of the image.
             
@@ -45,22 +45,26 @@ class CellProperties(SequentialStepsClass):
             Returns:
             - True if the region touches any border, False otherwise.
             """
-            a = np.where(region !=0)
 
-            minr, maxr, minc, maxc = np.min(a[0]), np.max(a[0]), np.min(a[1]), np.max(a[1])
-            if minr == 0 or minc == 0 or maxr == image.shape[0] or maxc == image.shape[1]:
-                return True
-            return False
+            results = []
+            for row in df.iterrow():
+                minr, minc, maxr, maxc = row['cell_bbox-0'], row['cell_bbox-1'], row['cell_bbox-2'], row['cell_bbox-3']
+                if minr == 0 or minc == 0 or maxr == image.shape[-2] or maxc == image.shape[-1]:
+                    results.append(True)
+                else:
+                    results.append(False)
+            return results
 
 
-
-        nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
-        cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
-        cyto_props = sk.measure.regionprops_table(cyto_mask.astype(int), image, properties=props_to_measure, extra_properties=(touching_border,))
+        nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure)
+        cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure)
+        cyto_props = sk.measure.regionprops_table(cyto_mask.astype(int), image, properties=props_to_measure)
 
         nuc_df = pd.DataFrame(nuc_props)
         cell_df = pd.DataFrame(cell_props)
         cyto_df = pd.DataFrame(cyto_props)
+
+        cell_df ['touching_border'] = touching_border(cell_df, image)
 
         nuc_df.columns = ['nuc_' + col for col in nuc_df.columns]
         cell_df.columns = ['cell_' + col for col in cell_df.columns]
