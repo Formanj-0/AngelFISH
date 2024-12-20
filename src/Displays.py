@@ -14,7 +14,9 @@ class Display:
         images = params['images']
         image = images[position, timepoint, channel, zslice]
         plt.imshow(image)
-        # turn of axis
+        # Rescale the image to avoid disruption by extreme values
+        plt.clim(0, np.percentile(image.flatten(), 99.99))
+        # Turn off axis
         plt.axis('off')
         plt.show()
         return image

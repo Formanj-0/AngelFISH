@@ -61,7 +61,6 @@ def handle_dict(d):
     return newd
 
 
-
 class Save_Outputs(Saving):
     def main(self, **kwargs):
         params = Parameters.get_parameters()
@@ -99,8 +98,6 @@ class Save_Outputs(Saving):
                             pass
                         else:
                             df[name] =[independent_params[fov][name] for fov in df['fov'].astype(int).tolist()]
-                df = df.sort_values(by='fov')
-                df['fov'] = pd.Categorical(df['fov']).codes
             return df
         
         def split_df(df, lower, upper):
@@ -112,6 +109,8 @@ class Save_Outputs(Saving):
                 positions = positions[positions <= upper]
 
                 df = df[df['fov'].isin(positions)]
+                df = df.sort_values(by='fov')
+                df['fov'] = pd.Categorical(df['fov']).codes
             return df
         
         close_h5_files()

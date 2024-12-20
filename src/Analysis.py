@@ -40,7 +40,7 @@ class Analysis_Manager:
         self._filter_on_date(date_range)
         self._filter_on_name(analysis_name)
         self._find_analysis()
-        self._deal_with_duplicates()
+        self._handle_duplicates()
 
     def list_analysis_names(self):
         self._find_analysis_names()
@@ -63,12 +63,13 @@ class Analysis_Manager:
             print('select an analysis')
 
     def _filter_on_name(self, analysis_name):
-        self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
+        # self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
+        self.analysis_names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
         if analysis_name is not None:
             self.analysis_names = [s for s in self.analysis_names if s == analysis_name]
 
     def _filter_on_date(self, date_range):
-        self.dates = set([s.split('_')[2] for s in self.analysis_names])
+        self.dates = set([s.split('_')[-1] for s in self.analysis_names])
         if date_range is not None:
             start_date, end_date = date_range
             self.dates = [date for date in self.dates if start_date <= date <= end_date]
@@ -77,13 +78,18 @@ class Analysis_Manager:
     def _find_analysis(self):
         # select data sets with self.data, and self.datasete
         self.analysis = []
-        for h in self.h5_files:
+        temp_h5_files = self.h5_files
+        for h_idx, h in enumerate(temp_h5_files):
             for dataset_name in self.analysis_names:
                 for date in self.dates:
                     if f'Analysis_{dataset_name}_{date}' in list(h.keys()):
                         self.analysis.append(h[f'Analysis_{dataset_name}_{date}'])
+                    else:
+                        self.h5_files.pop(h_idx)
 
-    def _deal_with_duplicates(self): # requires user input
+                        
+
+    def _handle_duplicates(self): # requires user input
         pass
 
     def _find_analysis_names(self):
@@ -122,11 +128,14 @@ class Analysis(ABC):
     def display(self):
         pass
 
-    @abstractmethod
-    def select_data(self, identifying_feature):
-        pass
+    # @abstractmethod
+    # def select_data(self, identifying_feature):
+    #     pass
 
-class SpotDetection_confirmation(Analysis):
+class SpotDetection_Confirmation(Analysis):
+    def __init__(self, am, seed = None):
+        super().__init__(am, seed)
+    
     def get_data(self):
         self.spots = self.am.select_datasets('df_spotresults')
         for i, s in enumerate(self.spots):
@@ -140,16 +149,6 @@ class SpotDetection_confirmation(Analysis):
         self.spots.to_csv(location, index=False)
 
     def display(self):
-        fig, axs = plt.subplot(1, 3)
-        # select one spot in the image and draw an arrow pointing to it with a specific color
-
-        # axs[0] - Plot the show image with arrows point at all the spots, with the selected spot being a different color
-        # add transperent outlines to the outside of cells
-
-        # axs[1] - Select the cell with the spot in it and show a bound box around that cell
-        # put transperent outline around the cell
-
-        # axs[2] - zoom in further on the spot and show a nxn box around the spot
         spot = self.spots.sample(n=1, random_state=self.seed).iloc[0]
         h5_idx = spot['h5_idx']
         image = self.images[h5_idx]
@@ -180,6 +179,101 @@ class SpotDetection_confirmation(Analysis):
         plt.show()
 
 
+class GR_Confirmation(Analysis):
+    def __init__(self, am, seed = None):
+        super().__init__(am, seed)
+
+    def get_data(self):
+        h = self.am.h5_files
+        d = self.am.select_datasets('cell_properties')
+        self.cellprops = []
+        for i, s in enumerate(h):
+            self.cellprops.append(pd.read_hdf(s.filename, d[i].name))
+            self.cellprops[i]['h5_idx'] = [i]*len(self.cellprops[i])
+        self.cellprops = pd.concat(self.cellprops, axis=0)
+        self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
+        self.images = self.am.raw_images
+        self.masks = self.am.masks
+
+
+    def save_data(self, location):
+        self.cellprops.to_csv(location, index=False)
+
+    def display(self, GR_Channel:int = 0, Nuc_Channel:int = 1):
+        # select a random fov, then display it
+        h5_idx = np.random.choice(self.cellprops['h5_idx'])
+        fov = np.random.choice(self.cellprops[self.cellprops['h5_idx'] == h5_idx]['fov'])
+        temp_img = self.images[h5_idx][fov, 0, GR_Channel, :, :, :]
+        temp_mask = self.masks[h5_idx][fov, 0, GR_Channel, :, :, :]
+
+        fig, axs = plt.subplots(1, 3)
+        axs[0].imshow(np.max(temp_img, axis=0))
+
+        # display the illumination profile
+        axs[1].imshow(self.illumination_profiles[GR_Channel])
+
+        # use the illumination profile to correct it, then display it
+        epsilon = 1e-6
+        correction_profiles = 1.0 / (self.illumination_profiles[GR_Channel] + epsilon)
+        temp_img *= correction_profiles[None, :, :]
+        axs[2].imshow(np.max(temp_img, axis=0))
+        plt.show()
+
+        # select a random cell in the fov and display it using the bonded boxs, also include measurments
+        # include a transparent mask over the random cell
+        fig, axs = plt.subplots(1, 2)
+
+        cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == fov) &  
+                                                                (self.cellprops['h5_idx'] == h5_idx)]['nuc_label']))
+        row = self.cellprops[(self.cellprops['fov'] == fov) & 
+                             (self.cellprops['nuc_label'] == cell_label) & 
+                             (self.cellprops['h5_idx'] == h5_idx)]
+
+        axs[0].imshow(np.max(temp_img, axis=0))
+        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = temp_mask == cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        # axs[1].set_title('Randomly selected cell with arrow')
+
+        try:
+            row_min = int(row['cell_bbox-0'])
+            col_min = int(row['cell_bbox-1'])
+            row_max = int(row['cell_bbox-2'])
+            col_max = int(row['cell_bbox-3'])
+
+            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+
+        plt.show()
+
+        # Nuc Mask
+        temp_mask = self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :]
+        temp_img = self.images[h5_idx][fov, 0, Nuc_Channel, :, :, :]
+
+        fig, axs = plt.subplots(1, 2)
+
+        axs[0].imshow(np.max(temp_img, axis=0))
+        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = temp_mask == cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        # axs[1].set_title('Randomly selected cell with arrow')
+
+        try:
+            row_min = int(row['cell_bbox-0'])
+            col_min = int(row['cell_bbox-1'])
+            row_max = int(row['cell_bbox-2'])
+            col_max = int(row['cell_bbox-3'])
+
+            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+
+        plt.show()
 
 
 
