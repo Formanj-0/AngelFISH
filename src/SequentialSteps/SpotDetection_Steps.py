@@ -833,10 +833,8 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
             rna = images[:min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]), 0, c, :, :, :].compute()
             rna = [rna[r].astype(np.float32) for r in range(rna.shape[0])]
 
-       
-            self.dim_3D = len(rna.shape) == 3
-            voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna.shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
-            spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna.shape) == 3 else (int(spot_yx), int(spot_yx))
+            voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna[0].shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
+            spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna[0].shape) == 3 else (int(spot_yx), int(spot_yx))
 
             if use_log_hook:
                 spot_radius_px = detection.get_object_radius_pixel(
