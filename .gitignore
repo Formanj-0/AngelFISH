@@ -10,3 +10,5 @@ config_nas.yml
 *.txt
 *.sld
 *.npy
+config_cluster.yml
+config_nas.yml
