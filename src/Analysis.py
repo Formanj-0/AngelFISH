@@ -6,6 +6,7 @@ import dask.dataframe as dp
 import pandas as pd
 from typing import Union
 from abc import ABC, abstractmethod
+import os
 
 """
 self: for each instance of this class has its own self.
@@ -14,15 +15,15 @@ self: for each instance of this class has its own self.
         variables
 """
 
-class Analysis_Manager:
-    def __init__(self, location: Union[str, list[str]] = None):
+class AnalysisManager:
+    def __init__(self, location:Union[str, list[str]]=None, log_location:str=None):
         # given:
         # h5 locations
         #   give me a location
         #   give me a list of locations
         #   give me none -> got to here and display these \\munsky-nas.engr.colostate.edu\share\Users\Jack\All_Analysis
-        if location is None:
-            self.select_from_list()
+        if location is None: # TODO make these if statement better
+            self.select_from_list(log_location)
         elif isinstance(location, str):
             self.location = [location]
         elif isinstance(location, list): # TODO make sure its a list of str
@@ -32,9 +33,24 @@ class Analysis_Manager:
         
         self._load_in_h5()
         
-    def select_from_list(self) -> list[str]: # TODO: this requires user input
-        pass
+    def select_from_list(self, log_location) -> list[str]: 
+        # log_location = r'Y:\Users\Jack\All_Analysis' # TODO: make this work for all users
+        # get the log files 
+        log_files = os.listdir(log_location)
 
+        # read the log files and spit on ' -> '
+        self.location = []
+        for l in log_files:
+            with open(os.path.join(log_location, l), 'r') as file:
+                content = file.read()
+            first, second = content.split(' -> ')
+            name = first.split(r'/')[-1]
+            drive = os.path.splitdrive(log_location)[0] + os.sep
+            second = os.path.join(*second.split('/')).strip()
+            location = os.path.join(drive, second, name)
+            # print(location)
+            self.location.append(location)
+        
     def select_analysis(self, analysis_name: str = None, date_range: list[str] = None):
         self._find_analysis_names()
         self._filter_on_date(date_range)
@@ -215,7 +231,8 @@ class GR_Confirmation(Analysis):
         # use the illumination profile to correct it, then display it
         epsilon = 1e-6
         correction_profiles = 1.0 / (self.illumination_profiles[GR_Channel] + epsilon)
-        temp_img *= correction_profiles[None, :, :]
+        # correction_profiles = self.illumination_profiles[GR_Channel]
+        temp_img *= correction_profiles[np.newaxis, :, :]
         axs[2].imshow(np.max(temp_img, axis=0))
         plt.show()
 
@@ -279,7 +296,7 @@ class GR_Confirmation(Analysis):
         print(
             self.validate_measurements(np.max(self.masks[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
                                        np.max(self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :], axis=0), 
-                                       np.max(self.images[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
+                                       np.max(self.images[h5_idx][fov, 0, GR_Channel, :, :, :].compute()*correction_profiles[np.newaxis, :, :], axis=0), 
                                        cell_label, row)
               )
 
@@ -359,7 +376,7 @@ class GR_Confirmation(Analysis):
 
 
 if __name__ == '__main__':
-    ana = Analysis_Manager(r'\\munsky-nas.engr.colostate.edu\share\smFISH_images\Eric_smFISH_images\20220225\DUSP1_Dex_0min_20220224\DUSP1_Dex_0min_20220224.h5')
+    ana = AnalysisManager(r'\\munsky-nas.engr.colostate.edu\share\smFISH_images\Eric_smFISH_images\20220225\DUSP1_Dex_0min_20220224\DUSP1_Dex_0min_20220224.h5')
     print(ana.location)
     print(ana.h5_files)
     ana.list_analysis_names()
