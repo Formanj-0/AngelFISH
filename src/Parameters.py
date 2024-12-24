@@ -141,8 +141,8 @@ class ScopeClass(Parameters):
     Class to store the parameters of the microscope.
     Attributes:
     voxel_size_yx: int
-    psf_z: int
-    psf_yx: int
+    spot_z: int
+    spot_yx: int
 
     Default values will be for Terminator Scope
     

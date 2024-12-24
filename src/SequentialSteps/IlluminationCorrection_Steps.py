@@ -38,7 +38,6 @@ class IlluminationCorrection(IndependentStepClass):
         - illumination_profiles: ndarray of shape [C, Y, X].
         """
         print("Starting illumination correction pipeline...")
-
         if imported_profiles is not None:
             if not isinstance(imported_profiles, np.ndarray):
                 raise TypeError("Imported profiles must be a NumPy array.")

@@ -57,6 +57,7 @@ class AnalysisManager:
         self._filter_on_name(analysis_name)
         self._find_analysis()
         self._handle_duplicates()
+        return self.h5_files
 
     def list_analysis_names(self):
         self._find_analysis_names()
@@ -94,16 +95,18 @@ class AnalysisManager:
     def _find_analysis(self):
         # select data sets with self.data, and self.datasete
         self.analysis = []
-        temp_h5_files = self.h5_files
-        for h_idx, h in enumerate(temp_h5_files):
+        bad_idx = []
+        for h_idx, h in enumerate(self.h5_files):
             for dataset_name in self.analysis_names:
-                for date in self.dates:
-                    if f'Analysis_{dataset_name}_{date}' in list(h.keys()):
-                        self.analysis.append(h[f'Analysis_{dataset_name}_{date}'])
-                    else:
-                        self.h5_files.pop(h_idx)
-
-                        
+                combos = [f'Analysis_{dataset_name}_{date}' for date in self.dates]
+                if any(combo in h.keys() for combo in combos):
+                    for combo in combos: # seach for the combo
+                        if combo in h.keys():
+                            self.analysis.append(h[combo])
+                            break
+                else:
+                    bad_idx.append(h_idx)
+        self.h5_files = [h for i, h in enumerate(self.h5_files) if i not in bad_idx]
 
     def _handle_duplicates(self): # requires user input
         pass
@@ -120,8 +123,11 @@ class AnalysisManager:
         for l in self.location:
             self.h5_files.append(h5py.File(l, 'r'))
 
+    
+    def get_images_and_masks(self):
         self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
         self.masks = [da.from_array(h['masks']) for h in self.h5_files]
+        return self.raw_images, self.masks
 
 #%%
 class Analysis(ABC):
@@ -208,8 +214,8 @@ class GR_Confirmation(Analysis):
             self.cellprops[i]['h5_idx'] = [i]*len(self.cellprops[i])
         self.cellprops = pd.concat(self.cellprops, axis=0)
         self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
-        self.images = self.am.raw_images
-        self.masks = self.am.masks
+        self.images, self.masks = self.am.get_images_and_masks()
+
 
 
     def save_data(self, location):
