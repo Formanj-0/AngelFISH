@@ -8,14 +8,12 @@ from typing import Union
 from abc import ABC, abstractmethod
 import os
 
-"""
-self: for each instance of this class has its own self.
-    contains:
-        methods
-        variables
-"""
 
 class AnalysisManager:
+    """
+    This class is made to select data for further analysis.
+    It provides methods to load, filter, and retrieve datasets from HDF5 files.
+    """
     def __init__(self, location:Union[str, list[str]]=None, log_location:str=None):
         # given:
         # h5 locations
@@ -135,8 +133,29 @@ class AnalysisManager:
         for h in self.h5_files:
             h.close()
 
-#%%
+#%% Analysis outline
 class Analysis(ABC):
+
+    """
+    Analysis is an abstract base class (ABC) that serves as a blueprint for further analysis classes. 
+    It ensures that any subclass implements the necessary methods for data handling and validation.
+    The confirmation that a class is working should be random to ensure minmum bias
+
+    Attributes:
+        am: An instance of a class responsible for managing analysis-related operations.
+        seed (float, optional): A seed value for random number generation to ensure reproducibility.
+    Methods:
+        get_data():
+            Abstract method to be implemented by subclasses for retrieving data.
+        save_data():
+            Abstract method to be implemented by subclasses for saving data.
+        display():
+            Abstract method to be implemented by subclasses for displaying data or results.
+        validate():
+            Abstract method to be implemented by subclasses for validating the analysis or data.
+        close():
+            Closes the analysis manager instance.    
+    """
     def __init__(self, am, seed: float = None):
         super().__init__()
         self.am = am
@@ -156,61 +175,150 @@ class Analysis(ABC):
     def display(self):
         pass
 
-    # @abstractmethod
-    # def select_data(self, identifying_feature):
-    #     pass
+    @abstractmethod
+    def validate(self):
+        pass
 
     def close(self):
         self.am.close()
 
+
+# Analysis children
 class SpotDetection_Confirmation(Analysis):
     def __init__(self, am, seed = None):
         super().__init__(am, seed)
     
     def get_data(self):
-        self.spots = self.am.select_datasets('df_spotresults')
-        for i, s in enumerate(self.spots):
-            self.spots[i] = pd.read_hdf(s)
+        h = self.am.h5_files
+        d = self.am.select_datasets('cell_properties')
+        self.spots = []
+        for i, s in enumerate(h):
+            self.spots.append(pd.read_hdf(s.filename, d[i].name))
             self.spots[i]['h5_idx'] = [i]*len(self.spots[i])
         self.spots = pd.concat(self.spots, axis=0)
-        self.images = self.am.raw_images
-        self.masks = self.am.masks
+        self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
+        self.images, self.masks = self.am.get_images_and_masks()
 
     def save_data(self, location):
         self.spots.to_csv(location, index=False)
 
-    def display(self):
-        spot = self.spots.sample(n=1, random_state=self.seed).iloc[0]
-        h5_idx = spot['h5_idx']
-        image = self.images[h5_idx]
-        mask = self.masks[h5_idx]
+    def display(self): # TODO: alter this to work for spot detection
+        # select a random fov, then display it
+        h5_idx = np.random.choice(self.cellprops['h5_idx'])
+        fov = np.random.choice(self.cellprops[self.cellprops['h5_idx'] == h5_idx]['fov'])
+        temp_img = self.images[h5_idx][fov, 0, GR_Channel, :, :, :]
+        temp_mask = self.masks[h5_idx][fov, 0, GR_Channel, :, :, :]
 
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axs = plt.subplots(1, 3)
+        axs[0].imshow(np.max(temp_img, axis=0))
 
-        # axs[0] - Plot the show image with arrows pointing at all the spots, with the selected spot being a different color
-        axs[0].imshow(image, cmap='gray')
-        for _, s in self.spots.iterrows():
-            color = 'red' if s.equals(spot) else 'blue'
-            axs[0].arrow(s['x'], s['y'], 0, 0, color=color, head_width=5)
-        axs[0].set_title('All spots with selected spot highlighted')
+        # display the illumination profile
+        axs[1].imshow(self.illumination_profiles[GR_Channel])
 
-        # axs[1] - Select the cell with the spot in it and show a bound box around that cell
-        cell_mask = mask == mask[int(spot['y']), int(spot['x'])]
-        axs[1].imshow(image, cmap='gray')
-        axs[1].imshow(cell_mask, cmap='jet', alpha=0.5)
-        axs[1].set_title('Cell containing the selected spot')
+        # use the illumination profile to correct it, then display it
+        epsilon = 1e-6
+        correction_profiles = 1.0 / (self.illumination_profiles[GR_Channel] + epsilon)
+        # correction_profiles = self.illumination_profiles[GR_Channel]
+        temp_img *= correction_profiles[np.newaxis, :, :]
+        axs[2].imshow(np.max(temp_img, axis=0))
+        plt.show()
 
-        # axs[2] - Zoom in further on the spot and show a nxn box around the spot
-        n = 20
-        x, y = int(spot['x']), int(spot['y'])
-        zoomed_image = image[max(0, y-n):y+n, max(0, x-n):x+n]
-        axs[2].imshow(zoomed_image, cmap='gray')
-        axs[2].set_title('Zoomed in on selected spot')
+        # select a random cell in the fov and display it using the bonded boxs, also include measurments
+        # include a transparent mask over the random cell
+        fig, axs = plt.subplots(1, 2)
+
+        cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == fov) &  
+                                                                (self.cellprops['h5_idx'] == h5_idx)]['nuc_label']))
+        row = self.cellprops[(self.cellprops['fov'] == fov) & 
+                             (self.cellprops['nuc_label'] == cell_label) & 
+                             (self.cellprops['h5_idx'] == h5_idx)]
+
+        axs[0].imshow(np.max(temp_img, axis=0))
+        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = temp_mask == cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        # axs[1].set_title('Randomly selected cell with arrow')
+
+        try:
+            row_min = int(row['cell_bbox-0'])
+            col_min = int(row['cell_bbox-1'])
+            row_max = int(row['cell_bbox-2'])
+            col_max = int(row['cell_bbox-3'])
+
+            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+
+        plt.show()
+
+        # Nuc Mask
+        temp_mask = self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :]
+        temp_img = self.images[h5_idx][fov, 0, Nuc_Channel, :, :, :]
+
+        fig, axs = plt.subplots(1, 2)
+
+        axs[0].imshow(np.max(temp_img, axis=0))
+        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = temp_mask == cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        # axs[1].set_title('Randomly selected cell with arrow')
+
+        try:
+            row_min = int(row['cell_bbox-0'])
+            col_min = int(row['cell_bbox-1'])
+            row_max = int(row['cell_bbox-2'])
+            col_max = int(row['cell_bbox-3'])
+
+            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
 
         plt.show()
 
 
 class GR_Confirmation(Analysis):
+    """
+    GR_Confirmation is a class designed to confirm the accuracy of image processing results 
+    for ICC of GR (Glucocorticoid Receptor) performed by Eric Rons. This class handles two 
+    channels: one for the nucleus and one for the GR. Cell masks are generated by dilating 
+    the nuclear mask, which is initially generated by Cellpose. A illumination pattern correction
+    was applied to even out the images.
+
+    Attributes:
+    -----------
+    am : object
+        An instance of the AnalysisManager class that handles the dataset and image operations.
+    seed : int, optional
+        A seed value for random number generation to ensure reproducibility (default is None).
+    cellprops : list
+        A list to store cell properties extracted from the datasets.
+    illumination_profiles : array
+        An array to store illumination profiles for image correction.
+    images : array
+        An array to store images from the datasets.
+    masks : array
+        An array to store masks from the datasets.
+    Methods:
+    --------
+    __init__(self, am, seed=None):
+        Initializes the GR_Confirmation class with the given AnalysisManager instance and seed value.
+    get_data(self):
+        Retrieves and processes the necessary data from the datasets, including cell properties, 
+        illumination profiles, images, and masks.
+    save_data(self, location):
+        Saves the cell properties data to a CSV file at the specified location.
+    display(self, GR_Channel=0, Nuc_Channel=1):
+        Displays a random field of view (FOV) with the GR and nucleus channels, including 
+        illumination correction and cell mask overlays. Also displays a randomly selected cell 
+        with its bounding box and measurements.
+    validate_measurements(self, cell_mask, nuc_mask, image, label, measurements):
+        Validates the calculated measurements (area, intensity, etc.) of the cell and nucleus 
+        against the provided measurements and returns a DataFrame with the comparison results.
+    """
     def __init__(self, am, seed = None):
         super().__init__(am, seed)
 
