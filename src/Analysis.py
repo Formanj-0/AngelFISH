@@ -106,6 +106,8 @@ class AnalysisManager:
                             break
                 else:
                     bad_idx.append(h_idx)
+        for i in bad_idx:
+            self.h5_files[i].close()
         self.h5_files = [h for i, h in enumerate(self.h5_files) if i not in bad_idx]
 
     def _handle_duplicates(self): # requires user input
@@ -128,6 +130,10 @@ class AnalysisManager:
         self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
         self.masks = [da.from_array(h['masks']) for h in self.h5_files]
         return self.raw_images, self.masks
+    
+    def close(self):
+        for h in self.h5_files:
+            h.close()
 
 #%%
 class Analysis(ABC):
@@ -153,6 +159,9 @@ class Analysis(ABC):
     # @abstractmethod
     # def select_data(self, identifying_feature):
     #     pass
+
+    def close(self):
+        self.am.close()
 
 class SpotDetection_Confirmation(Analysis):
     def __init__(self, am, seed = None):
