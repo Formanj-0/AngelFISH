@@ -406,25 +406,28 @@ class BIGFISH_SpotDetection(SpotDetection):
         return {'df_cellresults': cell_results, 'df_spotresults': spots, 'df_clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
-            # check if a threshold is provided
-            if isinstance(bigfish_threshold[c], (int, float)):
-                threshold = bigfish_threshold[c]
-            elif bigfish_threshold == 'mean':
-                threshold = kwargs['bigfish_mean_threshold'][c]
-            elif bigfish_threshold == 'min':
-                threshold = kwargs['bigfish_min_threshold'][c]
-            elif bigfish_threshold == 'max':
-                threshold = kwargs['bigfish_max_threshold'][c]
-            elif bigfish_threshold == 'median':
-                threshold = kwargs['bigfish_median_threshold'][c]
-            elif bigfish_threshold == 'mode':
-                threshold = kwargs['bigfish_mode_threshold'][c]
-            elif bigfish_threshold == '75th_percentile':
-                threshold = kwargs['bigfish_75_quartile'][c]
-            elif bigfish_threshold == '25th_percentile':
-                threshold = kwargs['bigfish_25_quartile'][c]
-            elif bigfish_threshold == '90th_percentile':
-                threshold = kwargs['bigfish_90_quartile'][c]
+            if bigfish_threshold is not None:
+                # check if a threshold is provided
+                if isinstance(bigfish_threshold[c], (int, float)):
+                    threshold = bigfish_threshold[c]
+                elif bigfish_threshold == 'mean':
+                    threshold = kwargs['bigfish_mean_threshold'][c]
+                elif bigfish_threshold == 'min':
+                    threshold = kwargs['bigfish_min_threshold'][c]
+                elif bigfish_threshold == 'max':
+                    threshold = kwargs['bigfish_max_threshold'][c]
+                elif bigfish_threshold == 'median':
+                    threshold = kwargs['bigfish_median_threshold'][c]
+                elif bigfish_threshold == 'mode':
+                    threshold = kwargs['bigfish_mode_threshold'][c]
+                elif bigfish_threshold == '75th_percentile':
+                    threshold = kwargs['bigfish_75_quartile'][c]
+                elif bigfish_threshold == '25th_percentile':
+                    threshold = kwargs['bigfish_25_quartile'][c]
+                elif bigfish_threshold == '90th_percentile':
+                    threshold = kwargs['bigfish_90_quartile'][c]
+                else: 
+                    raise ValueError('IDK what to do wit this threshold type')
             else:
                 threshold = None
 

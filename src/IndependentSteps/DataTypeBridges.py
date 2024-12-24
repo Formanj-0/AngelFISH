@@ -138,14 +138,16 @@ class DataTypeBridge(IndependentStepClass):
             ip = {}
             for i, p in enumerate(position_indexs):
                 if independent_params is not None and len(independent_params) > 1:
-                    independent_params[i]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
+                    if NAS_locations is not None:
+                        independent_params[i]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
                     if i == 0:
                         temp = {p_idx: independent_params[i] for p_idx in range(p)}
                     else:
                         temp = {p_idx: independent_params[i] for p_idx in range(position_indexs[i-1], p)}
                     ip = {**ip, **temp}
                 elif independent_params is not None and len(independent_params) == 1:
-                    independent_params[0]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
+                    if NAS_locations is not None:
+                        independent_params[0]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
                     if i == 0:
                         temp = {p_idx: independent_params[0] for p_idx in range(p)}
                     else:
