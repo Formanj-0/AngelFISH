@@ -65,7 +65,13 @@ class AnalysisManager:
 
     def select_datasets(self, dataset_name) -> list:
         if hasattr(self, 'analysis'):
-            self.datasets = [h[dataset_name] for h in self.analysis]
+            self.datasets = []
+            for h in self.analysis:
+                try:
+                    self.datasets.append(h[dataset_name])
+                except KeyError:
+                    print('missing datasets')
+                    self.datasets.append(None)
             return self.datasets
         else:
             print('select an anlysis')
@@ -190,48 +196,61 @@ class SpotDetection_Confirmation(Analysis):
     
     def get_data(self):
         h = self.am.h5_files
-        d = self.am.select_datasets('cell_properties')
+        d = self.am.select_datasets('df_spotresults')
+        d1 = self.am.select_datasets('df_cellresults')
+        d2 = self.am.select_datasets('cell_properties')
+        d3 = self.am.select_datasets('df_clusterresults')
+
         self.spots = []
+        self.clusters = []
+        self.cellprops = []
+        self.cellspots = []
         for i, s in enumerate(h):
             self.spots.append(pd.read_hdf(s.filename, d[i].name))
             self.spots[i]['h5_idx'] = [i]*len(self.spots[i])
+            try:
+                self.clusters.append(pd.read_hdf(s.filename, d3[i].name))
+                self.clusters[-1]['h5_idx'] = [i]*len(self.clusters[-1])
+            except AttributeError:
+                pass
+            self.cellprops.append(pd.read_hdf(s.filename, d2[i].name))
+            self.cellprops[i]['h5_idx'] = [i]*len(self.cellprops[i])
+            self.cellspots.append(pd.read_hdf(s.filename, d1[i].name))
+            self.cellspots[i]['h5_idx'] = [i]*len(self.cellspots[i])
+
         self.spots = pd.concat(self.spots, axis=0)
-        self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
+        self.clusters = pd.concat(self.clusters, axis=0)
+        self.cellprops = pd.concat(self.cellprops, axis=0)
+        self.cellspots = pd.concat(self.cellspots, axis=0)
         self.images, self.masks = self.am.get_images_and_masks()
 
     def save_data(self, location):
         self.spots.to_csv(location, index=False)
+        self.clusters.to_csv(location, index=False)
+        self.cellprops.to_csv(location, index=False)
+        self.cellspots.to_csv(location, index=False)
 
-    def display(self): # TODO: alter this to work for spot detection
+
+    def display(self, spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2): # TODO: alter this to work for spot detection
         # select a random fov, then display it
-        h5_idx = np.random.choice(self.cellprops['h5_idx'])
-        fov = np.random.choice(self.cellprops[self.cellprops['h5_idx'] == h5_idx]['fov'])
-        temp_img = self.images[h5_idx][fov, 0, GR_Channel, :, :, :]
-        temp_mask = self.masks[h5_idx][fov, 0, GR_Channel, :, :, :]
+        h5_idx = np.random.choice(self.spots['h5_idx'])
+        fov = np.random.choice(self.spots[self.spots['h5_idx'] == h5_idx]['fov'])
+        tmp_spot = self.images[h5_idx][fov, 0, spotChannel, :, :, :]
+        tmp_nuc = self.images[h5_idx][fov, 0, nucChannel, :, :, :]
+        tmp_cyto = self.images[h5_idx][fov, 0, cytoChannel, :, :, :]
 
-        fig, axs = plt.subplots(1, 3)
-        axs[0].imshow(np.max(temp_img, axis=0))
-
-        # display the illumination profile
-        axs[1].imshow(self.illumination_profiles[GR_Channel])
-
-        # use the illumination profile to correct it, then display it
-        epsilon = 1e-6
-        correction_profiles = 1.0 / (self.illumination_profiles[GR_Channel] + epsilon)
-        # correction_profiles = self.illumination_profiles[GR_Channel]
-        temp_img *= correction_profiles[np.newaxis, :, :]
-        axs[2].imshow(np.max(temp_img, axis=0))
-        plt.show()
+        tmp_nucmask = self.masks[h5_idx][fov, 0, nucChannel, :, :, :]
+        tmp_cellmask = self.masks[h5_idx][fov, 0, cytoChannel, :, :, :]
 
         # select a random cell in the fov and display it using the bonded boxs, also include measurments
         # include a transparent mask over the random cell
         fig, axs = plt.subplots(1, 2)
 
-        cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == fov) &  
-                                                                (self.cellprops['h5_idx'] == h5_idx)]['nuc_label']))
-        row = self.cellprops[(self.cellprops['fov'] == fov) & 
-                             (self.cellprops['nuc_label'] == cell_label) & 
-                             (self.cellprops['h5_idx'] == h5_idx)]
+        cell_label = np.random.choice(np.unique(self.spots[(self.spots['fov'] == fov) &  
+                                                                (self.spots['h5_idx'] == h5_idx)]['nuc_label']))
+        row = self.spots[(self.spots['fov'] == fov) & 
+                             (self.spots['nuc_label'] == cell_label) & 
+                             (self.spots['h5_idx'] == h5_idx)]
 
         axs[0].imshow(np.max(temp_img, axis=0))
         axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
@@ -278,6 +297,9 @@ class SpotDetection_Confirmation(Analysis):
             print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
 
         plt.show()
+
+    def validate(self):
+        pass
 
 
 class GR_Confirmation(Analysis):

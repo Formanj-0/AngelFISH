@@ -34,7 +34,7 @@ class SpotDetection(SequentialStepsClass):
                                                         nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
-            spots, clusters = self.get_spot_properties(rna, spots, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots, **kwargs)
+            spots = self.get_spot_properties(rna, spots, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots, **kwargs)
 
             spots, cell_results, clusters = self.add_ind_params(spots, cell_results, clusters, timepoint, fov, c)
 
@@ -403,7 +403,7 @@ class BIGFISH_SpotDetection(SpotDetection):
             spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params)
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
-        return {'df_cellresults': cell_results, 'df_spotresults': spots, 'df_clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
+        return {'cellresults': cell_results, 'spotresults': spots, 'clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
             if bigfish_threshold is not None:
@@ -642,9 +642,9 @@ class BIGFISH_SpotDetection(SpotDetection):
             df_spotresults['FISH_Channel'] = [c]*len(df_spotresults)
 
             if df_cellresults is not None:
-                df_spotresults['timepoint'] = [timepoint]*len(df_spotresults)
-                df_spotresults['fov'] = [fov]*len(df_spotresults)
-                df_spotresults['FISH_Channel'] = [c]*len(df_spotresults)
+                df_cellresults['timepoint'] = [timepoint]*len(df_cellresults)
+                df_cellresults['fov'] = [fov]*len(df_cellresults)
+                df_cellresults['FISH_Channel'] = [c]*len(df_cellresults)
 
             df_clusterresults['timepoint'] = [timepoint]*len(df_clusterresults)
             df_clusterresults['fov'] = [fov]*len(df_clusterresults)
