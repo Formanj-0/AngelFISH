@@ -30,13 +30,13 @@ class SpotDetection(SequentialStepsClass):
             rna = rna.compute()
             spots, clusters = self.get_detected_spots(**kwargs)
 
-            cell_results, spots = self.extract_cell_level_results(image, spots, clusters, nucChannel, c, 
+            cell_results, spots = self.extract_cell_level_results(image, spots, clusters, nucChannel, FISHChannel[c], 
                                                         nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
             spots = self.get_spot_properties(rna, spots, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots, **kwargs)
 
-            spots, cell_results, clusters = self.add_ind_params(spots, cell_results, clusters, timepoint, fov, c)
+            spots, cell_results, clusters = self.add_ind_params(spots, cell_results, clusters, timepoint, fov, FISHChannel[c])
 
         return {'df_cellresults':cell_results ,'df_spotresults':spots, 'df_clusterresults':clusters}
 
@@ -394,13 +394,13 @@ class BIGFISH_SpotDetection(SpotDetection):
                 bigfish_threshold=bigfish_threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
                 minimum_distance=bigfish_minDistance, use_pca=bigfish_use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio, **kwargs)
             
-            cell_results, spots_px = self.extract_cell_level_results(image, spots_px, clusters, nucChannel, c, 
+            cell_results, spots_px = self.extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
                                                             nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
             spots_px = self.get_spot_properties(rna, spots_px, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots, **kwargs)
 
-            spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params)
+            spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, independent_params)
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
         return {'cellresults': cell_results, 'spotresults': spots, 'clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
@@ -445,10 +445,13 @@ class BIGFISH_SpotDetection(SpotDetection):
         spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna.shape) == 3 else (int(spot_yx), int(spot_yx))
 
         if use_log_hook:
-            spot_radius_px = detection.get_object_radius_pixel(
-                    voxel_size_nm=voxel_size_nm, 
-                    object_radius_nm=spot_size_nm, 
-                    ndim=len(rna.shape))
+            if minimum_distance is None:
+                spot_radius_px = detection.get_object_radius_pixel(
+                        voxel_size_nm=voxel_size_nm, 
+                        object_radius_nm=spot_size_nm, 
+                        ndim=len(rna.shape))
+            else:
+                spot_radius_px = minimum_distance
         else:
             spot_radius_px = None
 
@@ -459,7 +462,7 @@ class BIGFISH_SpotDetection(SpotDetection):
                                         voxel_size=voxel_size_nm if not use_log_hook else None,
                                         spot_radius=spot_size_nm if not use_log_hook else None,
                                         log_kernel_size=spot_radius_px if use_log_hook else None,
-                                        minimum_distance=minimum_distance if use_log_hook and minimum_distance is None else spot_radius_px,)
+                                        minimum_distance=spot_radius_px if use_log_hook else None,)
         
         if use_pca:
             # lets try log filter
@@ -824,7 +827,7 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
     def __init__(self):
         super().__init__()
 
-    def main(self, images, FISHChannel: list[int], voxel_size_yx, voxel_size_z, spot_yx, spot_z, 
+    def main(self, images, FISHChannel:list[int], voxel_size_yx, voxel_size_z, spot_yx, spot_z, 
             MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD:int = 50,
             use_log_hook:bool =False, verbose:bool = False, 
             display_plots: bool = False, bigfish_minDistance: Union[list, float] = None, **kwargs): #TODO minDistance not implemented
@@ -833,17 +836,23 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
 
         thresholds = []
         for c in FISHChannel:
-            rna = images[:min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]), 0, c, :, :, :].compute()
-            rna = [rna[r].astype(np.float32) for r in range(rna.shape[0])]
+            rna = images[:min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]), 0, c, :, :, :].squeeze().compute()
+            if min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]) == 1:
+                rna = [rna]
+            else:
+                rna = [rna[r] for r in range(rna.shape[0])]
 
             voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna[0].shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
             spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna[0].shape) == 3 else (int(spot_yx), int(spot_yx))
 
             if use_log_hook:
-                spot_radius_px = detection.get_object_radius_pixel(
-                        voxel_size_nm=voxel_size_nm, 
-                        object_radius_nm=spot_size_nm, 
-                        ndim=len(rna.shape))
+                if bigfish_minDistance is None:
+                    spot_radius_px = detection.get_object_radius_pixel(
+                            voxel_size_nm=voxel_size_nm, 
+                            object_radius_nm=spot_size_nm, 
+                            ndim=len(rna.shape))
+                else:
+                    spot_radius_px = bigfish_minDistance
             else:
                 spot_radius_px = None
 
@@ -853,7 +862,7 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
                                             voxel_size=voxel_size_nm if not use_log_hook else None,
                                             spot_radius=spot_size_nm if not use_log_hook else None,
                                             log_kernel_size=spot_radius_px if use_log_hook else None,
-                                            minimum_distance=bigfish_minDistance if use_log_hook and bigfish_minDistance is None else spot_radius_px,)
+                                            minimum_distance=spot_radius_px if use_log_hook else None,)
             thresholds.append(t)
             
             print("Channel: ", c)

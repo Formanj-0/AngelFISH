@@ -415,34 +415,6 @@ class Settings(Parameters):
             raise ValueError("Name must be set")
 
 
-# class GeneratedOutputs(Parameters): # TODO: clear this, I dont think I use it anymore
-#     _instance = None
-
-#     def __init__(self, **kwargs):
-#         if kwargs is not None:
-#             for key, value in kwargs.items():
-#                 setattr(self, key, value)
-
-#     def clear_outputs(self):
-#         GeneratedOutputs._instances = []
-
-#     def get_outputs(self):
-#         from . import OutputClass
-#         self.outputs = OutputClass._instances
-#         return self.outputs
-    
-#     def todict(self):
-        # for key in self.__dict__.keys():
-        #     try:
-        #         step_dict = getattr(self.data, key).__dict__
-        #         kwargs_data = {**kwargs_data, **step_dict}
-        #         kwargs_data.pop(key)
-        #     except AttributeError:
-        #         pass
-        
-        # return kwargs_data
-
-
 #%% Required Params
 class required_params(ABC):
     @abstractmethod

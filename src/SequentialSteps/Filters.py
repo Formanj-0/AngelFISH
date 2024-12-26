@@ -122,29 +122,26 @@ class FilteredImages(IndependentStepClass):
         """
         pass
 
-class rescale_images(SequentialStepsClass):
+class rescale_images(IndependentStepClass):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def main(self, image: np.array, id: int, 
-             channel_to_stretch: int = None, stretching_percentile:float = 99.9, 
-             display_plots: bool = False, **kwargs):
-        # reshape image from zyxc to czyx
-        image = np.moveaxis(image, -1, 0)
-        # rescale image
-        print(image.shape)
-        image = stack.rescale(image, channel_to_stretch=channel_to_stretch, stretching_percentile=stretching_percentile)
-
-        # reshape image back to zyxc
-        image = np.moveaxis(image, 0, -1)
+    def main(self, images: np.array, channel_to_stretch: int = None, 
+             stretching_percentile:float = 99.9, display_plots: bool = False, **kwargs):
+        
+        for p in range(images.shape[0]):
+            for t in range(images.shape[1]):
+                img = images[p, t, :, :, :, :]
+                img = stack.rescale(img.compute(), channel_to_stretch=channel_to_stretch, stretching_percentile=stretching_percentile)
+                images[p, t, :, :, :, :] = img
 
         if display_plots:
-            for c in range(image.shape[3]):
-                plt.imshow(np.max(image[:, :, :, c], axis=0))
+            for c in range(images.shape[2]):
+                plt.imshow(np.max(images[0, 0, c, :, :, :], axis=0))
                 plt.title(f'channel {c}')
                 plt.show()
 
-        return {'image': image}
+        return {'images': images}
 
         
 
