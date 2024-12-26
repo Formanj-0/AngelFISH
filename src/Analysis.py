@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Union
 from abc import ABC, abstractmethod
 import os
+from skimage.measure import find_contours
 
 
 class AnalysisManager:
@@ -193,6 +194,9 @@ class Analysis(ABC):
 class SpotDetection_Confirmation(Analysis):
     def __init__(self, am, seed = None):
         super().__init__(am, seed)
+        self.fov = None
+        self.h5_idx = None
+        self.cell_label = None
     
     def get_data(self):
         h = self.am.h5_files
@@ -231,72 +235,110 @@ class SpotDetection_Confirmation(Analysis):
         self.cellspots.to_csv(location, index=False)
 
 
-    def display(self, spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2): # TODO: alter this to work for spot detection
-        # select a random fov, then display it
-        h5_idx = np.random.choice(self.spots['h5_idx'])
-        fov = np.random.choice(self.spots[self.spots['h5_idx'] == h5_idx]['fov'])
-        tmp_spot = self.images[h5_idx][fov, 0, spotChannel, :, :, :]
-        tmp_nuc = self.images[h5_idx][fov, 0, nucChannel, :, :, :]
-        tmp_cyto = self.images[h5_idx][fov, 0, cytoChannel, :, :, :]
+    def display(self, newFOV:bool=False, newCell:bool=False, 
+                spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2):
+        if self.fov is None or newFOV:
+            # select a random self.fov, then display it
+            self.h5_idx = np.random.choice(self.spots['h5_idx'])
+            self.fov = np.random.choice(self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'])
+            tmp_spot = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+            tmp_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+            tmp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
-        tmp_nucmask = self.masks[h5_idx][fov, 0, nucChannel, :, :, :]
-        tmp_cellmask = self.masks[h5_idx][fov, 0, cytoChannel, :, :, :]
+            tmp_nucmask = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+            tmp_cellmask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
-        # select a random cell in the fov and display it using the bonded boxs, also include measurments
-        # include a transparent mask over the random cell
-        fig, axs = plt.subplots(1, 2)
+        if self.cell_label is None or newCell:
+            self.cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == self.fov) &  
+                                                            (self.cellprops['h5_idx'] == self.h5_idx)]['cell_label']))
+        
+        fovSpots = self.spots[(self.spots['fov'] == self.fov) & 
+                    (self.spots['h5_idx'] == self.h5_idx)]
+        complete = False
+        while not complete:
+            cellSpots = fovSpots[fovSpots['cell_label'] == self.cell_label]
+            if len(cellSpots) > 0:
+                complete = True
 
-        cell_label = np.random.choice(np.unique(self.spots[(self.spots['fov'] == fov) &  
-                                                                (self.spots['h5_idx'] == h5_idx)]['nuc_label']))
-        row = self.spots[(self.spots['fov'] == fov) & 
-                             (self.spots['nuc_label'] == cell_label) & 
-                             (self.spots['h5_idx'] == h5_idx)]
+        spotRow = cellSpots.iloc[np.random.choice(np.arange(len(cellSpots)))]
 
-        axs[0].imshow(np.max(temp_img, axis=0))
-        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = temp_mask == cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
-        # axs[1].set_title('Randomly selected cell with arrow')
+        cell = self.cellprops[(self.cellprops['fov'] == self.fov) & 
+                            (self.cellprops['h5_idx'] == self.h5_idx) &
+                            (self.cellprops['cell_label'] == self.cell_label)]
 
+
+        # Plot spots
+        fig, axs = plt.subplots(1, 3)
+        axs[0].axis('off')
+        axs[0].set_title('Total FOV')
+        axs[1].axis('off')
+        axs[1].set_title('Zoom in on cell')
+        axs[2].axis('off')
+        axs[2].set_title('Zoom in on spot')
+
+
+        # display FOV and masks. 
+        # nuc mask less transparent
+        # cell mask more transparent
+        axs[0].imshow(np.max(tmp_spot, axis=0), cmap='gray', vmin=np.min(tmp_spot), vmax=np.max(tmp_spot)*0.99)
+        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.4, cmap='jet')
+        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=0.2, cmap='jet')
+
+        # outline the selected cell
+        cell_mask = tmp_cellmask == self.cell_label
+        contours = find_contours(np.max(cell_mask.compute(), axis=0), 0.5)
+        for contour in contours:
+            axs[0].plot(contour[:, 1], contour[:, 0], linewidth=2, color='red')
+
+            axs[0].plot(contour[:, 1], contour[:, 0], linewidth=2, color='red')
+        
+        # put red arrows on all spots in fov 
+        # put blue arrows on selected spot
+        for _, spot in fovSpots.iterrows():
+            axs[0].arrow(spot['x_px'], spot['y_px'], 0, 0, color='red', head_width=5)
+
+        axs[0].arrow(spotRow['x_px'], spotRow['y_px'], 0, 0, color='blue', head_width=5)
+
+        # zoom in on the cells
         try:
-            row_min = int(row['cell_bbox-0'])
-            col_min = int(row['cell_bbox-1'])
-            row_max = int(row['cell_bbox-2'])
-            col_max = int(row['cell_bbox-3'])
+            row_min = int(cell['cell_bbox-0'])
+            col_min = int(cell['cell_bbox-1'])
+            row_max = int(cell['cell_bbox-2'])
+            col_max = int(cell['cell_bbox-3'])
 
-            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+            axs[1].imshow(np.max(tmp_spot, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.4, cmap='jet')
+            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.2, cmap='jet')
+
+            # put arrows on the spots within this fov
+            for _, spot in fovSpots.iterrows():
+                if row_min <= spot['y_px'] < row_max and col_min <= spot['x_px'] < col_max:
+                    axs[1].arrow(spot['x_px'] - col_min, spot['y_px'] - row_min, 0, 0, color='red', head_width=5)
+
+            if row_min <= spotRow['y_px'] < row_max and col_min <= spotRow['x_px'] < col_max:
+                axs[1].arrow(spotRow['x_px'] - col_min, spotRow['y_px'] - row_min, 0, 0, color='blue', head_width=5)
         except:
-            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
+
+        # zoom in further on the spot
+        try:
+            print(f'number of selected spots: {len(spotRow)}')
+            spot_row_min = max(int(spotRow['y_px']) - 15, 0)
+            spot_row_max = min(int(spotRow['y_px']) + 15, tmp_spot.shape[1])
+            spot_col_min = max(int(spotRow['x_px']) - 15, 0)
+            spot_col_max = min(int(spotRow['x_px']) + 15, tmp_spot.shape[2])
+
+            axs[2].arrow(spotRow['x_px'] - spot_col_min, spotRow['y_px'] - spot_row_min, 0, 0, color='blue', head_width=2)
+            axs[2].imshow(np.max(tmp_spot, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max])
+            axs[2].imshow(np.max(tmp_nucmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.4, cmap='jet')
+            axs[2].imshow(np.max(tmp_cellmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.2, cmap='jet')
+
+        except:
+            print(f'Zoom in on spot failed for self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label}')
 
         plt.show()
 
-        # Nuc Mask
-        temp_mask = self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :]
-        temp_img = self.images[h5_idx][fov, 0, Nuc_Channel, :, :, :]
 
-        fig, axs = plt.subplots(1, 2)
-
-        axs[0].imshow(np.max(temp_img, axis=0))
-        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = temp_mask == cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
-        # axs[1].set_title('Randomly selected cell with arrow')
-
-        try:
-            row_min = int(row['cell_bbox-0'])
-            col_min = int(row['cell_bbox-1'])
-            row_max = int(row['cell_bbox-2'])
-            col_max = int(row['cell_bbox-3'])
-
-            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
-        except:
-            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
-
-        plt.show()
 
     def validate(self):
         pass
