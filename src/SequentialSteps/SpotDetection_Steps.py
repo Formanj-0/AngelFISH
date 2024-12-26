@@ -850,14 +850,14 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
                     spot_radius_px = detection.get_object_radius_pixel(
                             voxel_size_nm=voxel_size_nm, 
                             object_radius_nm=spot_size_nm, 
-                            ndim=len(rna.shape))
+                            ndim=len(rna[0].shape))
                 else:
                     spot_radius_px = bigfish_minDistance
             else:
                 spot_radius_px = None
 
             spots, t = detection.detect_spots(
-                                            images=rna, 
+                                            images=rna,
                                             return_threshold=True,
                                             voxel_size=voxel_size_nm if not use_log_hook else None,
                                             spot_radius=spot_size_nm if not use_log_hook else None,
@@ -872,7 +872,130 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
         return {'bigfish_threshold': thresholds}
 
 
+class Automatic_BIGFISH_Threshold(IndependentStepClass):
+        def __init__(self):
+            super().__init__()
 
+        def main(self, images, FISHChannel: list[int], voxel_size_yx, voxel_size_z, spot_yx, spot_z, 
+                  MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD:int = 50,
+              use_log_hook:bool =False, bigfish_min_threshold:float = 0, verbose:bool = False, 
+              display_plots: bool = False, **kwargs):
+
+
+            self.verbose = verbose
+            self.display_plots = display_plots
+
+            min_thresholds = []
+            max_thresholds = []
+            mean_thresholds = []
+            std_thresholds = []
+            mode_threshold = []
+            median_threshold = []
+            quartiles_90_threshold = []
+            quartiles_75_threshold = []
+            quartiles_25_threshold = []
+            for c in FISHChannel:
+                num_images_used = 0
+                list_thresholds = []
+                for p in range(images.shape[0]):
+
+                    rna = images[p, 0, c, :, :, :].compute()
+                    voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna.shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))
+                    spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if len(rna.shape) == 3 else (int(spot_yx), int(spot_yx))
+                    threshold = self.calculate_threshold(rna, voxel_size_nm, spot_size_nm, use_log_hook)
+
+                    if threshold is not None and threshold > bigfish_min_threshold:
+                        if verbose:
+                            print("Threshold: ", threshold)
+                        list_thresholds.append(threshold)
+                        num_images_used += 1
+                    else:
+                        if verbose:
+                            print("Threshold: ", threshold, " was regected")
+
+                    if num_images_used >= MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD:
+                        break
+                
+                min_thresholds.append(np.min(list_thresholds))
+                max_thresholds.append(np.max(list_thresholds))
+                # mode_threshold.append(np.bincount(list_thresholds).argmax())
+                median_threshold.append(np.median(list_thresholds))
+                quartiles_75_threshold.append(np.percentile(list_thresholds, 75))
+                quartiles_25_threshold.append(np.percentile(list_thresholds, 25))
+                quartiles_90_threshold.append(np.percentile(list_thresholds, 90))
+                mean_thresholds.append(np.mean(list_thresholds))
+                std_thresholds.append(np.std(list_thresholds))
+                if verbose:
+                    print("Channel: ", c)
+                    print("Min Threshold: ", min_thresholds[-1])
+                    print("Max Threshold: ", max_thresholds[-1])
+                    print("Mode Threshold: ", mode_threshold[-1])
+                    print("Median Threshold: ", median_threshold[-1])
+                    print("Mean Threshold: ", mean_thresholds[-1])
+                    print("Std Threshold: ", std_thresholds[-1])
+                    print("90 Quartile Threshold: ", quartiles_90_threshold[-1])
+                    print("75 Quartile Threshold: ", quartiles_75_threshold[-1])
+                    print("25 Quartile Threshold: ", quartiles_25_threshold[-1])
+                    print()
+            
+            return {'bigfish_min_threshold': min_thresholds, 'bigfish_max_threshold': max_thresholds, 
+                    'bigfish_mean_threshold':mean_thresholds, 'bigfish_std_threshold':std_thresholds, 
+                    'bigfish_median_threshold':median_threshold, 'bigfish_75_quartile':quartiles_75_threshold, 
+                    'bigfish_25_quartile':quartiles_25_threshold, 'bigfish_90_quartile':quartiles_90_threshold}
+
+
+        def calculate_threshold(self, rna, voxel_size, spot_size, use_log_hook:bool =False):
+            if use_log_hook:
+                spot_radius_px = detection.get_object_radius_pixel(
+                    voxel_size_nm=voxel_size,
+                    object_radius_nm=spot_size,
+                    ndim=3)
+                
+                if self.verbose:
+                    print("spot radius (z axis): {:0.3f} pixels".format(spot_radius_px[0]))
+                    print("spot radius (yx plan): {:0.3f} pixels".format(spot_radius_px[-1]))
+
+                spot_size = (spot_radius_px[0], spot_radius_px[-1], spot_radius_px[-1])
+                spots, threshold = detection.detect_spots(
+                    images=rna,
+                    return_threshold=True,
+                    log_kernel_size=spot_size,
+                    minimum_distance=spot_size)
+                
+                if self.verbose:
+                    print("detected spots")
+                    print("\r shape: {0}".format(spots.shape))
+                    print("\r threshold: {0}".format(threshold))
+
+                if self.display_plots:
+                    plot.plot_elbow(
+                        images=rna,
+                        minimum_distance=spot_size,
+                        log_kernel_size=spot_size,
+                        title="Log Filter",
+                        )
+
+            else:
+                spot_size = spot_size
+                spots, threshold = detection.detect_spots(
+                    images=rna,
+                    return_threshold=True,
+                    voxel_size=voxel_size,  # in nanometer (one value per dimension zyx)
+                    spot_radius=spot_size)  # in nanometer (one value per dimension zyx)
+                if self.verbose:
+                    print("detected spots")
+                    print("\r shape: {0}".format(spots.shape))
+                    print("\r threshold: {0}".format(threshold))
+
+                if self.display_plots:
+                    plot.plot_elbow(
+                        images=rna,
+                        voxel_size=voxel_size,
+                        spot_radius=spot_size, 
+                        title="Normal Filter",
+                        )
+            
+            return threshold
 
 #%% Masking
 class DetectedSpot_Mask(SequentialStepsClass):

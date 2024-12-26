@@ -133,6 +133,7 @@ class rescale_images(IndependentStepClass):
             for t in range(images.shape[1]):
                 img = images[p, t, :, :, :, :]
                 img = stack.rescale(img.compute(), channel_to_stretch=channel_to_stretch, stretching_percentile=stretching_percentile)
+                img = stack.cast_img_uint8(img)
                 images[p, t, :, :, :, :] = img
 
         if display_plots:
@@ -141,7 +142,7 @@ class rescale_images(IndependentStepClass):
                 plt.title(f'channel {c}')
                 plt.show()
 
-        return {'images': images}
+        return {'images': images.compute()}
 
         
 
