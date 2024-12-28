@@ -52,7 +52,7 @@ class CellSegmentation(SequentialStepsClass):
 
     def align_nuc_cell_masks(self, nuc_mask, cell_mask):
         if nuc_mask is not None and cell_mask is not None:
-            nuc_mask, cell_mask = multistack.match_nuc_cell(nuc_mask, cell_mask, single_nuc=True, cell_alone=False)
+            nuc_mask, cell_mask = multistack.match_nuc_cell(nuc_mask, cell_mask, single_nuc=False, cell_alone=False)
         return nuc_mask, cell_mask
 
     def plot_segmentation(self, display_plots, image, nuc_mask, cell_mask, nuc_channel, cyto_channel, do_3D_Segmentation):
