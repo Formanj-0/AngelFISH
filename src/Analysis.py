@@ -250,15 +250,13 @@ class SpotDetection_Confirmation(Analysis):
 
         if self.cell_label is None or newCell:
             self.cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == self.fov) &  
-                                                            (self.cellprops['h5_idx'] == self.h5_idx)]['cell_label']))
+                                                            (self.cellprops['h5_idx'] == self.h5_idx) & 
+                                                            (self.cellprops['cell_label'] != 0)]['cell_label']))
         
         fovSpots = self.spots[(self.spots['fov'] == self.fov) & 
                     (self.spots['h5_idx'] == self.h5_idx)]
-        complete = False
-        while not complete:
-            cellSpots = fovSpots[fovSpots['cell_label'] == self.cell_label]
-            if len(cellSpots) > 0:
-                complete = True
+
+        cellSpots = fovSpots[fovSpots['cell_label'] == self.cell_label]
 
         spotRow = cellSpots.iloc[np.random.choice(np.arange(len(cellSpots)))]
 
@@ -280,9 +278,9 @@ class SpotDetection_Confirmation(Analysis):
         # display FOV and masks. 
         # nuc mask less transparent
         # cell mask more transparent
-        axs[0].imshow(np.max(tmp_spot, axis=0), cmap='gray', vmin=np.min(tmp_spot), vmax=np.max(tmp_spot)*0.99)
-        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.4, cmap='jet')
-        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=0.2, cmap='jet')
+        axs[0].imshow(np.max(tmp_spot, axis=0), vmin=np.min(tmp_spot), vmax=np.max(tmp_spot))
+        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.2, cmap='jet')
+        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=0.1, cmap='jet')
 
         # outline the selected cell
         cell_mask = tmp_cellmask == self.cell_label
@@ -290,14 +288,12 @@ class SpotDetection_Confirmation(Analysis):
         for contour in contours:
             axs[0].plot(contour[:, 1], contour[:, 0], linewidth=2, color='red')
 
-            axs[0].plot(contour[:, 1], contour[:, 0], linewidth=2, color='red')
-        
         # put red arrows on all spots in fov 
         # put blue arrows on selected spot
         for _, spot in fovSpots.iterrows():
-            axs[0].arrow(spot['x_px'], spot['y_px'], 0, 0, color='red', head_width=5)
+            axs[0].arrow(spot['x_px'] + 2, spot['y_px'] + 2, 0, 0, color='red', head_width=5)
 
-        axs[0].arrow(spotRow['x_px'], spotRow['y_px'], 0, 0, color='blue', head_width=5)
+        axs[0].arrow(spotRow['x_px'] + 2, spotRow['y_px'] + 2, 0, 0, color='blue', head_width=5)
 
         # zoom in on the cells
         try:
@@ -307,16 +303,15 @@ class SpotDetection_Confirmation(Analysis):
             col_max = int(cell['cell_bbox-3'])
 
             axs[1].imshow(np.max(tmp_spot, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.4, cmap='jet')
-            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.2, cmap='jet')
+            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.2, cmap='jet')
+            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.1, cmap='jet')
 
             # put arrows on the spots within this fov
-            for _, spot in fovSpots.iterrows():
+            for _, spot in cellSpots.iterrows():
                 if row_min <= spot['y_px'] < row_max and col_min <= spot['x_px'] < col_max:
-                    axs[1].arrow(spot['x_px'] - col_min, spot['y_px'] - row_min, 0, 0, color='red', head_width=5)
+                    axs[1].arrow(spot['x_px'] - col_min + 2, spot['y_px'] - row_min + 2, 0, 0, color='red', head_width=5)
 
-            if row_min <= spotRow['y_px'] < row_max and col_min <= spotRow['x_px'] < col_max:
-                axs[1].arrow(spotRow['x_px'] - col_min, spotRow['y_px'] - row_min, 0, 0, color='blue', head_width=5)
+            axs[1].arrow(spotRow['x_px'] - col_min + 2, spotRow['y_px'] - row_min + 2, 0, 0, color='blue', head_width=5)
         except:
             print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
 
@@ -328,7 +323,7 @@ class SpotDetection_Confirmation(Analysis):
             spot_col_min = max(int(spotRow['x_px']) - 15, 0)
             spot_col_max = min(int(spotRow['x_px']) + 15, tmp_spot.shape[2])
 
-            axs[2].arrow(spotRow['x_px'] - spot_col_min, spotRow['y_px'] - spot_row_min, 0, 0, color='blue', head_width=2)
+            axs[2].arrow(spotRow['x_px'] - spot_col_min + 2, spotRow['y_px'] - spot_row_min + 2, 0, 0, color='blue', head_width=2)
             axs[2].imshow(np.max(tmp_spot, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max])
             axs[2].imshow(np.max(tmp_nucmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.4, cmap='jet')
             axs[2].imshow(np.max(tmp_cellmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.2, cmap='jet')

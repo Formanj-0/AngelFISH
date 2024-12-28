@@ -55,7 +55,6 @@ class CellProperties(SequentialStepsClass):
                     results.append(False)
             return results
 
-
         nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure)
         cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure)
         cyto_props = sk.measure.regionprops_table(cyto_mask.astype(int), image, properties=props_to_measure)
