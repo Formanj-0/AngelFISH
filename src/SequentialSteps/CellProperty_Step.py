@@ -47,7 +47,7 @@ class CellProperties(SequentialStepsClass):
             """
 
             results = []
-            for row in df.iterrow():
+            for row in df.iterrows():
                 minr, minc, maxr, maxc = row['cell_bbox-0'], row['cell_bbox-1'], row['cell_bbox-2'], row['cell_bbox-3']
                 if minr == 0 or minc == 0 or maxr == image.shape[-2] or maxc == image.shape[-1]:
                     results.append(True)
