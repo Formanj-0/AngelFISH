@@ -336,7 +336,24 @@ class SpotDetection_Confirmation(Analysis):
 
 
     def validate(self):
-        pass
+        # check cyto, cell, and nuc labels are the same
+        if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
+            print('nuc and cell labels match')
+        else:
+            print('ERROR: nuc and cell labels dont match')
+
+        if np.all(self.cellprops['cell_label'] == self.cellprops['cyto_label']):
+            print('cyto and cell labels match')
+        else:
+            print('ERROR: cyto and cell labels dont match')
+
+        if np.all(self.cellprops['nuc_label'] == self.cellprops['cyto_label']):
+            print('cyto and nuc labels match')
+        else:
+            print('ERROR: cyto and nuc labels dont match')
+
+        # confirm spots belong to the correct label TODO
+
 
 
 class GR_Confirmation(Analysis):
