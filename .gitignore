@@ -12,3 +12,4 @@ config_nas.yml
 *.npy
 config_cluster.yml
 config_nas.yml
+*.pyc
