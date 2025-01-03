@@ -47,7 +47,7 @@ class CellProperties(SequentialStepsClass):
             """
 
             results = []
-            for row in df.iterrows():
+            for i, row in df.iterrows():
                 minr, minc, maxr, maxc = row['cell_bbox-0'], row['cell_bbox-1'], row['cell_bbox-2'], row['cell_bbox-3']
                 if minr == 0 or minc == 0 or maxr == image.shape[-2] or maxc == image.shape[-1]:
                     results.append(True)
@@ -63,11 +63,11 @@ class CellProperties(SequentialStepsClass):
         cell_df = pd.DataFrame(cell_props)
         cyto_df = pd.DataFrame(cyto_props)
 
-        cell_df ['touching_border'] = touching_border(cell_df, image)
-
         nuc_df.columns = ['nuc_' + col for col in nuc_df.columns]
         cell_df.columns = ['cell_' + col for col in cell_df.columns]
         cyto_df.columns = ['cyto_' + col for col in cyto_df.columns]
+
+        cell_df ['touching_border'] = touching_border(cell_df, image)
 
         combined_df = pd.concat([nuc_df, cell_df, cyto_df], axis=1)
         combined_df['fov'] = [fov]*len(combined_df)
