@@ -14,3 +14,5 @@ config_cluster.yml
 config_nas.yml
 *.pyc
 *.pyc
+*.csv
+*.json
