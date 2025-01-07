@@ -102,7 +102,7 @@ class AnalysisManager:
         self.analysis = []
         bad_idx = []
         for h_idx, h in enumerate(self.h5_files):
-            for dataset_name in self.analysis_names:
+            for dataset_name in set(self.analysis_names):
                 combos = [f'Analysis_{dataset_name}_{date}' for date in self.dates]
                 if any(combo in h.keys() for combo in combos):
                     for combo in combos: # seach for the combo
@@ -200,10 +200,10 @@ class SpotDetection_Confirmation(Analysis):
     
     def get_data(self):
         h = self.am.h5_files
-        d = self.am.select_datasets('df_spotresults')
-        d1 = self.am.select_datasets('df_cellresults')
+        d = self.am.select_datasets('spotresults')
+        d1 = self.am.select_datasets('cellresults')
         d2 = self.am.select_datasets('cell_properties')
-        d3 = self.am.select_datasets('df_clusterresults')
+        d3 = self.am.select_datasets('clusterresults')
 
         self.spots = []
         self.clusters = []
