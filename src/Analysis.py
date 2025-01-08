@@ -117,6 +117,8 @@ class AnalysisManager:
 
     def _handle_duplicates(self): # requires user input
         pass
+        # TODO: check if h5 has multiple analysis in it
+        
 
     def _find_analysis_names(self):
         self.analysis_names = []
@@ -493,13 +495,13 @@ class GR_Confirmation(Analysis):
 
 
         print(
-            self.validate_measurements(np.max(self.masks[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
+            self.validate(np.max(self.masks[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
                                        np.max(self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :], axis=0), 
                                        np.max(self.images[h5_idx][fov, 0, GR_Channel, :, :, :].compute()*correction_profiles[np.newaxis, :, :], axis=0), 
                                        cell_label, row)
               )
 
-    def validate_measurements(self, cell_mask, nuc_mask, image, label, measurements):
+    def validate(self, cell_mask, nuc_mask, image, label, measurements):
         # calculate cell area
         cell_area = np.sum(cell_mask == label).compute()
         nuc_area = np.sum(nuc_mask == label).compute()
