@@ -102,7 +102,7 @@ class AnalysisManager:
         self.analysis = []
         bad_idx = []
         for h_idx, h in enumerate(self.h5_files):
-            for dataset_name in self.analysis_names:
+            for dataset_name in set(self.analysis_names):
                 combos = [f'Analysis_{dataset_name}_{date}' for date in self.dates]
                 if any(combo in h.keys() for combo in combos):
                     for combo in combos: # seach for the combo
@@ -202,10 +202,10 @@ class SpotDetection_Confirmation(Analysis):
     
     def get_data(self):
         h = self.am.h5_files
-        d = self.am.select_datasets('df_spotresults')
-        d1 = self.am.select_datasets('df_cellresults')
+        d = self.am.select_datasets('spotresults')
+        d1 = self.am.select_datasets('cellresults')
         d2 = self.am.select_datasets('cell_properties')
-        d3 = self.am.select_datasets('df_clusterresults')
+        d3 = self.am.select_datasets('clusterresults')
 
         self.spots = []
         self.clusters = []
@@ -293,9 +293,9 @@ class SpotDetection_Confirmation(Analysis):
         # put red arrows on all spots in fov 
         # put blue arrows on selected spot
         for _, spot in fovSpots.iterrows():
-            axs[0].arrow(spot['x_px'] + 2, spot['y_px'] + 2, 0, 0, color='red', head_width=5)
+            axs[0].arrow(spot['x_px'] + 2, spot['y_px'], 0, 0, color='red', head_width=5)
 
-        axs[0].arrow(spotRow['x_px'] + 2, spotRow['y_px'] + 2, 0, 0, color='blue', head_width=5)
+        axs[0].arrow(spotRow['x_px'] + 2, spotRow['y_px'], 0, 0, color='blue', head_width=5)
 
         # zoom in on the cells
         try:
@@ -319,7 +319,7 @@ class SpotDetection_Confirmation(Analysis):
 
         # zoom in further on the spot
         try:
-            print(f'number of selected spots: {len(spotRow)}')
+            # print(f'number of selected spots: {len(spotRow)}')
             spot_row_min = max(int(spotRow['y_px']) - 15, 0)
             spot_row_max = min(int(spotRow['y_px']) + 15, tmp_spot.shape[1])
             spot_col_min = max(int(spotRow['x_px']) - 15, 0)
@@ -335,6 +335,52 @@ class SpotDetection_Confirmation(Analysis):
 
         plt.show()
 
+        # display the nucleus in channel
+        fig, axs = plt.subplots(1, 2)
+
+        axs[0].imshow(np.max(tmp_nuc, axis=0))
+        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = tmp_nucmask == self.cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+
+        try:
+            row_min = int(cell['cell_bbox-0'])
+            col_min = int(cell['cell_bbox-1'])
+            row_max = int(cell['cell_bbox-2'])
+            col_max = int(cell['cell_bbox-3'])
+
+            axs[1].imshow(np.max(tmp_nuc, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
+
+        plt.show()
+
+        # display the cyto channel
+        temp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        temp_cyto_mask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+
+        fig, axs = plt.subplots(1, 2)
+
+        axs[0].imshow(np.max(temp_cyto, axis=0))
+        axs[0].imshow(np.max(temp_cyto_mask, axis=0), alpha=0.4, cmap='jet')
+        cell_mask = temp_cyto_mask == self.cell_label
+        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
+        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+
+        try:
+            row_min = int(cell['cell_bbox-0'])
+            col_min = int(cell['cell_bbox-1'])
+            row_max = int(cell['cell_bbox-2'])
+            col_max = int(cell['cell_bbox-3'])
+
+            axs[1].imshow(np.max(temp_cyto, axis=0)[row_min:row_max, col_min:col_max])
+            axs[1].imshow(np.max(temp_cyto_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
+        except:
+            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
+
+        plt.show()
 
 
     def validate(self):
