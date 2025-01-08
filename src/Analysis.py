@@ -42,6 +42,8 @@ class AnalysisManager:
         for l in log_files:
             with open(os.path.join(log_location, l), 'r') as file:
                 content = file.read()
+                
+            content = content.split('\n')[-2]
             first, second = content.split(' -> ')
             name = first.split(r'/')[-1]
             drive = os.path.splitdrive(log_location)[0] + os.sep
@@ -71,7 +73,7 @@ class AnalysisManager:
                 try:
                     self.datasets.append(h[dataset_name])
                 except KeyError:
-                    print('missing datasets')
+                    print(f'{h} missing datasets')
                     self.datasets.append(None)
             return self.datasets
         else:
@@ -239,16 +241,23 @@ class SpotDetection_Confirmation(Analysis):
 
     def display(self, newFOV:bool=False, newCell:bool=False, 
                 spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2):
+        
+        nucAlpha = 0.1
+        cytoAlpha = 0.2
+        headWidth = 2
+        dx = 0
+        dy = 0.5
+
         if self.fov is None or newFOV:
             # select a random self.fov, then display it
             self.h5_idx = np.random.choice(self.spots['h5_idx'])
             self.fov = np.random.choice(self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'])
-            tmp_spot = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
-            tmp_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-            tmp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        tmp_spot = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        tmp_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        tmp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
-            tmp_nucmask = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-            tmp_cellmask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        tmp_nucmask = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        tmp_cellmask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
         if self.cell_label is None or newCell:
             self.cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == self.fov) &  
@@ -268,7 +277,7 @@ class SpotDetection_Confirmation(Analysis):
 
 
         # Plot spots
-        fig, axs = plt.subplots(1, 3)
+        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         axs[0].axis('off')
         axs[0].set_title('Total FOV')
         axs[1].axis('off')
@@ -281,8 +290,8 @@ class SpotDetection_Confirmation(Analysis):
         # nuc mask less transparent
         # cell mask more transparent
         axs[0].imshow(np.max(tmp_spot, axis=0), vmin=np.min(tmp_spot), vmax=np.max(tmp_spot))
-        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.2, cmap='jet')
-        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=0.1, cmap='jet')
+        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=nucAlpha, cmap='jet')
+        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=cytoAlpha, cmap='jet')
 
         # outline the selected cell
         cell_mask = tmp_cellmask == self.cell_label
@@ -293,9 +302,9 @@ class SpotDetection_Confirmation(Analysis):
         # put red arrows on all spots in fov 
         # put blue arrows on selected spot
         for _, spot in fovSpots.iterrows():
-            axs[0].arrow(spot['x_px'] + 2, spot['y_px'], 0, 0, color='red', head_width=5)
+            axs[0].arrow(spot['x_px'] - dx, spot['y_px'] - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
 
-        axs[0].arrow(spotRow['x_px'] + 2, spotRow['y_px'], 0, 0, color='blue', head_width=5)
+        axs[0].arrow(spotRow['x_px'] - dx, spotRow['y_px'] - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
 
         # zoom in on the cells
         try:
@@ -305,30 +314,39 @@ class SpotDetection_Confirmation(Analysis):
             col_max = int(cell['cell_bbox-3'])
 
             axs[1].imshow(np.max(tmp_spot, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.2, cmap='jet')
-            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.1, cmap='jet')
+            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=nucAlpha, cmap='jet')
+            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=cytoAlpha, cmap='jet')
 
             # put arrows on the spots within this fov
             for _, spot in cellSpots.iterrows():
                 if row_min <= spot['y_px'] < row_max and col_min <= spot['x_px'] < col_max:
-                    axs[1].arrow(spot['x_px'] - col_min + 2, spot['y_px'] - row_min + 2, 0, 0, color='red', head_width=5)
+                    axs[1].arrow(spot['x_px'] - col_min - dx, spot['y_px'] - row_min - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
 
-            axs[1].arrow(spotRow['x_px'] - col_min + 2, spotRow['y_px'] - row_min + 2, 0, 0, color='blue', head_width=5)
+            axs[1].arrow(spotRow['x_px'] - col_min - dx, spotRow['y_px'] - row_min - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
         except:
             print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
 
         # zoom in further on the spot
+
+        headWidth = 0.5
+        dx = 0.5
+        dy = 0.5
+
+
         try:
-            # print(f'number of selected spots: {len(spotRow)}')
             spot_row_min = max(int(spotRow['y_px']) - 15, 0)
             spot_row_max = min(int(spotRow['y_px']) + 15, tmp_spot.shape[1])
             spot_col_min = max(int(spotRow['x_px']) - 15, 0)
             spot_col_max = min(int(spotRow['x_px']) + 15, tmp_spot.shape[2])
 
-            axs[2].arrow(spotRow['x_px'] - spot_col_min + 2, spotRow['y_px'] - spot_row_min + 2, 0, 0, color='blue', head_width=2)
+            for _, spot in cellSpots.iterrows():
+                if (spot_row_min -2 <= spot['y_px'] < spot_row_max + 2 and spot_col_min-2 <= spot['x_px'] < spot_col_max+2) and (spotRow['x_px'] != spot['x_px'] and spot['y_px'] != spotRow['y_px']):
+                    axs[2].arrow(spot['x_px'] - spot_col_min - dx, spot['y_px'] - spot_row_min - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
+
+            axs[2].arrow(spotRow['x_px'] - spot_col_min - dx, spotRow['y_px'] - spot_row_min - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
             axs[2].imshow(np.max(tmp_spot, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max])
-            axs[2].imshow(np.max(tmp_nucmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.4, cmap='jet')
-            axs[2].imshow(np.max(tmp_cellmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=0.2, cmap='jet')
+            axs[2].imshow(np.max(tmp_nucmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=nucAlpha, cmap='jet')
+            axs[2].imshow(np.max(tmp_cellmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=cytoAlpha, cmap='jet')
 
         except:
             print(f'Zoom in on spot failed for self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label}')
