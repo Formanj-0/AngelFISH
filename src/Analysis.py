@@ -15,14 +15,14 @@ class AnalysisManager:
     This class is made to select data for further analysis.
     It provides methods to load, filter, and retrieve datasets from HDF5 files.
     """
-    def __init__(self, location:Union[str, list[str]]=None, log_location:str=None):
+    def __init__(self, location:Union[str, list[str]]=None, log_location:str=None, mac:bool=False):
         # given:
         # h5 locations
         #   give me a location
         #   give me a list of locations
         #   give me none -> got to here and display these \\munsky-nas.engr.colostate.edu\share\Users\Jack\All_Analysis
         if location is None: # TODO make these if statement better
-            self.select_from_list(log_location)
+            self.select_from_list(log_location, mac)
         elif isinstance(location, str):
             self.location = [location]
         elif isinstance(location, list): # TODO make sure its a list of str
@@ -32,7 +32,7 @@ class AnalysisManager:
         
         self._load_in_h5()
         
-    def select_from_list(self, log_location) -> list[str]: 
+    def select_from_list(self, log_location, mac:bool=False) -> list[str]: 
         # log_location = r'Y:\Users\Jack\All_Analysis' # TODO: make this work for all users
         # get the log files 
         log_files = os.listdir(log_location)
@@ -46,7 +46,10 @@ class AnalysisManager:
             content = content.split('\n')[-2]
             first, second = content.split(' -> ')
             name = first.split(r'/')[-1]
-            drive = os.path.splitdrive(log_location)[0] + os.sep
+            if mac:
+                drive = '/Volumes/share/'
+            else:
+                drive = os.path.splitdrive(log_location)[0] + os.sep
             second = os.path.join(*second.split('/')).strip()
             location = os.path.join(drive, second, name)
             # print(location)
