@@ -491,6 +491,9 @@ class GR_Confirmation(Analysis):
         temp_mask = self.masks[h5_idx][fov, 0, GR_Channel, :, :, :]
 
         fig, axs = plt.subplots(1, 3)
+        axs[0].axis('off')
+        axs[1].axis('off')
+        axs[2].axis('off')
         axs[0].imshow(np.max(temp_img, axis=0))
 
         # display the illumination profile
@@ -498,16 +501,17 @@ class GR_Confirmation(Analysis):
 
         # use the illumination profile to correct it, then display it
         epsilon = 1e-6
-        correction_profiles = 1.0 / (self.illumination_profiles[GR_Channel] + epsilon)
-        # correction_profiles = self.illumination_profiles[GR_Channel]
-        temp_img *= correction_profiles[np.newaxis, :, :]
+        temp_img /= (self.illumination_profiles[GR_Channel] + epsilon)
+        
         axs[2].imshow(np.max(temp_img, axis=0))
         plt.show()
 
         # select a random cell in the fov and display it using the bonded boxs, also include measurments
         # include a transparent mask over the random cell
         fig, axs = plt.subplots(1, 2)
-
+        axs[0].axis('off')
+        axs[1].axis('off')
+        
         cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == fov) &  
                                                                 (self.cellprops['h5_idx'] == h5_idx)]['nuc_label']))
         row = self.cellprops[(self.cellprops['fov'] == fov) & 
@@ -539,6 +543,8 @@ class GR_Confirmation(Analysis):
         temp_img = self.images[h5_idx][fov, 0, Nuc_Channel, :, :, :]
 
         fig, axs = plt.subplots(1, 2)
+        axs[0].axis('off')
+        axs[1].axis('off')
 
         axs[0].imshow(np.max(temp_img, axis=0))
         axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
