@@ -632,21 +632,21 @@ class BIGFISH_SpotDetection(SpotDetection):
                 if sub_pixel_fitting:
                     spots = np.concatenate([spots_px, spots_subpx], axis=1)
                     df_spotresults = pd.DataFrame(spots, columns=['z_px', 'y_px', 'x_px', 'cluster_index', 'z_nm', 'y_nm', 'x_nm', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index'])
+                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
 
                 else:
                     df_spotresults = pd.DataFrame(spots_px, columns=['z_px', 'y_px', 'x_px', 'cluster_index', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index'])
+                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
             
             else:
                 if sub_pixel_fitting:
                     spots = np.concatenate([spots_px, spots_subpx], axis=1)
                     df_spotresults = pd.DataFrame(spots, columns=['y_px', 'x_px', 'cluster_index', 'z_nm', 'y_nm', 'x_nm', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index'])
+                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
 
                 else:
                     df_spotresults = pd.DataFrame(spots_px, columns=['y_px', 'x_px', 'cluster_index', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index'])
+                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
 
             df_spotresults['timepoint'] = [timepoint]*len(df_spotresults)
             df_spotresults['fov'] = [fov]*len(df_spotresults)
