@@ -30,7 +30,7 @@ class SpotDetection(SequentialStepsClass):
             rna = rna.compute()
             spots, clusters = self.get_detected_spots(**kwargs)
 
-            cell_results, spots = self.extract_cell_level_results(image, spots, clusters, nucChannel, FISHChannel[c], 
+            cell_results, spots, clusters = self.extract_cell_level_results(image, spots, clusters, nucChannel, FISHChannel[c], 
                                                         nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
@@ -38,7 +38,7 @@ class SpotDetection(SequentialStepsClass):
 
             spots, cell_results, clusters = self.add_ind_params(spots, cell_results, clusters, timepoint, fov, FISHChannel[c])
 
-        return {'df_cellresults':cell_results ,'df_spotresults':spots, 'df_clusterresults':clusters}
+        return {'cellresults':cell_results ,'spotresults':spots, 'clusterresults':clusters}
 
 
     @abstractmethod
@@ -148,17 +148,25 @@ class SpotDetection(SequentialStepsClass):
             ##### Update spots to include cells
             c_list = [cell_label[s[1], s[2]] for s in spots] # TODO make this work for and 3D
             n_list = [nuc_label[s[1], s[2]] for s in spots]
-            cell_label = c_list
             is_nuc = [(n>0 and c==0) for n,c in zip(n_list,c_list)]
             errors = [(n>0 and c>0 and n!=c) for n,c in zip(n_list,c_list)]
             if any(errors):
                 raise ValueError('Miss matching cell labels')
 
-            spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(cell_label).reshape(-1, 1)])
+            # For clusters
+            c_list_clusters = [cell_label[s[1], s[2]] for s in clusters] # TODO make this work for and 3D
+            n_list_clusters = [nuc_label[s[1], s[2]] for s in clusters]
+            is_nuc_clusters = [(n>0 and c==0) for n,c in zip(n_list_clusters,c_list_clusters)]
+            errors_clusters = [(n>0 and c>0 and n!=c) for n,c in zip(n_list_clusters,c_list_clusters)]
+            if any(errors_clusters):
+                raise ValueError('Miss matching cell labels in clusters')
+            
+            clusters = np.hstack([clusters, np.array(is_nuc_clusters).reshape(-1, 1), np.array(c_list_clusters).reshape(-1, 1)])
+            spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(c_list).reshape(-1, 1)])
         else:
             df = None
 
-        return df, spots
+        return df, spots, clusters
 
     def add_ind_params(self, df_spotresults, df_cellresults, df_clusterresults, timepoint, fov, c):
         df_spotresults['timepoint'] = [timepoint]*len(df_spotresults)
@@ -394,7 +402,7 @@ class BIGFISH_SpotDetection(SpotDetection):
                 bigfish_threshold=bigfish_threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
                 minimum_distance=bigfish_minDistance, use_pca=bigfish_use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio, **kwargs)
             
-            cell_results, spots_px = self.extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
+            cell_results, spots_px, clusters = self.extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
                                                             nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
@@ -897,7 +905,7 @@ class Automatic_BIGFISH_Threshold(IndependentStepClass):
             for c in FISHChannel:
                 num_images_used = 0
                 list_thresholds = []
-                for p in range(images.shape[0]):
+                for p in np.random.choice(np.arange(images.shape[0]), min(MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD, images.shape[0]), replace=False):
 
                     rna = images[p, 0, c, :, :, :].compute()
                     voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if len(rna.shape) == 3 else (int(voxel_size_yx), int(voxel_size_yx))

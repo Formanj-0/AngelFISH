@@ -22,7 +22,7 @@ class AnalysisManager:
         #   give me a list of locations
         #   give me none -> got to here and display these \\munsky-nas.engr.colostate.edu\share\Users\Jack\All_Analysis
         if location is None: # TODO make these if statement better
-            self.select_from_list(log_location, mac)
+            self.get_locations(log_location, mac)
         elif isinstance(location, str):
             self.location = [location]
         elif isinstance(location, list): # TODO make sure its a list of str
@@ -31,8 +31,8 @@ class AnalysisManager:
             raise ValueError('Location is not properly defined')
         
         self._load_in_h5()
-        
-    def select_from_list(self, log_location, mac:bool=False) -> list[str]: 
+
+    def get_locations(self, log_location, mac:bool=False) -> list[str]: 
         # log_location = r'Y:\Users\Jack\All_Analysis' # TODO: make this work for all users
         # get the log files 
         log_files = os.listdir(log_location)
@@ -54,7 +54,7 @@ class AnalysisManager:
             location = os.path.join(drive, second, name)
             # print(location)
             self.location.append(location)
-        
+
     def select_analysis(self, analysis_name: str = None, date_range: list[str] = None):
         self._find_analysis_names()
         self._filter_on_date(date_range)
@@ -123,7 +123,6 @@ class AnalysisManager:
     def _handle_duplicates(self): # requires user input
         pass
         # TODO: check if h5 has multiple analysis in it
-        
 
     def _find_analysis_names(self):
         self.analysis_names = []
@@ -136,7 +135,6 @@ class AnalysisManager:
         self.h5_files = []
         for l in self.location:
             self.h5_files.append(h5py.File(l, 'r'))
-
     
     def get_images_and_masks(self):
         self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
@@ -240,7 +238,6 @@ class SpotDetection_Confirmation(Analysis):
         self.clusters.to_csv(location, index=False)
         self.cellprops.to_csv(location, index=False)
         self.cellspots.to_csv(location, index=False)
-
 
     def display(self, newFOV:bool=False, newCell:bool=False, 
                 spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2):
@@ -403,7 +400,6 @@ class SpotDetection_Confirmation(Analysis):
 
         plt.show()
 
-
     def validate(self):
         # check cyto, cell, and nuc labels are the same
         if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
@@ -423,7 +419,37 @@ class SpotDetection_Confirmation(Analysis):
 
         # confirm spots belong to the correct label TODO
 
+    def set_relationships(self):
+        # create local keys
+        self.spots['spot_key'] = np.arange(self.spots.shape[0])
+        self.cellprops['cell_key'] = np.arange(self.cellprops.shape[0])
+        self.clusters['cluster_key'] = np.arange(self.clusters.shape[0])
 
+        # relate cellprops to cluster and spots
+        for i, cell in self.cellprops.iterrows():
+            matching_spots = (self.spots['cell_label'] == cell['nuc_label']) & \
+                     (self.spots['fov'] == cell['fov']) & \
+                     (self.spots['timepoint'] == cell['timepoint']) & \
+                     (self.spots['NAS_location'] == cell['NAS_location'])
+            self.spots.loc[matching_spots, 'cell_key'] = cell['cell_key']
+
+            matching_clusters = (self.clusters['cell_label'] == cell['nuc_label']) & \
+                    (self.clusters['fov'] == cell['fov']) & \
+                    (self.clusters['timepoint'] == cell['timepoint']) & \
+                    (self.clusters['NAS_location'] == cell['NAS_location'])
+            self.clusters.loc[matching_clusters, 'cell_key'] = cell['cell_key']
+
+        # confirm results, count the number of spots per each cell_key
+        for cell_key in np.random.choice(self.cellprops['cell_key'], 10):
+            cell = self.cellprops[self.cellprops['cell_key'] == cell_key]
+            spot_count = self.spots[self.spots['cell_key'] == cell_key].shape[0]
+            cell_spot_count = self.cellspots[self.cellspots['cell_key'] == cell_key]['nb_rna'].sum() # there should only be one of these 
+            assert spot_count == cell_spot_count, f"Mismatch in spot count for cell_key {cell_key}: {spot_count} vs {cell_spot_count}"
+
+
+    
+    def gate():
+        pass
 
 class GR_Confirmation(Analysis):
     """
@@ -477,8 +503,6 @@ class GR_Confirmation(Analysis):
         self.cellprops = pd.concat(self.cellprops, axis=0)
         self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
         self.images, self.masks = self.am.get_images_and_masks()
-
-
 
     def save_data(self, location):
         self.cellprops.to_csv(location, index=False)
