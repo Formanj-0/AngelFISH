@@ -6,6 +6,7 @@ from copy import copy
 from .Parameters import Parameters, DataContainer
 from functools import wraps
 import traceback
+from dask.distributed import Client, as_completed
 
 def handle_errors(func):
     @wraps(func)
@@ -75,22 +76,25 @@ class StepClass(ABC):
             params['fov'] = p
             params['timepoint'] = t
             params['image'] = params['images'][p, t, :, :, :, :]
-            try:
-                cytoChannel = params['cytoChannel']
-                if cytoChannel is not None:
-                    params['cell_mask'] = params['masks'][p, t, cytoChannel, :, :, :] if params['masks'].shape[1] > 1 else params['masks'][p, 0, cytoChannel, :, :, :]
-                else:
-                    params['cell_mask'] = None
-            except AttributeError:
-                params['cell_mask'] = None
-            try:
-                nucChannel = params['nucChannel']
-                if nucChannel is not None:
-                    params['nuc_mask'] = params["masks"][p, t, nucChannel, :, :, :] if params['masks'].shape[1] > 1 else params['masks'][p, 0, nucChannel, :, :, :]
-                else:
-                    params['nuc_mask'] = None
-            except AttributeError:
-                params['nuc_mask'] = None
+            ms = params['mask_structure']
+
+            for child, (struc, channel, parent) in ms.items():
+                if parent is not None:
+                    parent_struc = ms[parent][0]
+                    index = []
+                    for dim in parent_struc:
+                        if dim in struc:
+                            index.append(slice(None))
+                        elif dim == 'p':
+                            index.append(p)
+                        elif dim == 't':
+                            index.append(t)
+                        elif dim == 'c':
+                            index.append(params[channel] if type(channel) == str else channel)
+                        else:
+                            raise ValueError(f"Unexpected dimension {dim} in parent structure")
+                    index = tuple(index)
+                    params[child] = params[parent][index]
 
             if params['cell_mask'] is not None and params['nuc_mask'] is not None:
                 params['cyto_mask'] = copy(params['cell_mask'])
@@ -204,6 +208,25 @@ class SequentialStepsClass(StepClass):
                         print('++++++++++++++++++++++++++++')
                         step.run(p, t)
                     count += 1
+
+        elif SequentialStepsClass.order == 'parallel':
+            client = Client()
+            futures = []
+            for t in range(params['images'].shape[1]):
+                if count >= number_of_chunks:
+                    break
+                for p in range(params['images'].shape[0]):
+                    if count >= number_of_chunks:
+                        break
+                    future = client.submit(self.run, p, t)
+                    futures.append(future)
+                    count += 1
+
+            for future in as_completed(futures):
+                result = future.result()
+                DataContainer().save_results(result, p, t)
+
+            client.close()
         else:
             raise ValueError('Order must be either "pt" or "tp"')
 
@@ -253,6 +276,26 @@ class SequentialStepsClass(StepClass):
                         DataContainer().save_results(output, p, t)
                         count += 1
                 return DataContainer().load_temp_data()
+
+            elif SequentialStepsClass.order == 'parallel':
+                client = Client()
+                futures = []
+                for t in range(params['images'].shape[1]):
+                    if count >= number_of_chunks:
+                        break
+                    for p in range(params['images'].shape[0]):
+                        if count >= number_of_chunks:
+                            break
+                        params = self.load_in_parameters(p, t)
+                        future = client.submit(self.main, **params)
+                        futures.append(future)
+                        count += 1
+
+                for future in as_completed(futures):
+                    result = future.result()
+                    DataContainer().save_results(result, p, t)
+
+                client.close()
 
         elif p is not None and t is not None:
             print('')

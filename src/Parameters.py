@@ -279,19 +279,42 @@ class DataContainer(Parameters):
 
     def save_masks(self, name, mask, p:int = None, t:int = None):
         params = Parameters().get_parameters()
-        if p is None and t is None and mask is not None:
-            masks = da.rechunk(da.asarray(mask, dtype=np.int8), (1, -1, -1, -1,-1,-1))
-            da.to_npy_stack(os.path.join(self.temp.name, 'masks'), masks) 
-
-        elif p is not None and t is not None and 'nuc' in name and mask is not None and params['nucChannel'] is not None:
-            old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
-            old[0, t, params['nucChannel'], :, :, :] = mask
-            np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
-
-        elif p is not None and t is not None and 'cell' in name and mask is not None and params['cytoChannel'] is not None:
-            old = np.load(os.path.join(self.temp.name, 'masks', f'{p}.npy'))
-            old[0, t, params['cytoChannel'], :, :, :] = mask
-            np.save(os.path.join(self.temp.name, 'masks', f'{p}.npy'), old)
+        mask_structure = params['mask_structure']
+        ms = mask_structure[name]
+        if mask is not None: 
+            if p is None and t is None:
+                chuncks = [1 if s=='p' else -1 for s in ms[0]]
+                masks = da.rechunk(da.asarray(mask, dtype=np.int8), list(chuncks))
+                da.to_npy_stack(os.path.join(self.temp.name, name), masks, axis=chuncks.index(1))
+            else:
+                if 'p' in ms[0] or 't' in ms[0]:
+                    raise 'idk where to put p and t'
+                else:
+                    parent = ms[2]
+                    ms_parent = mask_structure[parent]
+                    channel = ms[1]
+                    child_structure = ms[0]
+                    parent_structure = ms_parent[0]
+                    # construct indexing for saving
+                    index = []
+                    for dim in parent_structure:
+                        if dim in child_structure:
+                            index.append(slice(None))
+                            # index.append(np.newaxis) # TODO FiX this, idk why its not working 
+                        elif dim == 'p':
+                            index.append(0)
+                        elif dim == 't':
+                            index.append(t)
+                        elif dim == 'c':
+                            index.append(params[channel] if type(channel) == str else channel)
+                        else:
+                            raise ValueError(f"Unexpected dimension {dim} in parent structure")
+                    parent_data = np.load(os.path.join(self.temp.name, parent, f'{p}.npy'))
+                    index = tuple(i if i is not None else slice(None) for i in index)
+                    parent_data[index] = mask
+                    np.save(os.path.join(self.temp.name, parent, f'{p}.npy'), parent_data)
+        else:
+            print('returned empty mask')
 
     def save_images(self, name, image, p:int = None, t:int = None):
         if p is None and t is None:
@@ -340,14 +363,8 @@ class DataContainer(Parameters):
             csv_files = [f for f in files if f.endswith('.csv')]
             json_files = [f for f in files if f.endswith('.json')]
             npy_files = [f for f in files if f.endswith('.npy')]
-            if 'images' in folder:
-                self.images = da.from_npy_stack(folder_path)
 
-            elif 'masks' in folder:
-                self.masks = da.from_npy_stack(folder_path)
-
-            # load folders with csvs as a pandas df
-            elif len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
+            if len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
                 if len(csv_files) == 1:
                     df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
                 else:
@@ -371,13 +388,16 @@ class DataContainer(Parameters):
                 data[folder] = json_data
 
             elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
-                if len(npy_files) == 1:
-                    npy_data = np.load(os.path.join(folder_path, npy_files[0]))
-                else:
-                    npy_data = []
-                    for n in npy_files:
-                        npy_data.append(np.load(os.path.join(folder_path, n)))
-                    npy_data = np.concatenate(npy_data, axis=0)
+                try:
+                    npy_data = da.from_npy_stack(folder_path)
+                except:
+                    if len(npy_files) == 1:
+                        npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                    else:
+                        npy_data = []
+                        for n in npy_files:
+                            npy_data.append(np.load(os.path.join(folder_path, n)))
+                        npy_data = np.concatenate(npy_data, axis=0)
                 setattr(self, folder, npy_data)
                 data[folder] = npy_data
 
@@ -387,6 +407,7 @@ class DataContainer(Parameters):
 
     def delete_temp(self):
         self.temp.cleanup()
+
 
 repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 @dataclass
@@ -401,6 +422,7 @@ class Settings(Parameters):
     share_name: str = 'share'
     display_plots: bool = True
     load_in_mask: bool = False
+    mask_structure: dict = None
 
     def __init__(self, **kwargs):
         if kwargs is not None:
@@ -409,6 +431,11 @@ class Settings(Parameters):
         
         if self.connection_config_location is None:
             self.connection_config_location = str(os.path.join(repo_path, 'config_nas.yml'))
+        
+        if self.mask_structure is None:
+            self.mask_structure = {'masks': ('ptczyx', None, None), 
+                                   'cell_mask': ('zyx', 'cytoChannel', 'masks'), 
+                                   'nuc_mask': ('zyx', 'nucChannel', 'masks')}
 
     def validate_parameters(self):
         if self.name is None:
@@ -420,29 +447,3 @@ class required_params(ABC):
     @abstractmethod
     def validate_parameter(self):
         ...
-
-
-# class Index_Dict(dict, required_params): # TODO Deal with this bs
-#     required_keys = {'x', 'y'}
-#     optional_keys = {'p', 'z', 'c'}
-
-#     def __init__(self, *args, **kwargs):
-#         # check if it none
-#         if self is not None:
-#             super().__init__(*args, **kwargs)
-#             self.validate_parameter()
-
-#     def validate_parameter(self):
-#         if not self.required_keys.issubset(self.keys()):
-#             raise ValueError(f"Missing required keys: {self.required_keys - set(self.keys())}")
-#         if not self.keys().issubset(self.required_keys.union(self.optional_keys)):
-#             raise ValueError(f"Invalid keys: {set(self.keys()) - self.required_keys.union(self.optional_keys)}")
-        
-#     # when the class is called, it will return the dict
-#     def __call__(self):
-#         return self
-    
-#     # when the class is updated from None
-#     def __setitem__(self, key, value):
-#         super().__setitem__(key, value)
-#         self.validate_parameter()

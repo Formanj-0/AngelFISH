@@ -240,28 +240,28 @@ class Save_Masks(Saving):
         params = Parameters.get_parameters()
 
         local_dataset_location = params['local_dataset_location']
-        masks = params['masks']
+        # masks = params['masks']
         h5_file = params['h5_file']
         position_indexs = params['position_indexs']
-
-        computed_masks = masks.compute()
+        mask_structure = params['mask_structure']
 
         close_h5_files()
 
         # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
-        if masks is not None:
+        for k, (s, c, p) in mask_structure.items():
             for i, locaction in enumerate(local_dataset_location):
-                with h5py.File(locaction, 'r+') as h5:
-                    # h5 = h5py.File(locaction, 'a')
-                    
-                    # check if the dataset is already made
-                    if '/masks' in h5:
-                        del h5['/masks']
+                if p is None:
+                    with h5py.File(locaction, 'r+') as h5:
+                        masks = params[k].compute
+                        
+                        # check if the dataset is already made
+                        if f'/{k}' in h5:
+                            del h5[f'/{k}']
 
-                    chunk_size = (1,) + computed_masks.shape[1:]  # Define chunk size
-                    h5.create_dataset('/masks', data=computed_masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
-                    
+                        chunk_size = (1,) + masks.shape[1:]  # Define chunk size
+                        h5.create_dataset('/masks', data=masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
+                        
 
 
 
