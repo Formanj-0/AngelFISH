@@ -627,35 +627,44 @@ class BIGFISH_SpotDetection(SpotDetection):
         return spots_post_clustering, dense_regions, reference_spot, clusters, spots_subpx, individual_thershold
 
     def standardize_df(self, df_cellresults, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params, **kwargs):
-            # merge spots_px and spots_um
+            # get the columns
+            cols_spots = []
+            cols_cluster = []
             if self.dim_3D:
-                if sub_pixel_fitting:
-                    spots = np.concatenate([spots_px, spots_subpx], axis=1)
-                    df_spotresults = pd.DataFrame(spots, columns=['z_px', 'y_px', 'x_px', 'cluster_index', 'is_nuc', 'cell_label', 'snr', 'signal', 'z_nm', 'y_nm', 'x_nm'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
+                cols_spots.append(['z_px', 'y_px', 'x_px', 'cluster_index'])
+                cols_cluster.append(['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index'])
+            else:
+                cols_spots.append(['y_px', 'x_px', 'cluster_index'])
+                cols_cluster.append(['y_px', 'x_px', 'nb_spots', 'cluster_index'])
+            
+            if df_cellresults is not None:
+                cols_spots.append(['is_nuc', 'cell_label'])
+                cols_cluster.append(['is_nuc', 'cell_label'])
+            
+            cols_spots.append(['snr', 'signal'])
 
-                else:
-                    df_spotresults = pd.DataFrame(spots_px, columns=['z_px', 'y_px', 'x_px', 'cluster_index', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['z_px', 'y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
+            if self.dim_3D and sub_pixel_fitting:
+                spots = np.concatenate([spots_px, spots_subpx], axis=1)
+                cols_spots.append(['z_nm', 'y_nm', 'x_nm'])
+
+            elif not self.dim_3D and sub_pixel_fitting:
+                spots = np.concatenate([spots_px, spots_subpx], axis=1)
+                cols_spots.append(['y_nm', 'x_nm'])
             
             else:
-                if sub_pixel_fitting:
-                    spots = np.concatenate([spots_px, spots_subpx], axis=1)
-                    df_spotresults = pd.DataFrame(spots, columns=['y_px', 'x_px', 'cluster_index', 'cell_label', 'snr', 'signal', 'z_nm', 'y_nm', 'x_nm', 'is_nuc'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
+                spots = spots_px
 
-                else:
-                    df_spotresults = pd.DataFrame(spots_px, columns=['y_px', 'x_px', 'cluster_index', 'is_nuc', 'cell_label', 'snr', 'signal'])
-                    df_clusterresults = pd.DataFrame(clusters, columns=['y_px', 'x_px', 'nb_spots', 'cluster_index', 'is_nuc', 'cell_label'])
+            cols_spots = [item for sublist in cols_spots for item in sublist]
+            cols_cluster = [item for sublist in cols_cluster for item in sublist]
 
+            # set the columns
+            df_spotresults = pd.DataFrame(spots, columns=cols_spots)
+            df_clusterresults = pd.DataFrame(clusters, columns=cols_cluster)
+
+            # add nesscary columns
             df_spotresults['timepoint'] = [timepoint]*len(df_spotresults)
             df_spotresults['fov'] = [fov]*len(df_spotresults)
             df_spotresults['FISH_Channel'] = [c]*len(df_spotresults)
-
-            if df_cellresults is not None:
-                df_cellresults['timepoint'] = [timepoint]*len(df_cellresults)
-                df_cellresults['fov'] = [fov]*len(df_cellresults)
-                df_cellresults['FISH_Channel'] = [c]*len(df_cellresults)
 
             df_clusterresults['timepoint'] = [timepoint]*len(df_clusterresults)
             df_clusterresults['fov'] = [fov]*len(df_clusterresults)
