@@ -7,6 +7,8 @@ from .Parameters import Parameters, DataContainer
 from functools import wraps
 import traceback
 from dask.distributed import Client, as_completed
+import dask
+import h5py
 
 def handle_errors(func):
     @wraps(func)
@@ -287,25 +289,31 @@ class SequentialStepsClass(StepClass):
                         if count >= number_of_chunks:
                             break
                         params = self.load_in_parameters(p, t)
-                        future = client.submit(self.main, **params)
+                        # Remove non-pickable objects from params
+                        params = {k: v for k, v in params.items() if not isinstance(v, h5py.File)}
+                        future = client.submit(self.p_runner, self.main, params, p, t)
                         futures.append(future)
                         count += 1
 
                 for future in as_completed(futures):
                     result = future.result()
-                    DataContainer().save_results(result, p, t)
+                    DataContainer().save_results(result[0], result[1], result[2])
 
                 client.close()
-
-        elif p is not None and t is not None:
-            print('')
-            print(' ###################### ')
-            print('FOV:' + str(p) + ' TIMEPOINT : ' + str(t))
-            print(' ###################### ')
-            params = self.load_in_parameters(p, t)
-            output = self.main(**params)
-            DataContainer().save_results(output, p, t)
-            return output
+    
+            elif p is not None and t is not None:
+                print('')
+                print(' ###################### ')
+                print('FOV:' + str(p) + ' TIMEPOINT : ' + str(t))
+                print(' ###################### ')
+                params = self.load_in_parameters(p, t)
+                output = self.main(**params)
+                DataContainer().save_results(output, p, t)
+                return output
+    
+    @staticmethod
+    def p_runner(func, params, p, t):
+        return (func(**params), p, t)
 
     def main(self, **kwargs):
         pass
