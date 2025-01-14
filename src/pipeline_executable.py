@@ -53,13 +53,13 @@ with open(pipeline_location, 'r') as f:
 
 repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 connection_config_location = str(os.path.join(repo_path, 'config_nas.yml'))
-for i in range(len(pipeline_dict['params'])):
-    pipeline_dict['params'][i]['display_plots'] = False
-    pipeline_dict['params'][i]['connection_config_location'] = connection_config_location
+
+pipeline_dict['params']['display_plots'] = False
+pipeline_dict['params']['connection_config_location'] = connection_config_location
 
     
 steps = pipeline_dict['steps']
-experiment_locations = [i['initial_data_location'] for i in pipeline_dict['params']]
+experiment_locations = pipeline_dict['params']['initial_data_location']
 
 print(steps)
 print(pipeline_dict['params'])
