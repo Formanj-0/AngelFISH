@@ -93,10 +93,12 @@ class Parameters(ABC):
                     setattr(instance, key, value)
                     print(f'Overwriting {key} in {instance.__class__.__name__}')
                     used_keys.append(key)
+
         # if there are any kwargs left, add them to the settings class
         # remove the used keys
         for key in used_keys:
-            kwargs.pop(key)
+            if key in kwargs:
+                kwargs.pop(key)
         
         if kwargs:
             print(f'Adding leftover kwargs to Settings')

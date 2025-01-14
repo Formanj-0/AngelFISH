@@ -156,9 +156,8 @@ class Pipeline:
 
         # Remove specified keys from params
         keys_to_remove = ['temp']  # specify the keys to remove
-        for param in params:
-            for key in keys_to_remove:
-                param.pop(key, None)
+        for key in keys_to_remove:
+            params.pop(key, None)
 
         # save save steps as a dictionary
         if self.steps is None:
