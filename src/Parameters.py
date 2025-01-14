@@ -222,6 +222,9 @@ class Experiment(Parameters):
         if type(self.FISHChannel) is int:
             self.FISHChannel = [self.FISHChannel]
 
+        if type(self.initial_data_location) is str:
+            self.initial_data_location = [self.initial_data_location]
+
         # make sure each independent parameter has the same keys
         if self.independent_params is not None:
             if type(self.independent_params) is list:
@@ -273,6 +276,10 @@ class DataContainer(Parameters):
             self._masks_modified = True
             
         super().__setattr__(name, value)
+    
+    def validate_parameters(self):
+        if type(self.local_dataset_location) is str:
+            self.local_dataset_location = [self.local_dataset_location]
 
     def save_results(self, kwargs: dict, p:int = None, t:int = None, parameters = None):
         parameters = Parameters() if parameters is None else parameters
