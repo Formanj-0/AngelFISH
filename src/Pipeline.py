@@ -71,15 +71,15 @@ class Pipeline:
 
         '''
         from src.GeneralStep import IndependentStepClass
-        IndependentStepClass().execute(self.data_container, self.parameters, self.independent_steps)
+        IndependentStepClass.execute(self.data_container, self.parameters, self.independent_steps)
 
     def execute_sequential_steps(self):
         from src.GeneralStep import SequentialStepsClass
-        SequentialStepsClass().execute(self.data_container, self.parameters, self.sequential_steps)
+        SequentialStepsClass.execute(self.data_container, self.parameters, self.sequential_steps)
 
     def execute_finalization_steps(self):
         from src.GeneralStep import FinalizingStepClass
-        FinalizingStepClass().execute(self.data_container, self.parameters, self.finalization_steps)
+        FinalizingStepClass.execute(self.data_container, self.parameters, self.finalization_steps)
 
     def __post_init__(self):
         self.check_requirements()
@@ -96,19 +96,19 @@ class Pipeline:
     def get_independent_steps(self):
         if self.state == 'global':
             from src.GeneralStep import IndependentStepClass
-            self.independent_steps = copy.copy(IndependentStepClass()._instances)
+            self.independent_steps = copy.copy(IndependentStepClass._instances)
         return self.independent_steps
 
     def get_sequential_steps(self):
         if self.state == 'global':
             from src.GeneralStep import SequentialStepsClass
-            self.sequential_steps = copy.copy(SequentialStepsClass()._instances)
+            self.sequential_steps = copy.copy(SequentialStepsClass._instances)
         return self.sequential_steps
     
     def get_finalization_steps(self):
         if self.state == 'global':
             from src.GeneralStep import FinalizingStepClass
-            self.finalization_steps = copy.copy(FinalizingStepClass()._instances)
+            self.finalization_steps = copy.copy(FinalizingStepClass._instances)
         return self.finalization_steps
 
     def get_parameters(self):
@@ -119,8 +119,9 @@ class Pipeline:
         if self.experiment_location is None:
             self.experiment_location = params['initial_data_location']
         if self.steps is None:
-            self.steps = [*[i.__class__.__name__ for i in self.get_independent_steps()], *[i.__class__.__name__ for i in self.get_sequential_steps()],
-                *[i.__class__.__name__ for i in self.get_finalization_steps()]]
+            self.steps = [*[i.__class__.__name__ for i in self.get_independent_steps()._instances], 
+                          *[i.__class__.__name__ for i in self.get_sequential_steps()._instances],
+                          *[i.__class__.__name__ for i in self.get_finalization_steps()._instances]]
         
 
         # self.modify_kwargs(params)

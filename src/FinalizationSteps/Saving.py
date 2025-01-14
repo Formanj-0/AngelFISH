@@ -150,7 +150,7 @@ class Save_Parameters(Saving):
                     h5file[f"{path}/{key}"] = item
         
         params = kwargs
-        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks']
+        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
 
         h5_file = DataContainer().h5_file
         Analysis_name = params['name']

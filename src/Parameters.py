@@ -80,13 +80,13 @@ class Parameters(ABC):
         DataContainer()
         Settings()
 
-    @classmethod
-    def update_parameters(cls, kwargs: dict):
+    def update_parameters(self, kwargs: dict):
         # Class method to update all instances of the parent class
         if kwargs is None:
             return None
         used_keys = []
-        for instance in cls._instances:
+        instances = Parameters._instances if self.state == 'global' else self.instances
+        for instance in instances:
             for key, value in kwargs.items():
                 # check if the key exists in the instance
                 if hasattr(instance, key):
@@ -101,7 +101,7 @@ class Parameters(ABC):
         if kwargs:
             print(f'Adding leftover kwargs to Settings')
             # find the settings instance
-            for instance in cls._instances:
+            for instance in instances:
                 if instance.__class__.__name__ == 'Settings':
                     for key, value in kwargs.items():
                         setattr(instance, key, value)
@@ -448,6 +448,7 @@ class Settings(Parameters):
     display_plots: bool = True
     load_in_mask: bool = False
     mask_structure: dict = None
+    order: str = 'pt'
 
     def __init__(self, **kwargs):
         self.state = 'global'

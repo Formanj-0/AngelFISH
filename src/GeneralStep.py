@@ -185,57 +185,58 @@ class SequentialStepsClass(StepClass):
     def __init__(self):
         self.is_first_run = True
 
-    def execute(self, data_container = None, parameter = None, sequentialsteps = None):
+    @staticmethod
+    def execute(data_container = None, parameter = None, sequentialsteps = None):
         data_container = DataContainer() if data_container is None else data_container
         parameter = Parameters() if parameter is None else parameter
-        sequentialsteps = SequentialStepsClass if sequentialsteps is None else sequentialsteps
+        sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
         data_container.load_temp_data()
         params = parameter.get_parameters()
 
         number_of_chunks = params['num_chunks_to_run']
         count = 0
-        if sequentialsteps.order == 'tp':
+        if params['order'] == 'tp':
             for t in range(params['images'].shape[1]):
                 if count >= number_of_chunks:
                     break
                 for p in range(params['images'].shape[0]):
                     if count >= number_of_chunks:
                         break
-                    for step in sequentialsteps._instances:
+                    for step in sequentialsteps:
                         print('++++++++++++++++++++++++++++')
                         print('Running : ', step)
                         print('++++++++++++++++++++++++++++')
-                        step.run(p, t, data_container, parameter, sequentialsteps)
+                        step.run(p, t, data_container, parameter)
                     count += 1
 
-        elif sequentialsteps.order == 'pt':
+        elif params['order'] == 'pt':
             for p in range(params['images'].shape[0]):
                 if count >= number_of_chunks:
                     break
                 for t in range(params['images'].shape[1]):
                     if count >= number_of_chunks:
                         break
-                    for step in sequentialsteps._instances:
+                    for step in sequentialsteps:
                         print('++++++++++++++++++++++++++++')
                         print('Running : ', step)
                         print('++++++++++++++++++++++++++++')
-                        step.run(p, t, data_container, parameter, sequentialsteps)
+                        step.run(p, t, data_container, parameter)
                     count += 1
 
-        elif sequentialsteps.order == 'parallel':
-            for step in sequentialsteps._instances:
+        elif params['order'] == 'parallel':
+            for step in sequentialsteps:
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', step)
                 print('++++++++++++++++++++++++++++')
-                step.run(None, None, data_container, parameter, sequentialsteps)
+                step.run(None, None, data_container, parameter)
         else:
             raise ValueError('Order must be either "pt" or "tp"')
 
     @handle_errors
-    def run(self, p:int = None, t:int = None, data_container = None, parameter = None, sequentialsteps = None):
+    def run(self, p:int = None, t:int = None, data_container = None, parameter = None):
         data_container = DataContainer() if data_container is None else data_container
         parameter = Parameters() if parameter is None else parameter
-        sequentialsteps = SequentialStepsClass if sequentialsteps is None else sequentialsteps
+        # sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
         data_container.load_temp_data()
 
 
@@ -244,7 +245,7 @@ class SequentialStepsClass(StepClass):
 
             number_of_chunks = params['num_chunks_to_run']
             count = 0
-            if sequentialsteps.order == 'tp':
+            if params['order'] == 'tp':
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', self)
                 print('++++++++++++++++++++++++++++')
@@ -264,7 +265,7 @@ class SequentialStepsClass(StepClass):
                         count += 1
                 return data_container.load_temp_data()
             
-            elif sequentialsteps.order == 'pt':
+            elif params['order'] == 'pt':
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', self)
                 print('++++++++++++++++++++++++++++')
@@ -284,7 +285,7 @@ class SequentialStepsClass(StepClass):
                         count += 1
                 return data_container.load_temp_data()
 
-            elif sequentialsteps.order == 'parallel':
+            elif params['order'] == 'parallel':
                 client = Client()
                 futures = []
                 for t in range(params['images'].shape[1]):
@@ -326,9 +327,10 @@ class SequentialStepsClass(StepClass):
 class FinalizingStepClass(StepClass):
     _instances = []
 
-    def execute(self, data_container = None, parameter = None, finalizingstep = None):
-        finalizingstep = FinalizingStepClass if finalizingstep is None else finalizingstep
-        for step in finalizingstep._instances:
+    @staticmethod
+    def execute(data_container = None, parameter = None, finalizingstep = None):
+        finalizingstep = FinalizingStepClass._instances if finalizingstep is None else finalizingstep
+        for step in finalizingstep:
             print('++++++++++++++++++++++++++++')
             print('Running : ', step)
             print('++++++++++++++++++++++++++++')
@@ -337,9 +339,10 @@ class FinalizingStepClass(StepClass):
 class IndependentStepClass(StepClass):
     _instances = []
 
-    def execute(self, data_container = None, parameter = None, independentsteps = None):
-        independentsteps = IndependentStepClass if independentsteps is None else independentsteps
-        for step in independentsteps._instances:
+    @staticmethod
+    def execute(data_container = None, parameter = None, independentsteps = None):
+        independentsteps = IndependentStepClass._instances if independentsteps is None else independentsteps
+        for step in independentsteps:
             print('++++++++++++++++++++++++++++')
             print('Running : ', step)
             print('++++++++++++++++++++++++++++')
