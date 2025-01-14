@@ -10,7 +10,7 @@ import os
 from skimage.measure import find_contours
 from skimage import exposure
 import matplotlib.patches as mpatches
-
+import copy
 
 class AnalysisManager:
     """
@@ -61,7 +61,7 @@ class AnalysisManager:
         self._find_analysis_names()
         self._filter_on_date(date_range)
         self._filter_on_name(analysis_name)
-        self._find_analysis()
+        self._find_analysis() # this give you self.analysis
         self._handle_duplicates()
         return self.h5_files
 
@@ -136,7 +136,8 @@ class AnalysisManager:
     def _load_in_h5(self):
         self.h5_files = []
         for l in self.location:
-            self.h5_files.append(h5py.File(l, 'r'))
+            if l not in [h.filename for h in self.h5_files]:
+                self.h5_files.append(h5py.File(l, 'a'))
     
     def get_images_and_masks(self):
         self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
@@ -147,6 +148,14 @@ class AnalysisManager:
         for h in self.h5_files:
             h.close()
 
+    def delete_selected_analysis(self, password):
+        if password == 'you_better_know_what_your_deleting':
+            for analysis_group in self.analysis:
+                parent_group = analysis_group.parent
+                filename = copy.copy(parent_group.file.filename)
+                del parent_group[analysis_group.name]
+        else:
+            print('you_better_know_what_your_deleting')
 #%% Analysis outline
 class Analysis(ABC):
 
