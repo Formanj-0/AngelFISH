@@ -148,7 +148,7 @@ class StepClass(ABC):
             else:
                 raise ValueError(f'{step} is not a valid step class')
 
-        return IndependentStepClass, SequentialStepsClass, FinalizingStepClass
+        return IndependentStepClass._instances, SequentialStepsClass._instances, FinalizingStepClass._instances
     
     @classmethod
     def list_all_children(cls):
