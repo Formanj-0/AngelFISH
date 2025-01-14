@@ -17,3 +17,4 @@ config_nas.yml
 *.csv
 *.json
 /src/__pycache__
+/src/SequentialSteps/__pycache__
