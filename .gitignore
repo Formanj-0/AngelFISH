@@ -16,3 +16,4 @@ config_nas.yml
 *.pyc
 *.csv
 *.json
+/src/__pycache__
