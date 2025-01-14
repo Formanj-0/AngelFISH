@@ -91,7 +91,7 @@ class IlluminationCorrection(IndependentStepClass):
             self.visualize_profiles(fitted_profiles, corrected_images, images, corrected_IL_profile)
 
         print("Illumination correction pipeline complete.")
-        return {'images': corrected_images, 'illumination_profiles': fitted_profiles}
+        return {'images': corrected_images, 'illumination_profiles': fitted_profiles, 'corrected_IL_profile': corrected_IL_profile}
 
     def validate_sigma_dict(self, num_channels, sigma_dict):
         """
