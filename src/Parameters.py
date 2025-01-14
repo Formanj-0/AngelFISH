@@ -27,12 +27,16 @@ class Parameters(ABC):
 
     def __new__(cls, *args, **kwargs):
         for instance in cls._instances:
-            if isinstance(instance, cls):
+            if instance.__class__ == cls:
                 return instance
         instance = super().__new__(cls)
         cls._instances.append(instance)
         return instance
 
+    def __init__(self):
+        self.state = 'global'
+        self.instances = []
+    
     @classmethod
     def get_all_instances(cls):
         # Class method to return all instances of the parent class
@@ -41,28 +45,29 @@ class Parameters(ABC):
     @classmethod
     def clear_instances(cls):
         # Class method to clear all instances of the parent class
+
         # deletes all instances of the class
-        for instance in cls._instances:
-            del instance
+        # for instance in cls._instances:
+        #     del instance
         cls._instances = []
 
     @classmethod
     def validate(cls):
         # make sure settings, scope, experiemnt, and datacontainer are all initialized
-        if len(cls._instances) < 3 or len(cls._instances) > 4:
-            raise ValueError(f"Settings, ScopeClass, and Experiment must all be initialized")
+        # if len(cls._instances) < 3 or len(cls._instances) > 5:
+        #     raise ValueError(f"Settings, ScopeClass, and Experiment must all be initialized")
         # makes sure ScopeClass is in _instances
-        if not any(isinstance(instance, ScopeClass) for instance in cls._instances):
-            raise ValueError(f"ScopeClass must be initialized")
-        # makes sure Experiment is in _instances
-        if not any(isinstance(instance, Experiment) for instance in cls._instances):
-            raise ValueError(f"Experiment must be initialized")
-        # makes sure DataContainer is in _instances
-        if not any(isinstance(instance, DataContainer) for instance in cls._instances):
-            print(f"DataContainer must be initialized")
-        # makes sure Settings is in _instances
-        if not any(isinstance(instance, Settings) for instance in cls._instances):
-            raise ValueError(f"Settings must be initialized")
+        # if not any(isinstance(instance, ScopeClass) for instance in cls._instances):
+        #     raise ValueError(f"ScopeClass must be initialized")
+        # # makes sure Experiment is in _instances
+        # if not any(isinstance(instance, Experiment) for instance in cls._instances):
+        #     raise ValueError(f"Experiment must be initialized")
+        # # makes sure DataContainer is in _instances
+        # if not any(isinstance(instance, DataContainer) for instance in cls._instances):
+        #     print(f"DataContainer must be initialized")
+        # # makes sure Settings is in _instances
+        # if not any(isinstance(instance, Settings) for instance in cls._instances):
+        #     raise ValueError(f"Settings must be initialized")
 
         # Class method to validate all instances of the parent class
         for instance in cls._instances:
@@ -75,13 +80,13 @@ class Parameters(ABC):
         DataContainer()
         Settings()
 
-    @classmethod
-    def update_parameters(cls, kwargs: dict):
+    def update_parameters(self, kwargs: dict):
         # Class method to update all instances of the parent class
         if kwargs is None:
             return None
         used_keys = []
-        for instance in cls._instances:
+        instances = Parameters._instances if self.state == 'global' else self.instances
+        for instance in instances:
             for key, value in kwargs.items():
                 # check if the key exists in the instance
                 if hasattr(instance, key):
@@ -96,7 +101,7 @@ class Parameters(ABC):
         if kwargs:
             print(f'Adding leftover kwargs to Settings')
             # find the settings instance
-            for instance in cls._instances:
+            for instance in instances:
                 if instance.__class__.__name__ == 'Settings':
                     for key, value in kwargs.items():
                         setattr(instance, key, value)
@@ -121,19 +126,33 @@ class Parameters(ABC):
             string += f'{key}: {value} \n'
         return string
 
-    @classmethod
     def get_parameters(self) -> dict:
         # Get all the parameters of all instances of the class
         params = {}
-        for instance in Parameters._instances:
-            # check for duplicates and raise an error if found
-            duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
-            if duplicate_keys:
-                if duplicate_keys != {'kwargs'}:
-                    raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
-            params.update(instance.todict())
+        if self.state == 'global':
+            for instance in Parameters()._instances:
+                # check for duplicates and raise an error if found
+                duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
+                if duplicate_keys:
+                    if duplicate_keys != {'kwargs'} and duplicate_keys != {'state'}:
+                        raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
+                params.update(instance.todict())
+        else:
+            for instance in self.instances:
+                # check for duplicates and raise an error if found
+                duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
+                if duplicate_keys:
+                    if duplicate_keys != {'kwargs'} and duplicate_keys != {'state'}:
+                        raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
+                params.update(instance.todict())
         return params
 
+    def isolate(self):
+        self.state = 'local'
+        self.instances = self.get_all_instances()
+        for i in self.instances:
+            i.state = self.state
+        self.clear_instances()
 
 @dataclass
 class ScopeClass(Parameters):
@@ -153,6 +172,7 @@ class ScopeClass(Parameters):
     microscope_saving_format: str = 'pycromanager'
 
     def __init__(self, **kwargs):
+        self.state = 'global'
         if kwargs is not None: # TODO this needs to be moved up but it has issues being in parmaeters class
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -179,6 +199,7 @@ class Experiment(Parameters):
     timestep_s: float = None
 
     def __init__(self, **kwargs):
+        self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -226,6 +247,7 @@ class DataContainer(Parameters):
     clear_after_error: bool = True
 
     def __init__(self, **kwargs):
+        self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -251,12 +273,13 @@ class DataContainer(Parameters):
             
         super().__setattr__(name, value)
 
-    def save_results(self, kwargs: dict, p:int = None, t:int = None):
+    def save_results(self, kwargs: dict, p:int = None, t:int = None, parameters = None):
+        parameters = Parameters() if parameters is None else parameters
         if kwargs is not None:
             for name, value in kwargs.items():
                 # check if it a mask
                 if 'mask' in name:
-                    self.save_masks(name, value, p, t)
+                    self.save_masks(name, value, p, t, parameters)
 
                 # check if it a image
                 elif 'image' in name:
@@ -270,15 +293,16 @@ class DataContainer(Parameters):
                 elif isinstance(value, np.ndarray):
                     self.save_np(name, value)
 
-                elif name in Parameters().get_parameters().keys():
-                    Parameters().update_parameters({name: value})
+                elif name in parameters.get_parameters().keys():
+                    parameters.update_parameters({name: value})
 
                 else:
                     # else save as json
                     self.save_extra(name, value)
 
-    def save_masks(self, name, mask, p:int = None, t:int = None):
-        params = Parameters().get_parameters()
+    def save_masks(self, name, mask, p:int = None, t:int = None, parameters = None):
+        parameters = Parameters() if parameters is None else parameters
+        params = parameters.get_parameters()
         mask_structure = params['mask_structure']
         ms = mask_structure[name]
         if mask is not None: 
@@ -403,6 +427,7 @@ class DataContainer(Parameters):
 
             else:
                 raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+
         return data
 
     def delete_temp(self):
@@ -423,8 +448,10 @@ class Settings(Parameters):
     display_plots: bool = True
     load_in_mask: bool = False
     mask_structure: dict = None
+    order: str = 'pt'
 
     def __init__(self, **kwargs):
+        self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)

@@ -63,7 +63,7 @@ def handle_dict(d):
 
 class Save_Outputs(Saving):
     def main(self, **kwargs):
-        params = Parameters.get_parameters()
+        params = kwargs
 
         h5_file = params['h5_file']
         Analysis_name = params['name']
@@ -149,8 +149,8 @@ class Save_Parameters(Saving):
                 else:
                     h5file[f"{path}/{key}"] = item
         
-        params = {**Settings.get_parameters(), **ScopeClass.get_parameters(), **Experiment.get_parameters()}
-        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks']
+        params = kwargs
+        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
 
         h5_file = DataContainer().h5_file
         Analysis_name = params['name']
@@ -199,7 +199,7 @@ class Save_Parameters(Saving):
 
 class Save_Images(Saving):
     def main(self, **kwargs):
-        params = Parameters.get_parameters()
+        params = kwargs
 
         h5_file = params['h5_file']
         Analysis_name = params['name']
@@ -237,7 +237,7 @@ class Save_Images(Saving):
 
 class Save_Masks(Saving):
     def main(self, **kwargs):
-        params = Parameters.get_parameters()
+        params = kwargs
 
         local_dataset_location = params['local_dataset_location']
         # masks = params['masks']
@@ -253,7 +253,7 @@ class Save_Masks(Saving):
             for i, locaction in enumerate(local_dataset_location):
                 if p is None:
                     with h5py.File(locaction, 'r+') as h5:
-                        masks = params[k].compute
+                        masks = params[k].compute()
                         
                         # check if the dataset is already made
                         if f'/{k}' in h5:

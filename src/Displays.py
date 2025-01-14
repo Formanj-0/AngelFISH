@@ -36,7 +36,7 @@ class Display:
     def displayImage_maxProject(self, position: int = 0, timepoint: int = 0, channel: int = 0):
         # TODO: time these parts
         DataContainer().load_temp_data()
-        params = Parameters.get_parameters()
+        params = Parameters().get_parameters()
         images = params['images']
         image = np.max(images[position, timepoint, channel, :, :, :].compute(), axis=0)
         

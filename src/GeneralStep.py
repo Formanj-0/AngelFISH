@@ -57,20 +57,21 @@ class StepClass(ABC):
 
     @classmethod
     def clear_instances(cls):
-        for step in cls._instances:
-            del step
+        # for step in cls._instances:
+        #     del step
+        cls._instances = []
 
     def __str__(self):
         return self.__class__.__name__
 
-    def load_in_parameters(self, p: int = None, t: int = None):
+    def load_in_parameters(self, p: int = None, t: int = None, parameters = None):
         """
         This is where the magic happens. This function will load in all the attributes of the class and return them as a dictionary.
         This allows all the bs that I decided to force on my code to not matter, and user can just write whatever they want in the main functions
         As long as the attributes are unique and saved using a step output class, this function will load them in.
         """
-
-        params = Parameters.get_parameters()
+        parameters = Parameters() if parameters is None else parameters
+        params = parameters.get_parameters()
         if t is None != p is None:
             raise ValueError('t and p must be both None or both not None')
 
@@ -128,6 +129,8 @@ class StepClass(ABC):
         ind_children = IndependentStepClass.list_all_children()
         fin_children = FinalizingStepClass.list_all_children()
 
+        StepClass.clear_instances()
+
         seq_children_names = [cls.__name__ for cls in seq_children]
         ind_children_names = [cls.__name__ for cls in ind_children]
         fin_children_names = [cls.__name__ for cls in fin_children]
@@ -145,6 +148,8 @@ class StepClass(ABC):
             else:
                 raise ValueError(f'{step} is not a valid step class')
 
+        return IndependentStepClass, SequentialStepsClass, FinalizingStepClass
+    
     @classmethod
     def list_all_children(cls):
         children = []
@@ -164,11 +169,13 @@ class StepClass(ABC):
         pass
 
     @handle_errors
-    def run(self, p: int = None, t:int = None):
-        kwargs = self.load_in_parameters(p, t)
+    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameters = Parameters() if parameters is None else parameters
+        kwargs = self.load_in_parameters(p, t, parameters)
         results = self.main(**kwargs) 
-        DataContainer().save_results(results, p, t)
-        DataContainer().load_temp_data()
+        data_container.save_results(results, p, t, parameters)
+        data_container.load_temp_data()
         return results
 
 class SequentialStepsClass(StepClass):
@@ -178,68 +185,67 @@ class SequentialStepsClass(StepClass):
     def __init__(self):
         self.is_first_run = True
 
-    def execute(self):
-        DataContainer().load_temp_data()
-        params = Parameters.get_parameters()
+    @staticmethod
+    def execute(data_container = None, parameter = None, sequentialsteps = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameter = Parameters() if parameter is None else parameter
+        sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
+        data_container.load_temp_data()
+        params = parameter.get_parameters()
+
         number_of_chunks = params['num_chunks_to_run']
         count = 0
-        if SequentialStepsClass.order == 'tp':
+        if params['order'] == 'tp':
             for t in range(params['images'].shape[1]):
                 if count >= number_of_chunks:
                     break
                 for p in range(params['images'].shape[0]):
                     if count >= number_of_chunks:
                         break
-                    for step in SequentialStepsClass._instances:
+                    for step in sequentialsteps:
                         print('++++++++++++++++++++++++++++')
                         print('Running : ', step)
                         print('++++++++++++++++++++++++++++')
-                        step.run(p, t)
+                        step.run(p, t, data_container, parameter)
                     count += 1
 
-        elif SequentialStepsClass.order == 'pt':
+        elif params['order'] == 'pt':
             for p in range(params['images'].shape[0]):
                 if count >= number_of_chunks:
                     break
                 for t in range(params['images'].shape[1]):
                     if count >= number_of_chunks:
                         break
-                    for step in SequentialStepsClass._instances:
+                    for step in sequentialsteps:
                         print('++++++++++++++++++++++++++++')
                         print('Running : ', step)
                         print('++++++++++++++++++++++++++++')
-                        step.run(p, t)
+                        step.run(p, t, data_container, parameter)
                     count += 1
 
-        elif SequentialStepsClass.order == 'parallel':
-            client = Client()
-            futures = []
-            for t in range(params['images'].shape[1]):
-                if count >= number_of_chunks:
-                    break
-                for p in range(params['images'].shape[0]):
-                    if count >= number_of_chunks:
-                        break
-                    future = client.submit(self.run, p, t)
-                    futures.append(future)
-                    count += 1
-
-            for future in as_completed(futures):
-                result = future.result()
-                DataContainer().save_results(result, p, t)
-
-            client.close()
+        elif params['order'] == 'parallel':
+            for step in sequentialsteps:
+                print('++++++++++++++++++++++++++++')
+                print('Running : ', step)
+                print('++++++++++++++++++++++++++++')
+                step.run(None, None, data_container, parameter)
         else:
             raise ValueError('Order must be either "pt" or "tp"')
 
     @handle_errors
-    def run(self, p:int = None, t:int = None):
-        DataContainer().load_temp_data()
+    def run(self, p:int = None, t:int = None, data_container = None, parameter = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameter = Parameters() if parameter is None else parameter
+        # sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
+        data_container.load_temp_data()
+
+
         if p is None and t is None:
-            params = Parameters.get_parameters()
+            params = parameter.get_parameters()
+
             number_of_chunks = params['num_chunks_to_run']
             count = 0
-            if SequentialStepsClass.order == 'tp':
+            if params['order'] == 'tp':
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', self)
                 print('++++++++++++++++++++++++++++')
@@ -253,13 +259,13 @@ class SequentialStepsClass(StepClass):
                         print(' ###################### ')
                         print('FOV' + str(p) + ' TIMEPOINT : ' + str(t))
                         print(' ###################### ')
-                        params = self.load_in_parameters(p, t)
+                        params = self.load_in_parameters(p, t, parameter)
                         output = self.main(**params)
-                        DataContainer().save_results(output, p, t)
+                        data_container.save_results(output, p, t, parameter)
                         count += 1
-                return DataContainer().load_temp_data()
+                return data_container.load_temp_data()
             
-            elif SequentialStepsClass.order == 'pt':
+            elif params['order'] == 'pt':
                 print('++++++++++++++++++++++++++++')
                 print('Running : ', self)
                 print('++++++++++++++++++++++++++++')
@@ -273,13 +279,13 @@ class SequentialStepsClass(StepClass):
                         print(' ###################### ')
                         print('FOV:' +  str(p) + ' TIMEPOINT: ' + str(t))
                         print(' ###################### ')
-                        params = self.load_in_parameters(p, t)
+                        params = self.load_in_parameters(p, t, parameter)
                         output = self.main(**params)
-                        DataContainer().save_results(output, p, t)
+                        data_container.save_results(output, p, t, parameter)
                         count += 1
-                return DataContainer().load_temp_data()
+                return data_container.load_temp_data()
 
-            elif SequentialStepsClass.order == 'parallel':
+            elif params['order'] == 'parallel':
                 client = Client()
                 futures = []
                 for t in range(params['images'].shape[1]):
@@ -288,7 +294,7 @@ class SequentialStepsClass(StepClass):
                     for p in range(params['images'].shape[0]):
                         if count >= number_of_chunks:
                             break
-                        params = self.load_in_parameters(p, t)
+                        params = self.load_in_parameters(p, t, parameter)
                         # Remove non-pickable objects from params
                         params = {k: v for k, v in params.items() if not isinstance(v, h5py.File)}
                         future = client.submit(self.p_runner, self.main, params, p, t)
@@ -297,19 +303,19 @@ class SequentialStepsClass(StepClass):
 
                 for future in as_completed(futures):
                     result = future.result()
-                    DataContainer().save_results(result[0], result[1], result[2])
+                    data_container.save_results(result[0], result[1], result[2], parameter)
 
                 client.close()
     
-            elif p is not None and t is not None:
-                print('')
-                print(' ###################### ')
-                print('FOV:' + str(p) + ' TIMEPOINT : ' + str(t))
-                print(' ###################### ')
-                params = self.load_in_parameters(p, t)
-                output = self.main(**params)
-                DataContainer().save_results(output, p, t)
-                return output
+        elif p is not None and t is not None:
+            print('')
+            print(' ###################### ')
+            print('FOV:' + str(p) + ' TIMEPOINT : ' + str(t))
+            print(' ###################### ')
+            params = self.load_in_parameters(p, t, parameter)
+            output = self.main(**params)
+            data_container.save_results(output, p, t, parameter)
+            return output
     
     @staticmethod
     def p_runner(func, params, p, t):
@@ -321,19 +327,23 @@ class SequentialStepsClass(StepClass):
 class FinalizingStepClass(StepClass):
     _instances = []
 
-    def execute(self):
-        for step in FinalizingStepClass._instances:
+    @staticmethod
+    def execute(data_container = None, parameter = None, finalizingstep = None):
+        finalizingstep = FinalizingStepClass._instances if finalizingstep is None else finalizingstep
+        for step in finalizingstep:
             print('++++++++++++++++++++++++++++')
             print('Running : ', step)
             print('++++++++++++++++++++++++++++')
-            step.run()
+            step.run(None, None, data_container, parameter)
 
 class IndependentStepClass(StepClass):
     _instances = []
 
-    def execute(self):
-        for step in IndependentStepClass._instances:
+    @staticmethod
+    def execute(data_container = None, parameter = None, independentsteps = None):
+        independentsteps = IndependentStepClass._instances if independentsteps is None else independentsteps
+        for step in independentsteps:
             print('++++++++++++++++++++++++++++')
             print('Running : ', step)
             print('++++++++++++++++++++++++++++')
-            step.run()
+            step.run(None, None, data_container, parameter)
