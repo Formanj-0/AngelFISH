@@ -28,12 +28,19 @@ class Moving_Data(FinalizingStepClass):
 class return_to_NAS(Moving_Data):
     def main(self, local_dataset_location, initial_data_location, connection_config_location, share_name, **kwargs):
 
-        for i, h5_file in enumerate(local_dataset_location):
-            log_file = os.path.splitext(os.path.basename(h5_file))[0]+'.log'
+        if isinstance(local_dataset_location, list):
+            for i, h5_file in enumerate(local_dataset_location):
+                log_file = os.path.splitext(os.path.basename(h5_file))[0]+'.log'
+                with open(log_file, 'a') as log:
+                    log.write(f'{datetime.now()}: {h5_file} -> {initial_data_location[i]}\n')
+                NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, '/Users/Jack/All_Analysis')
+                NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location[i])
+        else:
+            log_file = os.path.splitext(os.path.basename(local_dataset_location))[0]+'.log'
             with open(log_file, 'a') as log:
-                log.write(f'{datetime.now()}: {h5_file} -> {initial_data_location[i]}\n')
+                log.write(f'{datetime.now()}: {local_dataset_location} -> {initial_data_location}\n')
             NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, '/Users/Jack/All_Analysis')
-            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location[i])
+            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location)
 
 class remove_local_data(Moving_Data):
     def main(self, local_dataset_location, **kwargs):

@@ -140,6 +140,7 @@ class Pipeline:
             print(self.independent_steps)
         if locations is not None:
             self.modify_kwargs({'initial_data_location': locations})
+        self.parameters.validate()
         # method to to execute the steps in order
         self.check_requirements()
         print('Running Independent Steps')

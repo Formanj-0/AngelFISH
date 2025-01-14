@@ -207,7 +207,6 @@ class Experiment(Parameters):
                 setattr(self, key, value)
 
     def validate_parameters(self):
-        print(DataContainer().local_dataset_location)
         if self.initial_data_location is None and DataContainer().local_dataset_location is None:
             raise ValueError("initial_data_location or local_dataset_location must be set")
         
