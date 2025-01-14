@@ -8,6 +8,8 @@ from typing import Union
 from abc import ABC, abstractmethod
 import os
 from skimage.measure import find_contours
+from skimage import exposure
+import matplotlib.patches as mpatches
 
 
 class AnalysisManager:
@@ -196,208 +198,395 @@ class Analysis(ABC):
 
 
 # Analysis children
+########################################
+# Helper functions for drawing spots
+########################################
+def draw_spot_circle(ax, x, y, radius=4, color='green'):
+    """
+    Draws an unfilled circle around (x,y).
+    """
+    circle = mpatches.Circle((x, y), radius=radius, fill=False,
+                             edgecolor=color, linewidth=1.5)
+    ax.add_patch(circle)
+
+def draw_spot_arrow(ax, x, y, color='green'):
+    """
+    Draws a small arrow from (x, y) to (x+3, y).
+    """
+    ax.arrow(x, y, 3, 0, head_width=3,
+             color=color, length_includes_head=True)
+
+
+########################################
+# Main Class
+########################################
 class SpotDetection_Confirmation(Analysis):
-    def __init__(self, am, seed = None):
+    """
+    SpotDetection_Confirmation class with:
+      1) Full-FOV segmentation (nucleus & cytoplasm)
+      2) Zoom on a single cell with circles or arrows for spots
+         + percentile-based contrast
+      3) (Optional) further zoom on one spot
+      4) 2x2 figure for SNR thresholds (show kept vs. discarded)
+    """
+
+    def __init__(self, am, seed=None):
         super().__init__(am, seed)
         self.fov = None
         self.h5_idx = None
         self.cell_label = None
-    
+
     def get_data(self):
+        """
+        Loads spots, clusters, cellprops, cellspots from HDF5,
+        plus images and masks.
+        """
         h = self.am.h5_files
-        d = self.am.select_datasets('spotresults')
-        d1 = self.am.select_datasets('cellresults')
-        d2 = self.am.select_datasets('cell_properties')
-        d3 = self.am.select_datasets('clusterresults')
+        d_spot     = self.am.select_datasets('spotresults')
+        d_cellres  = self.am.select_datasets('cellresults')
+        d_props    = self.am.select_datasets('cell_properties')
+        d_cluster  = self.am.select_datasets('clusterresults')
 
         self.spots = []
         self.clusters = []
         self.cellprops = []
         self.cellspots = []
         for i, s in enumerate(h):
-            self.spots.append(pd.read_hdf(s.filename, d[i].name))
-            self.spots[i]['h5_idx'] = [i]*len(self.spots[i])
+            # Spots
+            df_spot = pd.read_hdf(s.filename, d_spot[i].name)
+            df_spot['h5_idx'] = i
+            self.spots.append(df_spot)
+
+            # Clusters
             try:
-                self.clusters.append(pd.read_hdf(s.filename, d3[i].name))
-                self.clusters[-1]['h5_idx'] = [i]*len(self.clusters[-1])
+                df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
+                df_clust['h5_idx'] = i
+                self.clusters.append(df_clust)
             except AttributeError:
-                pass
-            self.cellprops.append(pd.read_hdf(s.filename, d2[i].name))
-            self.cellprops[i]['h5_idx'] = [i]*len(self.cellprops[i])
-            self.cellspots.append(pd.read_hdf(s.filename, d1[i].name))
-            self.cellspots[i]['h5_idx'] = [i]*len(self.cellspots[i])
+                pass  # If missing cluster data
+
+            # Cellprops
+            df_prop = pd.read_hdf(s.filename, d_props[i].name)
+            df_prop['h5_idx'] = i
+            self.cellprops.append(df_prop)
+
+            # Cellspots
+            df_cellres = pd.read_hdf(s.filename, d_cellres[i].name)
+            df_cellres['h5_idx'] = i
+            self.cellspots.append(df_cellres)
 
         self.spots = pd.concat(self.spots, axis=0)
         self.clusters = pd.concat(self.clusters, axis=0)
         self.cellprops = pd.concat(self.cellprops, axis=0)
         self.cellspots = pd.concat(self.cellspots, axis=0)
+
         self.images, self.masks = self.am.get_images_and_masks()
 
     def save_data(self, location):
-        self.spots.to_csv(location, index=False)
-        self.clusters.to_csv(location, index=False)
-        self.cellprops.to_csv(location, index=False)
-        self.cellspots.to_csv(location, index=False)
+        """
+        Saves the DataFrames to CSV.
+        """
+        self.spots.to_csv(os.path.join(location, 'spots.csv'), index=False)
+        self.clusters.to_csv(os.path.join(location, 'clusters.csv'), index=False)
+        self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
+        self.cellspots.to_csv(os.path.join(location, 'cellspots.csv'), index=False)
 
-    def display(self, newFOV:bool=False, newCell:bool=False, 
-                spotChannel:int=0, cytoChannel:int=1, nucChannel:int=2):
-        
-        nucAlpha = 0.1
-        cytoAlpha = 0.2
-        headWidth = 2
-        dx = 0
-        dy = 0.5
-
+    ############################################################
+    # MAIN DISPLAY: orchestrates the steps
+    ############################################################
+    def display(self, newFOV=True, newCell=True,
+                spotChannel=0, cytoChannel=1, nucChannel=2):
+        """
+        Steps:
+         1) Full-FOV segmentation
+         2) Zoom on chosen cell (percentile-based contrast, circles/arrows)
+         3) (Optional) further zoom on a single spot
+         4) SNR threshold 2x2 figure
+        """
+        # Possibly pick a new random FOV/cell
         if self.fov is None or newFOV:
-            # select a random self.fov, then display it
             self.h5_idx = np.random.choice(self.spots['h5_idx'])
             self.fov = np.random.choice(self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'])
-        tmp_spot = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
-        tmp_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-        tmp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
-
-        tmp_nucmask = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-        tmp_cellmask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
-
         if self.cell_label is None or newCell:
-            self.cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == self.fov) &  
-                                                            (self.cellprops['h5_idx'] == self.h5_idx) & 
-                                                            (self.cellprops['cell_label'] != 0)]['cell_label']))
-        
-        fovSpots = self.spots[(self.spots['fov'] == self.fov) & 
-                    (self.spots['h5_idx'] == self.h5_idx)]
+            valid_labels = self.cellprops[
+                (self.cellprops['h5_idx'] == self.h5_idx) &
+                (self.cellprops['fov'] == self.fov) &
+                (self.cellprops['cell_label'] != 0)
+            ]['cell_label'].unique()
+            if len(valid_labels) == 0:
+                print("No valid cell_label in this FOV. Aborting.")
+                return
+            self.cell_label = np.random.choice(valid_labels)
 
-        cellSpots = fovSpots[fovSpots['cell_label'] == self.cell_label]
+        # 1) Full-FOV segmentation
+        self._display_full_fov_segmentation(cytoChannel, nucChannel)
 
-        spotRow = cellSpots.iloc[np.random.choice(np.arange(len(cellSpots)))]
+        # 2) Zoom on cell
+        self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
 
-        cell = self.cellprops[(self.cellprops['fov'] == self.fov) & 
-                            (self.cellprops['h5_idx'] == self.h5_idx) &
-                            (self.cellprops['cell_label'] == self.cell_label)]
+        # 3) (Optional) further zoom on a single spot
+        # self._display_zoom_on_one_spot(spotChannel)
 
+        # 4) SNR threshold figure
+        self._display_snr_thresholds(spotChannel)
 
-        # Plot spots
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        axs[0].axis('off')
-        axs[0].set_title('Total FOV')
-        axs[1].axis('off')
-        axs[1].set_title('Zoom in on cell')
-        axs[2].axis('off')
-        axs[2].set_title('Zoom in on spot')
+    ############################################################
+    # 1) Full-FOV segmentation (no spots)
+    ############################################################
+    def _display_full_fov_segmentation(self, cytoChannel, nucChannel):
+        """
+        Shows nucleus channel + mask (left),
+        cytoplasm channel + mask (right).
+        """
+        img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
+        mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
 
-        # display FOV and masks. 
-        # nuc mask less transparent
-        # cell mask more transparent
-        axs[0].imshow(np.max(tmp_spot, axis=0), vmin=np.min(tmp_spot), vmax=np.max(tmp_spot))
-        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=nucAlpha, cmap='jet')
-        axs[0].imshow(np.max(tmp_cellmask, axis=0), alpha=cytoAlpha, cmap='jet')
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        for ax in axs:
+            ax.axis("off")
 
-        # outline the selected cell
-        cell_mask = tmp_cellmask == self.cell_label
-        contours = find_contours(np.max(cell_mask.compute(), axis=0), 0.5)
-        for contour in contours:
-            axs[0].plot(contour[:, 1], contour[:, 0], linewidth=2, color='red')
+        # Nucleus
+        axs[0].imshow(np.max(img_nuc, axis=0), cmap='gray')
+        axs[0].imshow(np.max(mask_nuc, axis=0), cmap='jet', alpha=0.3)
+        axs[0].set_title(f"FOV={self.fov} - Nucleus segmentation")
 
-        # put red arrows on all spots in fov 
-        # put blue arrows on selected spot
-        for _, spot in fovSpots.iterrows():
-            axs[0].arrow(spot['x_px'] - dx, spot['y_px'] - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
+        # Cytoplasm
+        axs[1].imshow(np.max(img_cyto, axis=0), cmap='gray')
+        axs[1].imshow(np.max(mask_cyto, axis=0), cmap='jet', alpha=0.3)
+        axs[1].set_title(f"FOV={self.fov} - Cytoplasm segmentation")
 
-        axs[0].arrow(spotRow['x_px'] - dx, spotRow['y_px'] - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
-
-        # zoom in on the cells
-        try:
-            row_min = int(cell['cell_bbox-0'])
-            col_min = int(cell['cell_bbox-1'])
-            row_max = int(cell['cell_bbox-2'])
-            col_max = int(cell['cell_bbox-3'])
-
-            axs[1].imshow(np.max(tmp_spot, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=nucAlpha, cmap='jet')
-            axs[1].imshow(np.max(tmp_cellmask, axis=0)[row_min:row_max, col_min:col_max], alpha=cytoAlpha, cmap='jet')
-
-            # put arrows on the spots within this fov
-            for _, spot in cellSpots.iterrows():
-                if row_min <= spot['y_px'] < row_max and col_min <= spot['x_px'] < col_max:
-                    axs[1].arrow(spot['x_px'] - col_min - dx, spot['y_px'] - row_min - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
-
-            axs[1].arrow(spotRow['x_px'] - col_min - dx, spotRow['y_px'] - row_min - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
-        except:
-            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
-
-        # zoom in further on the spot
-
-        headWidth = 0.5
-        dx = 0.5
-        dy = 0.5
-
-
-        try:
-            spot_row_min = max(int(spotRow['y_px']) - 15, 0)
-            spot_row_max = min(int(spotRow['y_px']) + 15, tmp_spot.shape[1])
-            spot_col_min = max(int(spotRow['x_px']) - 15, 0)
-            spot_col_max = min(int(spotRow['x_px']) + 15, tmp_spot.shape[2])
-
-            for _, spot in cellSpots.iterrows():
-                if (spot_row_min -2 <= spot['y_px'] < spot_row_max + 2 and spot_col_min-2 <= spot['x_px'] < spot_col_max+2) and (spotRow['x_px'] != spot['x_px'] and spot['y_px'] != spotRow['y_px']):
-                    axs[2].arrow(spot['x_px'] - spot_col_min - dx, spot['y_px'] - spot_row_min - dy, dx, dy, color='red', head_width=headWidth, length_includes_head=True)
-
-            axs[2].arrow(spotRow['x_px'] - spot_col_min - dx, spotRow['y_px'] - spot_row_min - dy, dx, dy, color='blue', head_width=headWidth, length_includes_head=True)
-            axs[2].imshow(np.max(tmp_spot, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max])
-            axs[2].imshow(np.max(tmp_nucmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=nucAlpha, cmap='jet')
-            axs[2].imshow(np.max(tmp_cellmask, axis=0)[spot_row_min:spot_row_max, spot_col_min:spot_col_max], alpha=cytoAlpha, cmap='jet')
-
-        except:
-            print(f'Zoom in on spot failed for self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label}')
-
+        plt.tight_layout()
         plt.show()
 
-        # display the nucleus in channel
-        fig, axs = plt.subplots(1, 2)
+    ############################################################
+    # 2) Zoom on cell with percentile-based contrast
+    ############################################################
+    def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
+        """
+        Zoom on bounding box, compute percentile-based contrast,
+        then overlay spots with circles or arrows.
+        """
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Aborting cell zoom.")
+            return
 
-        axs[0].imshow(np.max(tmp_nuc, axis=0))
-        axs[0].imshow(np.max(tmp_nucmask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = tmp_nucmask == self.cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
 
-        try:
-            row_min = int(cell['cell_bbox-0'])
-            col_min = int(cell['cell_bbox-1'])
-            row_max = int(cell['cell_bbox-2'])
-            col_max = int(cell['cell_bbox-3'])
+        # Spot channel -> 2D
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        # If that's a Dask array, do:
+        img_spot_2d = np.max(img_spot_3d, axis=0)  # still Dask?
 
-            axs[1].imshow(np.max(tmp_nuc, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(tmp_nucmask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
-        except:
-            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
+        # slice and compute
+        crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot = crop_spot_dask.compute()  # ensure it's NumPy
 
+        # percentile-based contrast
+        if crop_spot.size > 0:
+            p1, p99 = np.percentile(crop_spot, (1, 99))
+            crop_spot_stretched = exposure.rescale_intensity(
+                crop_spot, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            crop_spot_stretched = crop_spot
+
+        # Masks -> also slice
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+        crop_nuc_dask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_nucmask = crop_nuc_dask.compute()
+
+        crop_cyto_dask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = crop_cyto_dask.compute()
+
+        # Spots in this cell
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Left: raw spot channel + mask overlay
+        axs[0].imshow(crop_spot, cmap='gray')
+        axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
+        axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
+        axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
+
+        # Right: contrast-stretched channel
+        axs[1].imshow(crop_spot_stretched, cmap='gray')
+        axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
+
+        dx, dy = col_min, row_min
+
+        # Mark spots
+        for _, spot in cell_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            # If nuclear => red, else green
+            if spot.get('is_nuc', False):
+                draw_spot_circle(axs[1], sx, sy, radius=4, color='red')
+            else:
+                draw_spot_circle(axs[1], sx, sy, radius=4, color='green')
+
+        for ax in axs:
+            ax.axis("off")
+        plt.tight_layout()
         plt.show()
 
-        # display the cyto channel
-        temp_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
-        temp_cyto_mask = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+    ############################################################
+    # 3) (Optional) Further zoom on a single spot
+    ############################################################
+    def _display_zoom_on_one_spot(self, spotChannel):
+        """
+        Randomly pick one spot from this cell, show ~15px bounding box,
+        do percentile-based contrast, ring the chosen spot in blue,
+        and any other spots in that patch in red.
+        """
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        if cell_spots.empty:
+            print("No spots in this cell. Skipping spot zoom.")
+            return
 
-        fig, axs = plt.subplots(1, 2)
+        chosen_spot = cell_spots.sample(1).iloc[0]
+        sx = int(chosen_spot['x_px'])
+        sy = int(chosen_spot['y_px'])
 
-        axs[0].imshow(np.max(temp_cyto, axis=0))
-        axs[0].imshow(np.max(temp_cyto_mask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = temp_cyto_mask == self.cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
+        pad = 15
+        x1 = max(sx - pad, 0)
+        x2 = sx + pad
+        y1 = max(sy - pad, 0)
+        y2 = sy + pad
 
-        try:
-            row_min = int(cell['cell_bbox-0'])
-            col_min = int(cell['cell_bbox-1'])
-            row_max = int(cell['cell_bbox-2'])
-            col_max = int(cell['cell_bbox-3'])
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
 
-            axs[1].imshow(np.max(temp_cyto, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(temp_cyto_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
-        except:
-            print(f'self.fov {self.fov}, h5 {self.h5_idx}, cell_label {self.cell_label} failed')
+        sub_img_dask = img_spot_2d[y1:y2, x1:x2]
+        sub_img = sub_img_dask.compute()
 
+        # Percentile
+        if sub_img.size > 0:
+            p1, p99 = np.percentile(sub_img, (1,99))
+            sub_img_stretched = exposure.rescale_intensity(
+                sub_img, in_range=(p1, p99), out_range=(0,1)
+            )
+        else:
+            sub_img_stretched = sub_img
+
+        fig, ax = plt.subplots(figsize=(5,5))
+        ax.imshow(sub_img_stretched, cmap='gray')
+        ax.set_title(f"Spot zoom (cell {self.cell_label})")
+
+        # Mark chosen spot in blue
+        draw_spot_circle(ax, pad, pad, radius=4, color='blue')
+
+        # Mark other spots in red if they are in the patch
+        for _, srow in cell_spots.iterrows():
+            rx = srow['x_px'] - x1
+            ry = srow['y_px'] - y1
+            if (rx < 0 or ry < 0 or rx >= (x2-x1) or ry >= (y2-y1)):
+                continue
+            if (srow['x_px'] == chosen_spot['x_px'] 
+                and srow['y_px'] == chosen_spot['y_px']):
+                continue
+            draw_spot_circle(ax, rx, ry, radius=3, color='red')
+
+        ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+    ############################################################
+    # 4) Single figure with 2x2 subplots for SNR thresholds
+    ############################################################
+    def _display_snr_thresholds(self, spotChannel, thresholds=[0,2,3,4]):
+        """
+        Show 2x2 figure. For each threshold T:
+          - green rings for spots with snr >= T
+          - red rings for spots with snr < T
+        Also does percentile-based contrast on the bounding box region.
+        """
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Skipping SNR thresholds.")
+            return
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot = crop_spot_dask.compute()
+
+        if crop_spot.size > 0:
+            p1, p99 = np.percentile(crop_spot, (1, 99))
+            crop_spot_stretched = exposure.rescale_intensity(
+                crop_spot, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            crop_spot_stretched = crop_spot
+
+        fig, axs = plt.subplots(2, 2, figsize=(10,10))
+        axs = axs.ravel()
+
+        # All spots in cell
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+
+        dx, dy = col_min, row_min
+
+        for i, thr in enumerate(thresholds):
+            ax = axs[i]
+            ax.imshow(crop_spot_stretched, cmap='gray')
+            ax.set_title(f"SNR >= {thr}")
+
+            cell_spots_in = cell_spots_all[cell_spots_all['snr'] >= thr]
+            cell_spots_out = cell_spots_all[cell_spots_all['snr'] < thr]
+
+            # Mark "included" in green
+            for _, spot in cell_spots_in.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax, sx, sy, radius=3, color='green')
+
+            # Mark "excluded" in red
+            for _, spot in cell_spots_out.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax, sx, sy, radius=3, color='red')
+
+            ax.axis("off")
+
+        plt.tight_layout()
         plt.show()
 
     def validate(self):
@@ -454,224 +643,365 @@ class SpotDetection_Confirmation(Analysis):
 class GR_Confirmation(Analysis):
     """
     GR_Confirmation is a class designed to confirm the accuracy of image processing results 
-    for ICC of GR (Glucocorticoid Receptor) performed by Eric Rons. This class handles two 
-    channels: one for the nucleus and one for the GR. Cell masks are generated by dilating 
-    the nuclear mask, which is initially generated by Cellpose. A illumination pattern correction
-    was applied to even out the images.
-
+    for ICC of GR (Glucocorticoid Receptor). It handles two channels (nucleus & GR), 
+    applies illumination correction, and visualizes segmentation masks.
+    
     Attributes:
     -----------
     am : object
-        An instance of the AnalysisManager class that handles the dataset and image operations.
+        The AnalysisManager instance for dataset and image operations.
     seed : int, optional
-        A seed value for random number generation to ensure reproducibility (default is None).
-    cellprops : list
-        A list to store cell properties extracted from the datasets.
-    illumination_profiles : array
-        An array to store illumination profiles for image correction.
-    images : array
-        An array to store images from the datasets.
-    masks : array
-        An array to store masks from the datasets.
+        For reproducibility, default None.
+    cellprops : pd.DataFrame
+        Per-cell properties loaded from HDF5 files.
+    illumination_profiles : dask.array or ndarray
+        Illumination profiles for correction.
+    images : array-like or dask.array
+        Image data: shape might be (fov, 1, channels, z, y, x) or similar.
+    masks : array-like or dask.array
+        Mask data: shape might be (fov, 1, channels, z, y, x) or similar.
+
     Methods:
     --------
-    __init__(self, am, seed=None):
-        Initializes the GR_Confirmation class with the given AnalysisManager instance and seed value.
-    get_data(self):
-        Retrieves and processes the necessary data from the datasets, including cell properties, 
-        illumination profiles, images, and masks.
-    save_data(self, location):
-        Saves the cell properties data to a CSV file at the specified location.
-    display(self, GR_Channel=0, Nuc_Channel=1):
-        Displays a random field of view (FOV) with the GR and nucleus channels, including 
-        illumination correction and cell mask overlays. Also displays a randomly selected cell 
-        with its bounding box and measurements.
-    validate_measurements(self, cell_mask, nuc_mask, image, label, measurements):
-        Validates the calculated measurements (area, intensity, etc.) of the cell and nucleus 
-        against the provided measurements and returns a DataFrame with the comparison results.
+    __init__(self, am, seed=None)
+    get_data(self)
+    save_data(self, location)
+    display(self, GR_Channel=0, Nuc_Channel=1)
+    validate(self, cell_mask, nuc_mask, image, label, measurements)
     """
-    def __init__(self, am, seed = None):
+    def __init__(self, am, seed=None):
         super().__init__(am, seed)
 
     def get_data(self):
+        """ Load data from the AnalysisManager. """
         h = self.am.h5_files
         d = self.am.select_datasets('cell_properties')
+
+        # Concatenate cellprops from each file, track which h5 they came from
         self.cellprops = []
         for i, s in enumerate(h):
-            self.cellprops.append(pd.read_hdf(s.filename, d[i].name))
-            self.cellprops[i]['h5_idx'] = [i]*len(self.cellprops[i])
+            df = pd.read_hdf(s.filename, d[i].name)
+            df['h5_idx'] = [i] * len(df)
+            self.cellprops.append(df)
         self.cellprops = pd.concat(self.cellprops, axis=0)
-        self.illumination_profiles = da.from_array(self.am.select_datasets('illumination_profiles'))[0, :, : ,:]
+
+        # Illumination profiles (assume shape: (n_channels, y, x))
+        self.illumination_profiles = da.from_array(
+            self.am.select_datasets('illumination_profiles')
+        )[0, :, :, :]
+
+        # Images and masks (often shape: (n_fov, 1, n_channels, [z,] y, x))
         self.images, self.masks = self.am.get_images_and_masks()
 
     def save_data(self, location):
+        """ Save cell properties to CSV. """
         self.cellprops.to_csv(location, index=False)
 
-    def display(self, GR_Channel:int = 0, Nuc_Channel:int = 1):
-        # select a random fov, then display it
+    def display(self, GR_Channel: int = 0, Nuc_Channel: int = 1):
+        """
+        Displays:
+          1) Illumination correction (raw, profile, corrected) for GR channel
+          2) Segmentation overlays 
+             - Left: raw Nuc + nuc_mask
+             - Right: raw GR + pseudo_cyto
+          3) Intensity histograms (using dask.histogram to avoid large memory usage)
+          4) (Optional) bounding box + validation for a random cell
+        """
+        # ------------------------------------------------
+        # 0. RANDOMLY SELECT A FOV
+        # ------------------------------------------------
         h5_idx = np.random.choice(self.cellprops['h5_idx'])
         fov = np.random.choice(self.cellprops[self.cellprops['h5_idx'] == h5_idx]['fov'])
-        temp_img = self.images[h5_idx][fov, 0, GR_Channel, :, :, :]
-        temp_mask = self.masks[h5_idx][fov, 0, GR_Channel, :, :, :]
 
-        fig, axs = plt.subplots(1, 3)
-        axs[0].axis('off')
-        axs[1].axis('off')
-        axs[2].axis('off')
-        axs[0].imshow(np.max(temp_img, axis=0))
+        # Extract data
+        gr_raw  = self.images[h5_idx][fov, 0, GR_Channel, ...]  # shape (z,y,x)
+        nuc_raw = self.images[h5_idx][fov, 0, Nuc_Channel, ...]
 
-        # display the illumination profile
-        axs[1].imshow(self.illumination_profiles[GR_Channel])
+        gr_mask  = self.masks[h5_idx][fov, 0, GR_Channel, ...]
+        nuc_mask = self.masks[h5_idx][fov, 0, Nuc_Channel, ...]
 
-        # use the illumination profile to correct it, then display it
+        # Pseudo-cyto = GR mask - nuc mask
+        pseudo_cyto_3d = gr_mask - nuc_mask
+
+        # Illumination for GR
+        gr_illum = self.illumination_profiles[GR_Channel]  # (y, x)
+
+        # ------------------------------------------------
+        # 1. ILLUMINATION CORRECTION
+        # ------------------------------------------------
+        fig1, axs1 = plt.subplots(1, 3, figsize=(12, 4))
+        for ax in axs1:
+            ax.axis("off")
+
+        # Make 2D for display if needed (max projection)
+        if gr_raw.ndim == 3:
+            gr_raw_2d = np.max(gr_raw, axis=0)
+        else:
+            gr_raw_2d = gr_raw
+
+        axs1[0].imshow(gr_raw_2d, cmap='gray')
+        axs1[0].set_title("GR Raw")
+
+        axs1[1].imshow(gr_illum, cmap='gray')
+        axs1[1].set_title("GR Illumination")
+
+        # Correct the image
         epsilon = 1e-6
-        temp_img /= (self.illumination_profiles[GR_Channel] + epsilon)
-        
-        axs[2].imshow(np.max(temp_img, axis=0))
+        gr_corrected = gr_raw / (gr_illum + epsilon)
+
+        if gr_corrected.ndim == 3:
+            gr_corrected_2d = np.max(gr_corrected, axis=0)
+        else:
+            gr_corrected_2d = gr_corrected
+        axs1[2].imshow(gr_corrected_2d, cmap='gray')
+        axs1[2].set_title("GR Corrected")
+
+        plt.tight_layout()
         plt.show()
 
-        # select a random cell in the fov and display it using the bonded boxs, also include measurments
-        # include a transparent mask over the random cell
-        fig, axs = plt.subplots(1, 2)
-        axs[0].axis('off')
-        axs[1].axis('off')
-        
-        cell_label = np.random.choice(np.unique(self.cellprops[(self.cellprops['fov'] == fov) &  
-                                                                (self.cellprops['h5_idx'] == h5_idx)]['nuc_label']))
-        row = self.cellprops[(self.cellprops['fov'] == fov) & 
-                             (self.cellprops['nuc_label'] == cell_label) & 
-                             (self.cellprops['h5_idx'] == h5_idx)]
+        # ------------------------------------------------
+        # 2. SEGMENTATION OVERLAYS
+        # ------------------------------------------------
+        fig2, axs2 = plt.subplots(1, 2, figsize=(8, 4))
+        for ax in axs2:
+            ax.axis("off")
 
-        axs[0].imshow(np.max(temp_img, axis=0))
-        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = temp_mask == cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
-        # axs[1].set_title('Randomly selected cell with arrow')
+        # nuc raw, nuc mask
+        if nuc_raw.ndim == 3:
+            nuc_raw_2d = np.max(nuc_raw, axis=0)
+        else:
+            nuc_raw_2d = nuc_raw
+        if nuc_mask.ndim == 3:
+            nuc_mask_2d = np.max(nuc_mask, axis=0)
+        else:
+            nuc_mask_2d = nuc_mask
 
-        try:
-            row_min = int(row['cell_bbox-0'])
-            col_min = int(row['cell_bbox-1'])
-            row_max = int(row['cell_bbox-2'])
-            col_max = int(row['cell_bbox-3'])
+        axs2[0].imshow(nuc_raw_2d, cmap='gray')
+        axs2[0].imshow(nuc_mask_2d, cmap='jet', alpha=0.6)
+        axs2[0].set_title("Nuc Raw + Nuc Mask")
 
-            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
-        except:
-            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+        # gr raw, pseudo-cyto
+        if gr_raw.ndim == 3:
+            gr_raw_2d = np.max(gr_raw, axis=0)
+        else:
+            gr_raw_2d = gr_raw
+        if pseudo_cyto_3d.ndim == 3:
+            pseudo_cyto_2d = np.max(pseudo_cyto_3d, axis=0)
+        else:
+            pseudo_cyto_2d = pseudo_cyto_3d
 
+        axs2[1].imshow(gr_raw_2d, cmap='gray')
+        axs2[1].imshow(pseudo_cyto_2d, cmap='jet', alpha=0.6)
+        axs2[1].set_title("GR Raw + Pseudo-cyto")
+
+        plt.tight_layout()
         plt.show()
 
-        # Nuc Mask
-        temp_mask = self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :]
-        temp_img = self.images[h5_idx][fov, 0, Nuc_Channel, :, :, :]
+        # ------------------------------------------------
+        # 3. INTENSITY HISTOGRAMS (use Dask's da.histogram)
+        # ------------------------------------------------
+        fig3, axs3 = plt.subplots(1, 2, figsize=(8, 4))
 
-        fig, axs = plt.subplots(1, 2)
-        axs[0].axis('off')
-        axs[1].axis('off')
+        #
+        # 3a. GR Raw histogram
+        #
+        # If gr_raw is a NumPy array, wrap it in dask; if it's already dask, keep as is
+        if not isinstance(gr_raw, da.Array):
+            gr_raw_da = da.from_array(gr_raw)
+        else:
+            gr_raw_da = gr_raw
 
-        axs[0].imshow(np.max(temp_img, axis=0))
-        axs[0].imshow(np.max(temp_mask, axis=0), alpha=0.4, cmap='jet')
-        cell_mask = temp_mask == cell_label
-        cell_center = np.array(np.nonzero(np.max(cell_mask, axis=0))).mean(axis=1)
-        axs[0].arrow(cell_center[1], cell_center[0], 0, 0, color='red', head_width=10)
-        # axs[1].set_title('Randomly selected cell with arrow')
+        # Compute min/max to define histogram range
+        raw_min, raw_max = gr_raw_da.min(), gr_raw_da.max()
+        if hasattr(raw_min, "compute"):
+            raw_min = raw_min.compute()
+        if hasattr(raw_max, "compute"):
+            raw_max = raw_max.compute()
 
-        try:
-            row_min = int(row['cell_bbox-0'])
-            col_min = int(row['cell_bbox-1'])
-            row_max = int(row['cell_bbox-2'])
-            col_max = int(row['cell_bbox-3'])
+        hist_raw, bins_raw = da.histogram(gr_raw_da, bins=100, range=(raw_min, raw_max))
 
-            axs[1].imshow(np.max(temp_img, axis=0)[row_min:row_max, col_min:col_max])
-            axs[1].imshow(np.max(temp_mask, axis=0)[row_min:row_max, col_min:col_max], alpha=0.25, cmap='jet')
-        except:
-            print(f'fov {fov}, h5 {h5_idx}, nuc_label {cell_label} failed')
+        # Conditionally compute
+        if hasattr(hist_raw, "compute"):
+            hist_raw = hist_raw.compute()
+        if hasattr(bins_raw, "compute"):
+            bins_raw = bins_raw.compute()
 
+        # Now they're NumPy arrays
+        width_raw = bins_raw[1:] - bins_raw[:-1]
+        axs3[0].bar(bins_raw[:-1], hist_raw, width=width_raw, color='orange', alpha=0.7)
+        axs3[0].set_title("GR Raw Histogram")
+
+        #
+        # 3b. GR Corrected histogram
+        #
+        if not isinstance(gr_corrected, da.Array):
+            gr_corrected_da = da.from_array(gr_corrected)
+        else:
+            gr_corrected_da = gr_corrected
+
+        corr_min, corr_max = gr_corrected_da.min(), gr_corrected_da.max()
+        if hasattr(corr_min, "compute"):
+            corr_min = corr_min.compute()
+        if hasattr(corr_max, "compute"):
+            corr_max = corr_max.compute()
+
+        hist_corr, bins_corr = da.histogram(gr_corrected_da, bins=100, range=(corr_min, corr_max))
+
+        if hasattr(hist_corr, "compute"):
+            hist_corr = hist_corr.compute()
+        if hasattr(bins_corr, "compute"):
+            bins_corr = bins_corr.compute()
+
+        width_corr = bins_corr[1:] - bins_corr[:-1]
+        axs3[1].bar(bins_corr[:-1], hist_corr, width=width_corr, color='green', alpha=0.7)
+        axs3[1].set_title("GR Corrected Histogram")
+
+        plt.tight_layout()
         plt.show()
 
+        # ------------------------------------------------
+        # 4. RANDOM CELL & VALIDATE
+        # ------------------------------------------------
+        possible_labels = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov)
+        ]['nuc_label'].unique()
 
-        print(
-            self.validate(np.max(self.masks[h5_idx][fov, 0, GR_Channel, :, :, :], axis=0), 
-                                       np.max(self.masks[h5_idx][fov, 0, Nuc_Channel, :, :, :], axis=0), 
-                                       np.max(self.images[h5_idx][fov, 0, GR_Channel, :, :, :].compute()*correction_profiles[np.newaxis, :, :], axis=0), 
-                                       cell_label, row)
-              )
+        if len(possible_labels) > 0:
+            cell_label = np.random.choice(possible_labels)
+            row = self.cellprops[
+                (self.cellprops['h5_idx'] == h5_idx) &
+                (self.cellprops['fov'] == fov) &
+                (self.cellprops['nuc_label'] == cell_label)
+            ]
+
+            # Attempt to read bounding box
+            try:
+                row_min = int(row['cell_bbox-0'])
+                col_min = int(row['cell_bbox-1'])
+                row_max = int(row['cell_bbox-2'])
+                col_max = int(row['cell_bbox-3'])
+            except:
+                print(f"Bounding box info missing for cell_label={cell_label}")
+                row_min, col_min, row_max, col_max = 0, 0, 0, 0
+
+            fig4, axs4 = plt.subplots(1, 2, figsize=(8, 4))
+            for ax in axs4:
+                ax.axis('off')
+
+            # Convert corrected GR to 2D if needed
+            if gr_corrected.ndim == 3:
+                gr_corrected_2d = np.max(gr_corrected, axis=0)
+            else:
+                gr_corrected_2d = gr_corrected
+
+            # Convert GR mask to boolean for chosen label
+            if gr_mask.ndim == 3:
+                gr_mask_3d = (gr_mask == cell_label)
+                gr_mask_2d = np.max(gr_mask_3d, axis=0)
+            else:
+                gr_mask_2d = (gr_mask == cell_label)
+
+            # Full FOV
+            if isinstance(gr_corrected_2d, da.Array):
+                gr_corrected_2d = gr_corrected_2d.compute()
+            axs4[0].imshow(gr_corrected_2d, cmap='gray')
+            axs4[0].imshow(gr_mask_2d, cmap='jet', alpha=0.7)
+            axs4[0].set_title("Random Cell Overlay")
+
+            # Zoomed bounding box
+            if (row_min < row_max) and (col_min < col_max):
+                crop_img  = gr_corrected_2d[row_min:row_max, col_min:col_max]
+                crop_mask = gr_mask_2d[row_min:row_max, col_min:col_max]
+
+                axs4[1].imshow(crop_img, cmap='gray')
+                axs4[1].imshow(crop_mask, cmap='jet', alpha=0.7)
+            axs4[1].set_title("Cell Bounding Box")
+
+            plt.tight_layout()
+            plt.show()
+
+            # Validation
+            try:
+                if nuc_mask.ndim == 3:
+                    nuc_mask_3d = (nuc_mask == cell_label)
+                    nuc_mask_2d = np.max(nuc_mask_3d, axis=0)
+                else:
+                    nuc_mask_2d = (nuc_mask == cell_label)
+
+                print(
+                    self.validate(
+                        gr_mask_2d, 
+                        nuc_mask_2d, 
+                        gr_corrected_2d, 
+                        cell_label, 
+                        row
+                    )
+                )
+            except Exception as e:
+                print(f"Validate failed for cell_label={cell_label}: {e}")
+        else:
+            print("No valid labels found in this FOV.")
 
     def validate(self, cell_mask, nuc_mask, image, label, measurements):
-        # calculate cell area
-        cell_area = np.sum(cell_mask == label).compute()
-        nuc_area = np.sum(nuc_mask == label).compute()
+        """
+        Validates the calculated measurements (area, intensity, etc.) of the cell 
+        and nucleus against the provided measurements, returning a DataFrame.
+        """
+        # If these arrays are still dask, compute them:
+        if isinstance(cell_mask, da.Array):
+            cell_mask = cell_mask.compute()
+        if isinstance(nuc_mask, da.Array):
+            nuc_mask = nuc_mask.compute()
+        if isinstance(image, da.Array):
+            image = image.compute()
 
-        # calculate average intensity
-        cell_avgInt = np.mean(image[cell_mask == label]).compute()
-        nuc_avgInt = np.mean(image[nuc_mask == label]).compute()
+        cell_area = np.sum(cell_mask)
+        nuc_area  = np.sum(nuc_mask)
 
-        # calculate std intensity
-        cell_stdInt = np.std(image[cell_mask == label]).compute()
-        nuc_stdInt = np.std(image[nuc_mask == label]).compute()
+        cell_pixels = image[cell_mask]
+        nuc_pixels  = image[nuc_mask]
 
-        # calculate max intensity
-        cell_maxInt = np.max(image[cell_mask == label]).compute()
-        nuc_maxInt = np.max(image[nuc_mask == label]).compute()
+        cell_avgInt = np.mean(cell_pixels)
+        nuc_avgInt  = np.mean(nuc_pixels)
+        cell_stdInt = np.std(cell_pixels)
+        nuc_stdInt  = np.std(nuc_pixels)
+        cell_maxInt = np.max(cell_pixels)
+        nuc_maxInt  = np.max(nuc_pixels)
+        cell_minInt = np.min(cell_pixels)
+        nuc_minInt  = np.min(nuc_pixels)
 
-        # calculate min intensity
-        cell_minInt = np.min(image[cell_mask == label]).compute()
-        nuc_minInt = np.min(image[nuc_mask == label]).compute()
+        # Helper to fetch measurement from `row`
+        def get_float(key):
+            return float(measurements.get(key, np.nan))
 
-        # compare
-        r = []
-        r.append(
-            ['cell_area', cell_area, float(measurements['cell_area']), np.isclose(cell_area, float(measurements['cell_area']))]
-        )
+        def close_enough(a, b):
+            return np.isclose(a, b, atol=1e-3)
 
-        r.append(
-            ['nuc_area', nuc_area, float(measurements['nuc_area']), np.isclose(nuc_area, float(measurements['nuc_area']))]
-        )
+        cyto_area = cell_area - nuc_area
 
-        r.append(
-            ['cyto_area', cyto_area := cell_area - nuc_area, float(measurements['cyto_area']), np.isclose(cyto_area, float(measurements['cyto_area']))]
-        )
+        rows = [
+            ['cell_area',     cell_area,     get_float('cell_area'),               close_enough(cell_area, get_float('cell_area'))],
+            ['nuc_area',      nuc_area,      get_float('nuc_area'),                close_enough(nuc_area,  get_float('nuc_area'))],
+            ['cyto_area',     cyto_area,     get_float('cyto_area'),               close_enough(cyto_area, get_float('cyto_area'))],
 
-        r.append(
-            ['cell_avgInt', cell_avgInt, float(measurements['cell_intensity_mean-0']), np.isclose(cell_avgInt, float(measurements['cell_intensity_mean-0']))]
-        )
+            ['cell_avgInt',   cell_avgInt,   get_float('cell_intensity_mean-0'),   close_enough(cell_avgInt, get_float('cell_intensity_mean-0'))],
+            ['nuc_avgInt',    nuc_avgInt,    get_float('nuc_intensity_mean-0'),    close_enough(nuc_avgInt,  get_float('nuc_intensity_mean-0'))],
 
-        r.append(
-            ['nuc_avgInt', nuc_avgInt, float(measurements['nuc_intensity_mean-0']), np.isclose(nuc_avgInt, float(measurements['nuc_intensity_mean-0']))]
-        )
+            ['cell_stdInt',   cell_stdInt,   get_float('cell_intensity_std-0'),    close_enough(cell_stdInt, get_float('cell_intensity_std-0'))],
+            ['nuc_stdInt',    nuc_stdInt,    get_float('nuc_intensity_std-0'),     close_enough(nuc_stdInt,  get_float('nuc_intensity_std-0'))],
 
-        r.append(
-            ['cell_stdInt', cell_stdInt, float(measurements['cell_intensity_std-0']), np.isclose(cell_stdInt, float(measurements['cell_intensity_std-0']))]
-        )
+            ['cell_maxInt',   cell_maxInt,   get_float('cell_intensity_max-0'),    close_enough(cell_maxInt, get_float('cell_intensity_max-0'))],
+            ['nuc_maxInt',    nuc_maxInt,    get_float('nuc_intensity_max-0'),     close_enough(nuc_maxInt,  get_float('nuc_intensity_max-0'))],
 
-        r.append(
-            ['nuc_stdInt', nuc_stdInt, float(measurements['nuc_intensity_std-0']), np.isclose(nuc_stdInt, float(measurements['nuc_intensity_std-0']))]
-        )
+            ['cell_minInt',   cell_minInt,   get_float('cell_intensity_min-0'),    close_enough(cell_minInt, get_float('cell_intensity_min-0'))],
+            ['nuc_minInt',    nuc_minInt,    get_float('nuc_intensity_min-0'),     close_enough(nuc_minInt,  get_float('nuc_intensity_min-0'))],
+        ]
 
-        r.append(
-            ['cell_maxInt', cell_maxInt, float(measurements['cell_intensity_max-0']), np.isclose(cell_maxInt, float(measurements['cell_intensity_max-0']))]
-        )
-
-        r.append(
-            ['nuc_maxInt', nuc_maxInt, float(measurements['nuc_intensity_max-0']), np.isclose(nuc_maxInt, float(measurements['nuc_intensity_max-0']))]
-        )
-
-        r.append(
-            ['cell_minInt', cell_minInt, float(measurements['cell_intensity_min-0']), np.isclose(cell_minInt, float(measurements['cell_intensity_min-0']))]
-        )
-
-        r.append(
-            ['nuc_minInt', nuc_minInt, float(measurements['nuc_intensity_min-0']), np.isclose(nuc_minInt, float(measurements['nuc_intensity_min-0']))]
-        )
-
-        results = pd.DataFrame(r, columns=['measurement', 'numpy calculated', 'step calculated', 'are close?'])
-        return results
-
-
-
-
-
+        return pd.DataFrame(
+            rows,
+            columns=['measurement', 'numpy calculated', 'step calculated', 'are close?']
+        )        
 
 if __name__ == '__main__':
     ana = AnalysisManager(r'\\munsky-nas.engr.colostate.edu\share\smFISH_images\Eric_smFISH_images\20220225\DUSP1_Dex_0min_20220224\DUSP1_Dex_0min_20220224.h5')
