@@ -1,12 +1,13 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1                # Request 1 GPU
 #SBATCH --exclude=gpu1              # Exclude node gpu1
-#SBATCH --partition=all              # Use the GPU partition
-#SBATCH --job-name=Image_Processing          # Job name
+#SBATCH --partition=all             # Use the GPU partition
+#SBATCH --job-name=Image_Processing # Job name
 #SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --output=job_output_%j.log     # Redirect output to a file with job ID
-#SBATCH --error=job_error_%j.log       # Redirect errors to a file with job ID
+#SBATCH --output=job_output_%j.log  # Redirect output to a file with job ID
+#SBATCH --error=job_error_%j.log    # Redirect errors to a file with job ID
 #SBATCH --no-requeue
+#SBATCH --exclusive                 # Limit to one job per node
 
 # module purge
 module load gnu9/9.4.0
