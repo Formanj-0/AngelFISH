@@ -30,6 +30,7 @@ import logging
 import numba
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 logging.getLogger('matplotlib.font_manager').disabled = True
 numba_logger = logging.getLogger('numba')
 numba_logger.setLevel(logging.WARNING)
@@ -56,6 +57,9 @@ connection_config_location = str(os.path.join(repo_path, 'config_nas.yml'))
 
 pipeline_dict['params']['display_plots'] = False
 pipeline_dict['params']['connection_config_location'] = connection_config_location
+
+if 'illumination_profiles' in pipeline_dict['params']:
+    pipeline_dict['params']['illumination_profiles']  = np.array(pipeline_dict['params']['illumination_profiles'])
 
     
 steps = pipeline_dict['steps']
