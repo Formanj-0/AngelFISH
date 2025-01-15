@@ -210,19 +210,19 @@ class Analysis(ABC):
 ########################################
 # Helper functions for drawing spots
 ########################################
-def draw_spot_circle(ax, x, y, radius=4, color='green'):
+def draw_spot_circle(ax, x, y, radius=4, color='gold'):
     """
     Draws an unfilled circle around (x,y).
     """
     circle = mpatches.Circle((x, y), radius=radius, fill=False,
-                             edgecolor=color, linewidth=1.5)
+                             edgecolor=color, linewidth=2)
     ax.add_patch(circle)
 
-def draw_spot_arrow(ax, x, y, color='green'):
+def draw_spot_arrow(ax, x, y, color='gold'):
     """
     Draws a small arrow from (x, y) to (x+3, y).
     """
-    ax.arrow(x, y, 3, 0, head_width=3,
+    ax.arrow(x-4, y, 3, 0, head_width=3,
              color=color, length_includes_head=True)
 
 
@@ -303,14 +303,13 @@ class SpotDetection_Confirmation(Analysis):
     ############################################################
     # MAIN DISPLAY: orchestrates the steps
     ############################################################
-    def display(self, newFOV=True, newCell=True,
-                spotChannel=0, cytoChannel=1, nucChannel=2):
+    def display(self, newFOV=True, newCell=True, spotChannel=0, cytoChannel=1, nucChannel=2):
         """
         Steps:
-         1) Full-FOV segmentation
-         2) Zoom on chosen cell (percentile-based contrast, circles/arrows)
-         3) (Optional) further zoom on a single spot
-         4) SNR threshold 2x2 figure
+        1) Full-FOV segmentation
+        2) Zoom on chosen cell (percentile-based contrast, circles/arrows)
+        3) Further zoom on a single spot
+        4) SNR threshold 2x2 figure
         """
         # Possibly pick a new random FOV/cell
         if self.fov is None or newFOV:
@@ -331,13 +330,14 @@ class SpotDetection_Confirmation(Analysis):
         self._display_full_fov_segmentation(cytoChannel, nucChannel)
 
         # 2) Zoom on cell
-        self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
+        chosen_spot = self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
 
-        # 3) (Optional) further zoom on a single spot
-        # self._display_zoom_on_one_spot(spotChannel)
+        # 3) Further zoom on a single spot
+        if chosen_spot is not None:
+            self._display_zoom_on_one_spot(spotChannel, chosen_spot)
 
         # 4) SNR threshold figure
-        self._display_snr_thresholds(spotChannel)
+        self._display_snr_thresholds(spotChannel, cytoChannel, nucChannel)
 
     ############################################################
     # 1) Full-FOV segmentation (no spots)
@@ -376,7 +376,7 @@ class SpotDetection_Confirmation(Analysis):
     def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
         """
         Zoom on bounding box, compute percentile-based contrast,
-        then overlay spots with circles or arrows.
+        then overlay spots with circles or arrows. Highlights the chosen spot.
         """
         cdf = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
@@ -385,7 +385,7 @@ class SpotDetection_Confirmation(Analysis):
         ]
         if cdf.empty:
             print("Cell not found. Aborting cell zoom.")
-            return
+            return None
 
         row_min = int(cdf['cell_bbox-0'].iloc[0])
         col_min = int(cdf['cell_bbox-1'].iloc[0])
@@ -394,14 +394,13 @@ class SpotDetection_Confirmation(Analysis):
 
         # Spot channel -> 2D
         img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
-        # If that's a Dask array, do:
-        img_spot_2d = np.max(img_spot_3d, axis=0)  # still Dask?
+        img_spot_2d = np.max(img_spot_3d, axis=0)
 
-        # slice and compute
+        # Slice and compute
         crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
-        crop_spot = crop_spot_dask.compute()  # ensure it's NumPy
+        crop_spot = crop_spot_dask.compute()
 
-        # percentile-based contrast
+        # Percentile-based contrast
         if crop_spot.size > 0:
             p1, p99 = np.percentile(crop_spot, (1, 99))
             crop_spot_stretched = exposure.rescale_intensity(
@@ -428,17 +427,24 @@ class SpotDetection_Confirmation(Analysis):
             (self.spots['fov'] == self.fov) &
             (self.spots['cell_label'] == self.cell_label)
         ]
+        if cell_spots.empty:
+            print("No spots found in the cell.")
+            return None
+
+        chosen_spot = cell_spots.sample(1).iloc[0]  # Randomly choose one spot
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
         # Left: raw spot channel + mask overlay
-        axs[0].imshow(crop_spot, cmap='gray')
+        axs[0].imshow(crop_spot_stretched, cmap='gray')
         axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
         axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
         axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
 
         # Right: contrast-stretched channel
         axs[1].imshow(crop_spot_stretched, cmap='gray')
+        axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+        axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
         axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
 
         dx, dy = col_min, row_min
@@ -447,36 +453,23 @@ class SpotDetection_Confirmation(Analysis):
         for _, spot in cell_spots.iterrows():
             sx = spot['x_px'] - dx
             sy = spot['y_px'] - dy
-            # If nuclear => red, else green
-            if spot.get('is_nuc', False):
-                draw_spot_circle(axs[1], sx, sy, radius=4, color='red')
-            else:
-                draw_spot_circle(axs[1], sx, sy, radius=4, color='green')
+            color = 'blue' if (spot['x_px'] == chosen_spot['x_px'] and spot['y_px'] == chosen_spot['y_px']) else 'gold'
+            draw_spot_circle(axs[1], sx, sy, radius=4, color=color)
 
         for ax in axs:
             ax.axis("off")
         plt.tight_layout()
         plt.show()
 
-    ############################################################
-    # 3) (Optional) Further zoom on a single spot
-    ############################################################
-    def _display_zoom_on_one_spot(self, spotChannel):
-        """
-        Randomly pick one spot from this cell, show ~15px bounding box,
-        do percentile-based contrast, ring the chosen spot in blue,
-        and any other spots in that patch in red.
-        """
-        cell_spots = self.spots[
-            (self.spots['h5_idx'] == self.h5_idx) &
-            (self.spots['fov'] == self.fov) &
-            (self.spots['cell_label'] == self.cell_label)
-        ]
-        if cell_spots.empty:
-            print("No spots in this cell. Skipping spot zoom.")
-            return
+        return chosen_spot
 
-        chosen_spot = cell_spots.sample(1).iloc[0]
+    ############################################################
+    # 3) Further zoom on a single spot
+    ############################################################
+    def _display_zoom_on_one_spot(self, spotChannel, chosen_spot):
+        """
+        Further zoom on a single spot. Highlights the chosen spot and others in the patch.
+        """
         sx = int(chosen_spot['x_px'])
         sy = int(chosen_spot['y_px'])
 
@@ -494,14 +487,14 @@ class SpotDetection_Confirmation(Analysis):
 
         # Percentile
         if sub_img.size > 0:
-            p1, p99 = np.percentile(sub_img, (1,99))
+            p1, p99 = np.percentile(sub_img, (1, 99))
             sub_img_stretched = exposure.rescale_intensity(
-                sub_img, in_range=(p1, p99), out_range=(0,1)
+                sub_img, in_range=(p1, p99), out_range=(0, 1)
             )
         else:
             sub_img_stretched = sub_img
 
-        fig, ax = plt.subplots(figsize=(5,5))
+        fig, ax = plt.subplots(figsize=(5, 5))
         ax.imshow(sub_img_stretched, cmap='gray')
         ax.set_title(f"Spot zoom (cell {self.cell_label})")
 
@@ -509,27 +502,32 @@ class SpotDetection_Confirmation(Analysis):
         draw_spot_circle(ax, pad, pad, radius=4, color='blue')
 
         # Mark other spots in red if they are in the patch
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
         for _, srow in cell_spots.iterrows():
             rx = srow['x_px'] - x1
             ry = srow['y_px'] - y1
-            if (rx < 0 or ry < 0 or rx >= (x2-x1) or ry >= (y2-y1)):
+            if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
                 continue
-            if (srow['x_px'] == chosen_spot['x_px'] 
-                and srow['y_px'] == chosen_spot['y_px']):
+            if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
                 continue
-            draw_spot_circle(ax, rx, ry, radius=3, color='red')
+            draw_spot_circle(ax, rx, ry, radius=3, color='gold')
 
         ax.axis("off")
         plt.tight_layout()
         plt.show()
 
+
     ############################################################
     # 4) Single figure with 2x2 subplots for SNR thresholds
     ############################################################
-    def _display_snr_thresholds(self, spotChannel, thresholds=[0,2,3,4]):
+    def _display_snr_thresholds(self, spotChannel, cytoChannel, nucChannel, thresholds=[0,2,3,4]):
         """
         Show 2x2 figure. For each threshold T:
-          - green rings for spots with snr >= T
+          - gold rings for spots with snr >= T
           - red rings for spots with snr < T
         Also does percentile-based contrast on the bounding box region.
         """
@@ -561,7 +559,19 @@ class SpotDetection_Confirmation(Analysis):
         else:
             crop_spot_stretched = crop_spot
 
-        fig, axs = plt.subplots(2, 2, figsize=(10,10))
+        # Masks -> also slice
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+        crop_nuc_dask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_nucmask = crop_nuc_dask.compute()
+
+        crop_cyto_dask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = crop_cyto_dask.compute()    
+
+        fig, axs = plt.subplots(2, 2, figsize=(12,12))
         axs = axs.ravel()
 
         # All spots in cell
@@ -576,22 +586,25 @@ class SpotDetection_Confirmation(Analysis):
         for i, thr in enumerate(thresholds):
             ax = axs[i]
             ax.imshow(crop_spot_stretched, cmap='gray')
+            ax.imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+            ax.imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+            ax.imshow
             ax.set_title(f"SNR >= {thr}")
 
             cell_spots_in = cell_spots_all[cell_spots_all['snr'] >= thr]
             cell_spots_out = cell_spots_all[cell_spots_all['snr'] < thr]
 
-            # Mark "included" in green
+            # Mark "included" in gold
             for _, spot in cell_spots_in.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
-                draw_spot_circle(ax, sx, sy, radius=3, color='green')
+                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
 
             # Mark "excluded" in red
             for _, spot in cell_spots_out.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
-                draw_spot_circle(ax, sx, sy, radius=3, color='red')
+                draw_spot_circle(ax, sx, sy, radius=4, color='red')
 
             ax.axis("off")
 
@@ -665,6 +678,8 @@ class GR_Confirmation(Analysis):
         Per-cell properties loaded from HDF5 files.
     illumination_profiles : dask.array or ndarray
         Illumination profiles for correction.
+    corrected_IL_profile: dask.array or ndarray
+        Corrected illumination profile.    
     images : array-like or dask.array
         Image data: shape might be (fov, 1, channels, z, y, x) or similar.
     masks : array-like or dask.array
@@ -709,7 +724,7 @@ class GR_Confirmation(Analysis):
     def display(self, GR_Channel: int = 0, Nuc_Channel: int = 1):
         """
         Displays:
-          1) Illumination correction (raw, profile, corrected) for GR channel
+          1) Illumination correction (raw, profile, corrected, corrected profile) for GR channel
           2) Segmentation overlays 
              - Left: raw Nuc + nuc_mask
              - Right: raw GR + pseudo_cyto
@@ -734,11 +749,12 @@ class GR_Confirmation(Analysis):
 
         # Illumination for GR
         gr_illum = self.illumination_profiles[GR_Channel]  # (y, x)
+        gr_corrected = self.corrected_IL_profile[GR_Channel]  # (y, x)
 
         # ------------------------------------------------
         # 1. ILLUMINATION CORRECTION
         # ------------------------------------------------
-        fig1, axs1 = plt.subplots(1, 3, figsize=(12, 4))
+        fig1, axs1 = plt.subplots(1, 4, figsize=(12, 4))
         for ax in axs1:
             ax.axis("off")
 
@@ -753,6 +769,7 @@ class GR_Confirmation(Analysis):
 
         axs1[1].imshow(gr_illum, cmap='gray')
         axs1[1].set_title("GR Illumination")
+        axs1[1].contour(self.illumination_profiles[GR_Channel], levels=10, colors='white', linewidths=0.5)
 
         # Correct the image
         epsilon = 1e-6
@@ -764,6 +781,10 @@ class GR_Confirmation(Analysis):
             gr_corrected_2d = gr_corrected
         axs1[2].imshow(gr_corrected_2d, cmap='gray')
         axs1[2].set_title("GR Corrected")
+
+        axs1[3].imshow(self.corrected_IL_profile[GR_Channel], cmap='gray')
+        axs1[3].set_title("Corrected Profile")
+        axs1[3].contour(self.corrected_IL_profile[GR_Channel], levels=10, colors='white', linewidths=0.5)
 
         plt.tight_layout()
         plt.show()
@@ -915,7 +936,7 @@ class GR_Confirmation(Analysis):
             if isinstance(gr_corrected_2d, da.Array):
                 gr_corrected_2d = gr_corrected_2d.compute()
             axs4[0].imshow(gr_corrected_2d, cmap='gray')
-            axs4[0].imshow(gr_mask_2d, cmap='jet', alpha=0.7)
+            axs4[0].imshow(gr_mask_2d, cmap='jet', alpha=0.6)
             axs4[0].set_title("Random Cell Overlay")
 
             # Zoomed bounding box
@@ -924,7 +945,7 @@ class GR_Confirmation(Analysis):
                 crop_mask = gr_mask_2d[row_min:row_max, col_min:col_max]
 
                 axs4[1].imshow(crop_img, cmap='gray')
-                axs4[1].imshow(crop_mask, cmap='jet', alpha=0.7)
+                axs4[1].imshow(crop_mask, cmap='jet', alpha=0.6)
             axs4[1].set_title("Cell Bounding Box")
 
             plt.tight_layout()
