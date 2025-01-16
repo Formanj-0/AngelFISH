@@ -11,6 +11,9 @@ from skimage.measure import find_contours
 from skimage import exposure
 import matplotlib.patches as mpatches
 import copy
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+
 
 class AnalysisManager:
     """
@@ -205,7 +208,7 @@ class Analysis(ABC):
     def close(self):
         self.am.close()
 
-
+#%%
 # Analysis children
 ########################################
 # Helper functions for drawing spots
@@ -524,12 +527,11 @@ class SpotDetection_Confirmation(Analysis):
     ############################################################
     # 4) Single figure with 2x2 subplots for SNR thresholds
     ############################################################
-    def _display_snr_thresholds(self, spotChannel, cytoChannel, nucChannel, thresholds=[0,2,3,4]):
+    def _display_snr_thresholds(self, spotChannel, cytoChannel, nucChannel, thresholds=[0, 2, 3, 4]):
         """
-        Show 2x2 figure. For each threshold T:
-          - gold rings for spots with snr >= T
-          - red rings for spots with snr < T
-        Also does percentile-based contrast on the bounding box region.
+        Show a figure for each threshold T:
+        - Left subplot: gold circles for spots above SNR >= T, red circles for spots below, with different shades of red for new spots below the threshold.
+        - Right subplot: gold circles for detected spots with SNR >= T.
         """
         cdf = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
@@ -571,8 +573,8 @@ class SpotDetection_Confirmation(Analysis):
         crop_cyto_dask = mask_cyto_2d[row_min:row_max, col_min:col_max]
         crop_cytomask = crop_cyto_dask.compute()    
 
-        fig, axs = plt.subplots(2, 2, figsize=(12,12))
-        axs = axs.ravel()
+        fig, axs = plt.subplots(len(thresholds), 2, figsize=(12, len(thresholds) * 6))
+        dx, dy = col_min, row_min
 
         # All spots in cell
         cell_spots_all = self.spots[
@@ -581,30 +583,51 @@ class SpotDetection_Confirmation(Analysis):
             (self.spots['cell_label'] == self.cell_label)
         ]
 
-        dx, dy = col_min, row_min
+        # Define different shades of red for thresholds
+        shades_of_red = [
+            (1, 0.8, 0.8),  # Light red
+            (1, 0.6, 0.6),  # Medium-light red
+            (1, 0.4, 0.4),  # Medium red
+            (1, 0.2, 0.2)   # Dark red
+        ]
 
         for i, thr in enumerate(thresholds):
-            ax = axs[i]
+            # Left: Spots shaded red depending on SNR threshold
+            ax = axs[i, 0]
             ax.imshow(crop_spot_stretched, cmap='gray')
             ax.imshow(crop_nucmask, cmap='Blues', alpha=0.2)
             ax.imshow(crop_cytomask, cmap='Reds', alpha=0.2)
-            ax.imshow
-            ax.set_title(f"SNR >= {thr}")
+            ax.set_title(f"SNR >= {thr} (Shaded Reds and Gold)")
 
+            # Mark spots below threshold with progressively darker reds
+            for j, t in enumerate(thresholds[:i + 1]):  # Up to the current threshold
+                cell_spots_below = cell_spots_all[
+                    (cell_spots_all['snr'] < t) & (cell_spots_all['snr'] >= (thresholds[j - 1] if j > 0 else 0))
+                ]
+                shade_color = shades_of_red[j % len(shades_of_red)]
+                for _, spot in cell_spots_below.iterrows():
+                    sx = spot['x_px'] - dx
+                    sy = spot['y_px'] - dy
+                    draw_spot_circle(ax, sx, sy, radius=4, color=shade_color)
+
+            # Mark spots above threshold in gold
             cell_spots_in = cell_spots_all[cell_spots_all['snr'] >= thr]
-            cell_spots_out = cell_spots_all[cell_spots_all['snr'] < thr]
-
-            # Mark "included" in gold
             for _, spot in cell_spots_in.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
                 draw_spot_circle(ax, sx, sy, radius=4, color='gold')
 
-            # Mark "excluded" in red
-            for _, spot in cell_spots_out.iterrows():
+            ax.axis("off")
+
+            # Right: Gold circles for detected spots
+            ax = axs[i, 1]
+            ax.imshow(crop_spot_stretched, cmap='gray')
+            ax.set_title(f"SNR >= {thr} (Detected Spots)")
+
+            for _, spot in cell_spots_in.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
-                draw_spot_circle(ax, sx, sy, radius=4, color='red')
+                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
 
             ax.axis("off")
 
