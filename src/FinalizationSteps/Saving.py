@@ -135,6 +135,7 @@ class Save_Outputs(Saving):
                             if key in group:
                                 del group[key]
                             
+                            print(f'saving {key}')
                             group.create_dataset(key, data=data)
 
                             h5_file.close()
