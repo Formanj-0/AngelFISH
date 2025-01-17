@@ -148,7 +148,7 @@ class SpotDetection(SequentialStepsClass):
             ##### Update spots to include cells
             c_list = [cell_label[s[1], s[2]] for s in spots] # TODO make this work for and 3D
             n_list = [nuc_label[s[1], s[2]] for s in spots]
-            is_nuc = [(n>0 and c==0) for n,c in zip(n_list,c_list)]
+            is_nuc = [(n>0 and c>0) for n,c in zip(n_list,c_list)]
             errors = [(n>0 and c>0 and n!=c) for n,c in zip(n_list,c_list)]
             if any(errors):
                 raise ValueError('Miss matching cell labels')
