@@ -62,7 +62,16 @@ def handle_dict(d):
 
 
 class Save_Outputs(Saving):
-    def main(self, **kwargs):
+    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameters = Parameters() if parameters is None else parameters
+        kwargs = self.load_in_parameters(p, t, parameters)
+        results = self.main(data_container, **kwargs) 
+        data_container.save_results(results, p, t, parameters)
+        data_container.load_temp_data()
+        return results
+
+    def main(self, data_container, **kwargs):
         params = kwargs
 
         h5_file = params['h5_file']
@@ -75,7 +84,7 @@ class Save_Outputs(Saving):
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
 
-        data = DataContainer().load_temp_data()
+        data = data_container.load_temp_data()
 
         self.save(data, local_dataset_location, h5_file, f'Analysis_{Analysis_name}_{date}', position_indexs, independent_params)
 
@@ -117,11 +126,13 @@ class Save_Outputs(Saving):
         
         for i, location in enumerate(locations):
             for key, data in attributes.items():
-                if key not in ['_initialized', 'independent_params']:
+                if key not in ['_initialized', 'independent_params'] and not any(substring in key for substring in ['mask', 'image']):
+
                     if data is not None:
                         if isinstance(data, pd.DataFrame):
                             data = handle_df(data)
                             data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
+                            print(f'saving {key}')
                             data.to_hdf(location, f'{group_name}/{key}', mode='a', format='table', data_columns=True)
 
                         else:
@@ -142,7 +153,16 @@ class Save_Outputs(Saving):
 
 
 class Save_Parameters(Saving):
-    def main(self, **kwargs):
+    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameters = Parameters() if parameters is None else parameters
+        kwargs = self.load_in_parameters(p, t, parameters)
+        results = self.main(parameters, **kwargs) 
+        data_container.save_results(results, p, t, parameters)
+        data_container.load_temp_data()
+        return results
+    
+    def main(self, parameters, **kwargs):
         def recursively_save_dict_contents_to_group(h5file, path, dic):
             for key, item in dic.items():
                 if isinstance(item, dict):
@@ -150,12 +170,12 @@ class Save_Parameters(Saving):
                 else:
                     h5file[f"{path}/{key}"] = item
         
-        params = kwargs
+        params = parameters.todict()
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
 
-        h5_file = DataContainer().h5_file
-        Analysis_name = params['name']
-        local_dataset_location = params['local_dataset_location']
+        h5_file = kwargs['h5_file']
+        Analysis_name = kwargs['name']
+        local_dataset_location = kwargs['local_dataset_location']
 
         close_h5_files()
 
