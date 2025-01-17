@@ -633,25 +633,25 @@ class SpotDetection_Confirmation(Analysis):
 
         plt.tight_layout()
         plt.show()
-
+   
     def validate(self):
-        # check cyto, cell, and nuc labels are the same
-        if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
-            print('nuc and cell labels match')
-        else:
-            print('ERROR: nuc and cell labels dont match')
+            # check cyto, cell, and nuc labels are the same
+            if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
+                print('nuc and cell labels match')
+            else:
+                print('ERROR: nuc and cell labels dont match')
 
-        if np.all(self.cellprops['cell_label'] == self.cellprops['cyto_label']):
-            print('cyto and cell labels match')
-        else:
-            print('ERROR: cyto and cell labels dont match')
+            if np.all(self.cellprops['cell_label'] == self.cellprops['cyto_label']):
+                print('cyto and cell labels match')
+            else:
+                print('ERROR: cyto and cell labels dont match')
 
-        if np.all(self.cellprops['nuc_label'] == self.cellprops['cyto_label']):
-            print('cyto and nuc labels match')
-        else:
-            print('ERROR: cyto and nuc labels dont match')
+            if np.all(self.cellprops['nuc_label'] == self.cellprops['cyto_label']):
+                print('cyto and nuc labels match')
+            else:
+                print('ERROR: cyto and nuc labels dont match')
 
-        # confirm spots belong to the correct label TODO
+            # confirm spots belong to the correct label TODO
 
     def set_relationships(self):
         # create local keys
@@ -662,9 +662,9 @@ class SpotDetection_Confirmation(Analysis):
         # relate cellprops to cluster and spots
         for i, cell in self.cellprops.iterrows():
             matching_spots = (self.spots['cell_label'] == cell['nuc_label']) & \
-                     (self.spots['fov'] == cell['fov']) & \
-                     (self.spots['timepoint'] == cell['timepoint']) & \
-                     (self.spots['NAS_location'] == cell['NAS_location'])
+                    (self.spots['fov'] == cell['fov']) & \
+                    (self.spots['timepoint'] == cell['timepoint']) & \
+                    (self.spots['NAS_location'] == cell['NAS_location'])
             self.spots.loc[matching_spots, 'cell_key'] = cell['cell_key']
 
             matching_clusters = (self.clusters['cell_label'] == cell['nuc_label']) & \
@@ -680,10 +680,921 @@ class SpotDetection_Confirmation(Analysis):
             cell_spot_count = self.cellspots[self.cellspots['cell_key'] == cell_key]['nb_rna'].sum() # there should only be one of these 
             assert spot_count == cell_spot_count, f"Mismatch in spot count for cell_key {cell_key}: {spot_count} vs {cell_spot_count}"
 
-
-    
     def gate():
         pass
+
+
+
+########################################
+# Helper functions for drawing spots
+########################################
+def draw_spot_circle(ax, x, y, radius=4, color='gold'):
+    """
+    Draws an unfilled circle around (x,y).
+    """
+    circle = mpatches.Circle((x, y), radius=radius, fill=False,
+                             edgecolor=color, linewidth=2)
+    ax.add_patch(circle)
+
+def draw_spot_arrow(ax, x, y, color='gold'):
+    """
+    Draws a small arrow from (x, y) to (x+3, y).
+    """
+    ax.arrow(x-4, y, 3, 0, head_width=3,
+             color=color, length_includes_head=True)
+
+
+########################################
+# Main Class
+########################################
+class SpotDetection_Confirmation_ER(Analysis):
+    """
+    SpotDetection_Confirmation class that ensures the same cell and same chosen spot
+    are shown across all displays:
+
+      1) Full-FOV segmentation (nucleus & cytoplasm)
+      2) Zoom on the same cell with percentile-based contrast (circles/arrows for spots)
+      3) Further zoom on the same single spot
+      4) 2x2 figure for SNR thresholds (all referencing the same cell/spot)
+         plus printing spots before/after threshold
+      5) Histograms and scatter plots for the same cell's spots (SNR thresholds)
+      6) Further zoom on that same single spot for each threshold T
+      7) Single figure (1x3) for Weighted Approach
+      8) Further zoom on that single spot for Weighted threshold
+      9) Weighted SNR logic: discard SNR < 2, remove bottom 20% in [2,5), keep others -> keep_wsnr
+    """
+
+    def __init__(self, am, seed=None):
+        super().__init__(am, seed)
+        self.fov = None
+        self.h5_idx = None
+        self.cell_label = None
+
+        # Weighted threshold new attribute:
+        self.snr_cutoff_2_5 = None  # 20th percentile in [2,5)
+
+        # We will store the "chosen_spot" once we pick it, for re-use
+        self.chosen_spot = None
+
+    ############################################################
+    # 0) Data loading and saving
+    ############################################################
+    def get_data(self):
+        """
+        Loads spots, clusters, cellprops, cellspots from HDF5,
+        plus images and masks.
+        """
+        h = self.am.h5_files
+        d_spot     = self.am.select_datasets('spotresults')
+        d_cellres  = self.am.select_datasets('cellresults')
+        d_props    = self.am.select_datasets('cell_properties')
+        d_cluster  = self.am.select_datasets('clusterresults')
+
+        self.spots = []
+        self.clusters = []
+        self.cellprops = []
+        self.cellspots = []
+        for i, s in enumerate(h):
+            # Spots
+            df_spot = pd.read_hdf(s.filename, d_spot[i].name)
+            df_spot['h5_idx'] = i
+            self.spots.append(df_spot)
+
+            # Clusters
+            try:
+                df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
+                df_clust['h5_idx'] = i
+                self.clusters.append(df_clust)
+            except AttributeError:
+                pass  # If missing cluster data
+
+            # Cellprops
+            df_prop = pd.read_hdf(s.filename, d_props[i].name)
+            df_prop['h5_idx'] = i
+            self.cellprops.append(df_prop)
+
+            # Cellspots
+            df_cellres = pd.read_hdf(s.filename, d_cellres[i].name)
+            df_cellres['h5_idx'] = i
+            self.cellspots.append(df_cellres)
+
+        # Concatenate
+        self.spots = pd.concat(self.spots, axis=0)
+        self.clusters = pd.concat(self.clusters, axis=0)
+        self.cellprops = pd.concat(self.cellprops, axis=0)
+        self.cellspots = pd.concat(self.cellspots, axis=0)
+
+        # images, masks
+        self.images, self.masks = self.am.get_images_and_masks()
+
+    def save_data(self, location):
+        """
+        Saves the DataFrames to CSV.
+        """
+        self.spots.to_csv(os.path.join(location, 'spots.csv'), index=False)
+        self.clusters.to_csv(os.path.join(location, 'clusters.csv'), index=False)
+        self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
+        self.cellspots.to_csv(os.path.join(location, 'cellspots.csv'), index=False)
+
+
+    ############################################################
+    # Weighted SNR: snr < 2 => discard, [2,5) => remove bottom 20%, keep >=5
+    ############################################################
+    def assign_revised_weighted_threshold(self):
+        """
+        1) Find 20th percentile of SNR for spots in [2,5).
+        2) Discard if snr < 2 or below that percentile in [2,5).
+        3) Otherwise keep.
+        Returns the numeric 20th-percentile cutoff for [2,5).
+        """
+        # Identify spots in [2,5)
+        mask_2_5 = (self.spots['snr'] >= 2) & (self.spots['snr'] < 5)
+        spots_2_5 = self.spots[mask_2_5]
+
+        if not spots_2_5.empty:
+            self.snr_cutoff_2_5 = np.percentile(spots_2_5['snr'], 20)
+        else:
+            self.snr_cutoff_2_5 = 2.0  # fallback
+
+        def keep_spot(row):
+            snr = row['snr']
+            if snr < 2:
+                return False
+            elif 2 <= snr < 5:
+                return snr >= self.snr_cutoff_2_5
+            else:
+                return True  # snr >= 5 => keep
+
+        self.spots['keep_wsnr'] = self.spots.apply(keep_spot, axis=1)
+
+        return self.snr_cutoff_2_5
+
+    ############################################################
+    # 1) Full-FOV segmentation (nucleus & cytoplasm)
+    ############################################################
+    def _display_full_fov_segmentation(self, cytoChannel, nucChannel):
+        """
+        Shows nucleus channel + mask (left),
+        cytoplasm channel + mask (right).
+        """
+        img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+
+        mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        for ax in axs:
+            ax.axis("off")
+
+        # Nucleus
+        axs[0].imshow(np.max(img_nuc, axis=0), cmap='gray')
+        axs[0].imshow(np.max(mask_nuc, axis=0), cmap='jet', alpha=0.3)
+        axs[0].set_title(f"FOV={self.fov} - Nucleus segmentation")
+
+        # Cytoplasm
+        axs[1].imshow(np.max(img_cyto, axis=0), cmap='gray')
+        axs[1].imshow(np.max(mask_cyto, axis=0), cmap='jet', alpha=0.3)
+        axs[1].set_title(f"FOV={self.fov} - Cytoplasm segmentation")
+
+        plt.tight_layout()
+        plt.show()
+
+    ############################################################
+    # 2) Zoom on cell with percentile-based contrast
+    ############################################################
+    def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
+        """
+        Zoom on bounding box, compute percentile-based contrast,
+        then overlay spots with circles or arrows. 
+        We'll store the chosen_spot in self.chosen_spot so it can be used by all subsequent displays.
+        """
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Aborting cell zoom.")
+            self.chosen_spot = None
+            return None
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+        # Spot channel -> 3D -> convert to 2D by max-projection
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot = crop_spot_dask.compute() if hasattr(crop_spot_dask, "compute") else crop_spot_dask
+
+        if crop_spot.size > 0:
+            p1, p99 = np.percentile(crop_spot, (1, 99))
+            crop_spot_stretched = exposure.rescale_intensity(
+                crop_spot, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            crop_spot_stretched = crop_spot
+
+        # Masks -> also slice
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+        crop_nuc_dask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_nucmask = crop_nuc_dask.compute() if hasattr(crop_nuc_dask, "compute") else crop_nuc_dask
+
+        crop_cyto_dask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = crop_cyto_dask.compute() if hasattr(crop_cyto_dask, "compute") else crop_cyto_dask
+
+        # Spots in this cell
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        if cell_spots.empty:
+            print("No spots found in the cell.")
+            self.chosen_spot = None
+            return None
+
+        # Randomly choose one spot in this cell => store it
+        chosen_spot = cell_spots.sample(1).iloc[0]
+        self.chosen_spot = chosen_spot
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Left: raw spot channel + mask overlay
+        axs[0].imshow(crop_spot_stretched, cmap='gray')
+        axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
+        axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
+        axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
+
+        # Right: contrast-stretched channel
+        axs[1].imshow(crop_spot_stretched, cmap='gray')
+        axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+        axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+        axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
+
+        dx, dy = col_min, row_min
+
+        # Mark spots
+        for _, spot in cell_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            color = 'blue' if (spot['x_px'] == chosen_spot['x_px'] and spot['y_px'] == chosen_spot['y_px']) else 'gold'
+            draw_spot_circle(axs[1], sx, sy, radius=4, color=color)
+
+        for ax in axs:
+            ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+        return chosen_spot
+
+    ############################################################
+    # 3) Further zoom on the same single spot
+    ############################################################
+    def _display_zoom_on_one_spot(self, spotChannel):
+        """
+        Further zoom on the same chosen_spot. 
+        If chosen_spot is None, do nothing.
+        """
+        if self.chosen_spot is None:
+            print("No chosen spot available for further zoom.")
+            return
+
+        chosen_spot = self.chosen_spot
+        sx = int(chosen_spot['x_px'])
+        sy = int(chosen_spot['y_px'])
+
+        pad = 15
+        x1 = max(sx - pad, 0)
+        x2 = sx + pad
+        y1 = max(sy - pad, 0)
+        y2 = sy + pad
+
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        sub_img_dask = img_spot_2d[y1:y2, x1:x2]
+        sub_img = sub_img_dask.compute() if hasattr(sub_img_dask, "compute") else sub_img_dask
+
+        if sub_img.size > 0:
+            p1, p99 = np.percentile(sub_img, (1, 99))
+            sub_img_stretched = exposure.rescale_intensity(
+                sub_img, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            sub_img_stretched = sub_img
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(sub_img_stretched, cmap='gray')
+        ax.set_title(f"Spot zoom (cell {self.cell_label})")
+
+        # Mark chosen spot in blue
+        draw_spot_circle(ax, pad, pad, radius=4, color='blue')
+
+        # Mark other spots in gold if they are in the patch
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        for _, srow in cell_spots.iterrows():
+            rx = srow['x_px'] - x1
+            ry = srow['y_px'] - y1
+            if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
+                continue
+            # Avoid drawing the chosen spot in gold:
+            if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
+                continue
+            draw_spot_circle(ax, rx, ry, radius=3, color='gold')
+
+        ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+
+    ############################################################
+    # 4) Single figure with 2x2 subplots for SNR thresholds
+    ############################################################
+    def _display_snr_thresholds(self, spotChannel, cytoChannel, nucChannel, thresholds=[0, 2, 3, 4]):
+        """
+        Show a figure for each threshold T in 'thresholds':
+        - Left subplot: gold circles for spots above SNR >= T, 
+                        red circles for spots below T 
+        - Right subplot: only gold circles for spots with SNR >= T
+        All still referencing the same cell/fov. The chosen_spot is drawn accordingly.
+        """
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Skipping SNR thresholds.")
+            return
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+        # Max-projection
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot = crop_spot_dask.compute() if hasattr(crop_spot_dask, "compute") else crop_spot_dask
+
+        if crop_spot.size > 0:
+            p1, p99 = np.percentile(crop_spot, (1, 99))
+            crop_spot_stretched = exposure.rescale_intensity(
+                crop_spot, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            crop_spot_stretched = crop_spot
+
+        # Masks
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+        crop_nuc = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_nucmask = crop_nuc.compute() if hasattr(crop_nuc, 'compute') else crop_nuc
+        crop_cyto = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = crop_cyto.compute() if hasattr(crop_cyto, 'compute') else crop_cyto
+
+        fig, axs = plt.subplots(len(thresholds), 2, figsize=(12, len(thresholds)*6))
+        dx, dy = col_min, row_min
+
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+
+        # Different red shades
+        shades_of_red = [
+            (1, 0.8, 0.8),
+            (1, 0.6, 0.6),
+            (1, 0.4, 0.4),
+            (1, 0.2, 0.2)
+        ]
+
+        for i, thr in enumerate(thresholds):
+            # Left
+            ax = axs[i, 0]
+            ax.imshow(crop_spot_stretched, cmap='gray')
+            ax.imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+            ax.imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+            ax.set_title(f"SNR >= {thr} (Shaded Reds, Gold)")
+
+            # Spots below threshold(s)
+            for j, t in enumerate(thresholds[:i + 1]):
+                low_spots = cell_spots_all[
+                    (cell_spots_all['snr'] < t)
+                    & (cell_spots_all['snr'] >= (thresholds[j-1] if j>0 else 0))
+                ]
+                shade_color = shades_of_red[j % len(shades_of_red)]
+                for _, spot in low_spots.iterrows():
+                    sx = spot['x_px'] - dx
+                    sy = spot['y_px'] - dy
+                    draw_spot_circle(ax, sx, sy, radius=4, color=shade_color)
+
+            # Spots above threshold in gold
+            in_spots = cell_spots_all[cell_spots_all['snr'] >= thr]
+            for _, spot in in_spots.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
+            ax.axis("off")
+
+            # Right
+            ax = axs[i, 1]
+            ax.imshow(crop_spot_stretched, cmap='gray')
+            ax.set_title(f"SNR >= {thr} (Detected Spots)")
+            for _, spot in in_spots.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
+            ax.axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+    def _print_spots_before_after_threshold(self, thresholds):
+        """
+        Prints how many spots in the current cell are before/after each threshold.
+        """
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        if cell_spots_all.empty:
+            print("No spots in this cell for threshold printing.")
+            return
+
+        for thr in thresholds:
+            n_before = len(cell_spots_all)
+            n_passed = len(cell_spots_all[cell_spots_all['snr'] >= thr])
+            print(f"Threshold SNR >= {thr}: {n_passed} kept / {n_before} total spots.")
+
+    ############################################################
+    # 5) Histograms and scatter plots for SNR thresholds
+    ############################################################
+    def _display_threshold_histograms_scatter(self, thresholds):
+        """
+        For each threshold, we display histograms, and a scatter,
+        but here let's show a single histogram & scatter for all spots in cell.
+        """
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        if cell_spots_all.empty:
+            print("No spots in cell for threshold histograms/scatter.")
+            return
+
+        fig, axs = plt.subplots(len(thresholds), 2, figsize=(18, 10))
+
+        for i, thr in enumerate(thresholds):
+            # Left: SNR histogram for spots above threshold
+            cell_spots_thr = cell_spots_all[cell_spots_all['snr'] >= thr]
+            axs[i, 0].hist(cell_spots_thr['signal'], bins=50, alpha=0.7, edgecolor='black')
+            axs[i, 0].set_title(f"SNR >= {thr} Spot Intensity Histogram")
+            axs[i, 0].set_xlabel("Intensity")
+            axs[i, 0].set_ylabel("Count")
+
+            # Right: Signal vs. SNR scatter
+            axs[i, 1].scatter(cell_spots_thr['signal'], cell_spots_thr['snr'], s=8, alpha=0.6)
+            axs[i, 1].set_title(f"SNR >= {thr} Signal vs. SNR")
+            axs[i, 1].set_xlabel("Intensity")
+            axs[i, 1].set_ylabel("SNR")
+            axs[i, 1].set_xscale('log')
+            axs[i, 1].set_yscale('log')
+        plt.tight_layout()
+        plt.show()
+
+    ############################################################
+    # 6) Further zoom on the same single spot for each threshold
+    ############################################################
+    def _display_further_zoom_for_thresholds(self, spotChannel, thresholds):
+        """
+        For each threshold T, we re-zoom around the SAME chosen_spot,
+        color it gold if SNR >= T, else red.
+        """
+        if self.chosen_spot is None:
+            print("No chosen spot for threshold-based further zoom.")
+            return
+
+        chosen_spot = self.chosen_spot
+        sx = int(chosen_spot['x_px'])
+        sy = int(chosen_spot['y_px'])
+
+        pad = 15
+        x1 = max(sx - pad, 0)
+        x2 = sx + pad
+        y1 = max(sy - pad, 0)
+        y2 = sy + pad
+
+        # 3D -> 2D
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        sub_img_dask = img_spot_2d[y1:y2, x1:x2]
+        sub_img = sub_img_dask.compute() if hasattr(sub_img_dask, "compute") else sub_img_dask
+
+        # We'll do one figure per threshold
+        for thr in thresholds:
+            if sub_img.size > 0:
+                p1, p99 = np.percentile(sub_img, (1, 99))
+                sub_img_stretched = exposure.rescale_intensity(
+                    sub_img, in_range=(p1, p99), out_range=(0, 1)
+                )
+            else:
+                sub_img_stretched = sub_img
+
+            fig, ax = plt.subplots(figsize=(5, 5))
+            ax.imshow(sub_img_stretched, cmap='gray')
+            ax.set_title(f"SNR >= {thr} Zoom (same spot)")
+
+            # Color gold if SNR >= thr, else red
+            if chosen_spot['snr'] >= thr:
+                color = 'gold'
+            else:
+                color = 'red'
+            draw_spot_circle(ax, pad, pad, radius=4, color=color)
+
+            # Optionally, mark other spots in the patch if you want
+            # or skip if you only want the chosen spot
+            cell_spots = self.spots[
+                (self.spots['h5_idx'] == self.h5_idx) &
+                (self.spots['fov'] == self.fov) &
+                (self.spots['cell_label'] == self.cell_label)
+            ]
+            for _, srow in cell_spots.iterrows():
+                rx = srow['x_px'] - x1
+                ry = srow['y_px'] - y1
+                if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
+                    continue
+                if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
+                    # already drawn
+                    continue
+                # color them in gold/red based on threshold too if you wish
+                color2 = 'gold' if srow['snr'] >= thr else 'red'
+                draw_spot_circle(ax, rx, ry, radius=3, color=color2)
+
+            ax.axis("off")
+            plt.tight_layout()
+            plt.show()
+
+    ############################################################
+    # 7) Single figure (1x3) for Weighted Approach
+    ############################################################
+    def _display_weighted_threshold_figure(self, spotChannel, cytoChannel, nucChannel):
+        """
+        1x3 subplots:
+         A) cell w/ masks before weighted threshold (all gold)
+         B) cell w/ masks after weighted threshold (gold=keep_wsnr, red=discard)
+         C) cell w/out masks, only the kept in gold
+        Using the same cell from self.fov/self.cell_label.
+        """
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("No cell found for weighted threshold figure.")
+            return
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+        # Convert 3D to 2D
+        spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        spot_2d = np.max(spot_3d, axis=0)
+        crop_spot_dask = spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot = crop_spot_dask.compute() if hasattr(crop_spot_dask, 'compute') else crop_spot_dask
+
+        if crop_spot.size > 0:
+            p1, p99 = np.percentile(crop_spot, (1, 99))
+            crop_spot_stretched = exposure.rescale_intensity(
+                crop_spot, in_range=(p1, p99), out_range=(0, 1)
+            )
+        else:
+            crop_spot_stretched = crop_spot
+
+        # Nuc/Cyto
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+        crop_nuc = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_nucmask = crop_nuc.compute() if hasattr(crop_nuc, 'compute') else crop_nuc
+        crop_cyto = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = crop_cyto.compute() if hasattr(crop_cyto, 'compute') else crop_cyto
+
+        fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+        dx, dy = col_min, row_min
+
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+
+        # Subplot A) all gold (before Weighted threshold)
+        axs[0].imshow(crop_spot_stretched, cmap='gray')
+        axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+        axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+        axs[0].set_title("A) Before Weighted Threshold (all gold)")
+
+        for _, spot in cell_spots_all.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            draw_spot_circle(axs[0], sx, sy, radius=4, color='gold')
+        axs[0].axis("off")
+
+        # Subplot B) after Weighted threshold (with masks)
+        axs[1].imshow(crop_spot_stretched, cmap='gray')
+        axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+        axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+        axs[1].set_title("B) Weighted thr (gold=keep, red=discard)")
+
+        kept_spots = cell_spots_all[cell_spots_all['keep_wsnr'] == True]
+        discarded_spots = cell_spots_all[cell_spots_all['keep_wsnr'] == False]
+        for _, spot in kept_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            draw_spot_circle(axs[1], sx, sy, radius=4, color='gold')
+        for _, spot in discarded_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            draw_spot_circle(axs[1], sx, sy, radius=4, color='red')
+        axs[1].axis("off")
+
+        # Subplot C) after Weighted threshold w/out masks (just gold for kept)
+        axs[2].imshow(crop_spot_stretched, cmap='gray')
+        axs[2].set_title("C) Weighted thr, no masks (kept in gold)")
+        for _, spot in kept_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            draw_spot_circle(axs[2], sx, sy, radius=4, color='gold')
+        axs[2].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        print(f"Weighted threshold => kept: {len(kept_spots)}, discarded: {len(discarded_spots)}")
+
+    ############################################################
+    # 8) Further zoom on the same single spot after Weighted threshold
+    ############################################################
+    def _display_weighted_zoom_on_spot(self, spotChannel):
+        """
+        Zoom on the SAME chosen_spot, coloring it gold if keep_wsnr==True, else red.
+        """
+        if self.chosen_spot is None:
+            print("No chosen spot for weighted zoom.")
+            return
+
+        chosen_spot = self.chosen_spot
+        sx = int(chosen_spot['x_px'])
+        sy = int(chosen_spot['y_px'])
+        pad = 15
+        x1 = max(sx - pad, 0)
+        x2 = sx + pad
+        y1 = max(sy - pad, 0)
+        y2 = sy + pad
+
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+
+        sub_img_dask = img_spot_2d[y1:y2, x1:x2]
+        sub_img = sub_img_dask.compute() if hasattr(sub_img_dask, 'compute') else sub_img_dask
+
+        if sub_img.size > 0:
+            p1, p99 = np.percentile(sub_img, (1, 99))
+            sub_img_stretched = exposure.rescale_intensity(sub_img, in_range=(p1, p99), out_range=(0, 1))
+        else:
+            sub_img_stretched = sub_img
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(sub_img_stretched, cmap='gray')
+        ax.set_title("Weighted Zoom: gold=keep, red=discard")
+
+        # color the chosen spot based on keep_wsnr
+        if chosen_spot['keep_wsnr']:
+            color = 'gold'
+        else:
+            color = 'red'
+        draw_spot_circle(ax, pad, pad, radius=3, color=color)
+
+        # If you want to highlight other spots in patch similarly, do so:
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        for _, srow in cell_spots_all.iterrows():
+            rx = srow['x_px'] - x1
+            ry = srow['y_px'] - y1
+            if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
+                continue
+            color2 = 'gold' if srow['keep_wsnr'] else 'red'
+            # If it's the chosen spot again, we skip (already drawn)
+            if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
+                continue
+            draw_spot_circle(ax, rx, ry, radius=3, color=color2)
+
+        ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+
+    ############################################################
+    # Extra: overview 1x3 plots for entire DataFrame (not just one cell)
+    ############################################################
+    def _display_overview_plots(self):
+        """
+        1) SNR histogram (ALL spots in entire dataset)
+        2) Intensity histogram (ALL spots)
+        3) Scatter (signal vs. snr) for ALL
+        """
+        if self.spots.empty:
+            print("No spots to display in overview plots.")
+            return
+
+        fig, axs = plt.subplots(1, 3, figsize=(18,5))
+
+        # SNR histogram
+        axs[0].hist(self.spots['snr'], bins=60, alpha=0.7, edgecolor='black')
+        axs[0].set_title("SNR Histogram (All Spots)")
+        axs[0].set_xlabel("SNR")
+        axs[0].set_ylabel("Count")
+
+        # Intensity histogram
+        axs[1].hist(self.spots['signal'], bins=60, alpha=0.7, edgecolor='black')
+        axs[1].set_title("Intensity Histogram (All Spots)")
+        axs[1].set_xlabel("Intensity")
+        axs[1].set_ylabel("Count")
+        axs[1].set_yscale("log")
+
+        # Scatter: signal vs. snr
+        axs[2].scatter(self.spots['signal'], self.spots['snr'], s=10, alpha=0.6)
+        axs[2].set_title("Signal vs. SNR (All Spots)")
+        axs[2].set_xlabel("Signal")
+        axs[2].set_ylabel("SNR")
+        axs[2].set_xscale('log')
+        axs[2].set_yscale('log')
+
+        plt.tight_layout()
+        plt.show()
+
+    ############################################################
+    # MAIN DISPLAY: orchestrates the steps
+    ############################################################
+    def display(
+        self, 
+        newFOV=True, 
+        newCell=True, 
+        spotChannel=0, 
+        cytoChannel=1, 
+        nucChannel=2,
+        thresholds=[0, 2, 3, 4]
+    ):
+        """
+        Steps:
+          1) Weighted SNR threshold assigned
+          2) Possibly pick random FOV/cell (only once)
+          3) Full-FOV segmentation
+          4) Zoom on cell (pick ONE chosen_spot) -> stored in self.chosen_spot
+          5) Zoom on that same chosen_spot
+          6) 2x2 figure for SNR thresholds -> same cell
+          7) Print spots before/after threshold
+          8) Histograms & scatter for SNR thresholds -> same cell
+          9) Further zoom for each threshold T, re-using the same chosen_spot
+         10) Weighted threshold figure (1x3)
+         11) Weighted threshold further zoom on same chosen_spot
+         12) Optional overview for entire dataset
+        """
+
+        # 1) Weighted threshold logic
+        thr_val = self.assign_revised_weighted_threshold()
+        print(f"[INFO] Weighted threshold in [2,5): bottom 20% => {thr_val:.2f}")
+
+        # 2) Possibly pick new FOV/cell (once)
+        if self.fov is None or newFOV:
+            self.h5_idx = np.random.choice(self.spots['h5_idx'])
+            self.fov = np.random.choice(self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'])
+
+        if self.cell_label is None or newCell:
+            valid_labels = self.cellprops[
+                (self.cellprops['h5_idx'] == self.h5_idx) &
+                (self.cellprops['fov'] == self.fov) &
+                (self.cellprops['cell_label'] != 0)
+            ]['cell_label'].unique()
+            if len(valid_labels) == 0:
+                print(f"No valid cell_label in FOV={self.fov}. Aborting.")
+                return
+            self.cell_label = np.random.choice(valid_labels)
+
+        # 3) Full-FOV segmentation
+        self._display_full_fov_segmentation(cytoChannel, nucChannel)
+
+        # 4) Zoom on cell -> picks ONE chosen_spot
+        self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
+        if self.chosen_spot is None:
+            return  # no spot found, skip
+
+        # 5) Zoom on that same chosen_spot
+        self._display_zoom_on_one_spot(spotChannel)
+
+        # 6) 2x2 figure for SNR thresholds
+        self._display_snr_thresholds(spotChannel, cytoChannel, nucChannel, thresholds=thresholds)
+
+        # 7) Print spots before/after threshold
+        self._print_spots_before_after_threshold(thresholds)
+
+        # 8) Histograms & scatter for SNR thresholds (cell-based)
+        self._display_threshold_histograms_scatter(thresholds)
+
+        # 9) Further zoom for each threshold T -> same chosen_spot
+        self._display_further_zoom_for_thresholds(spotChannel, thresholds)
+
+        # 10) Weighted threshold figure (1x3)
+        self._display_weighted_threshold_figure(spotChannel, cytoChannel, nucChannel)
+
+        # 11) Weighted threshold further zoom
+        self._display_weighted_zoom_on_spot(spotChannel)
+
+        # 12) Optional overview for entire dataset
+        self._display_overview_plots()
+
+    ############################################################
+   
+    def validate(self):
+            # check cyto, cell, and nuc labels are the same
+            if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
+                print('nuc and cell labels match')
+            else:
+                print('ERROR: nuc and cell labels dont match')
+
+            if np.all(self.cellprops['cell_label'] == self.cellprops['cyto_label']):
+                print('cyto and cell labels match')
+            else:
+                print('ERROR: cyto and cell labels dont match')
+
+            if np.all(self.cellprops['nuc_label'] == self.cellprops['cyto_label']):
+                print('cyto and nuc labels match')
+            else:
+                print('ERROR: cyto and nuc labels dont match')
+
+            # confirm spots belong to the correct label TODO
+
+    def set_relationships(self):
+        # create local keys
+        self.spots['spot_key'] = np.arange(self.spots.shape[0])
+        self.cellprops['cell_key'] = np.arange(self.cellprops.shape[0])
+        self.clusters['cluster_key'] = np.arange(self.clusters.shape[0])
+
+        # relate cellprops to cluster and spots
+        for i, cell in self.cellprops.iterrows():
+            matching_spots = (self.spots['cell_label'] == cell['nuc_label']) & \
+                    (self.spots['fov'] == cell['fov']) & \
+                    (self.spots['timepoint'] == cell['timepoint']) & \
+                    (self.spots['NAS_location'] == cell['NAS_location'])
+            self.spots.loc[matching_spots, 'cell_key'] = cell['cell_key']
+
+            matching_clusters = (self.clusters['cell_label'] == cell['nuc_label']) & \
+                    (self.clusters['fov'] == cell['fov']) & \
+                    (self.clusters['timepoint'] == cell['timepoint']) & \
+                    (self.clusters['NAS_location'] == cell['NAS_location'])
+            self.clusters.loc[matching_clusters, 'cell_key'] = cell['cell_key']
+
+        # confirm results, count the number of spots per each cell_key
+        for cell_key in np.random.choice(self.cellprops['cell_key'], 10):
+            cell = self.cellprops[self.cellprops['cell_key'] == cell_key]
+            spot_count = self.spots[self.spots['cell_key'] == cell_key].shape[0]
+            cell_spot_count = self.cellspots[self.cellspots['cell_key'] == cell_key]['nb_rna'].sum() # there should only be one of these 
+            assert spot_count == cell_spot_count, f"Mismatch in spot count for cell_key {cell_key}: {spot_count} vs {cell_spot_count}"
+
+    def gate():
+        pass
+
 
 class GR_Confirmation(Analysis):
     """
