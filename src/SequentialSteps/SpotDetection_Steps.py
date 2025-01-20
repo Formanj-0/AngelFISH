@@ -946,7 +946,7 @@ class Automatic_BIGFISH_Threshold(IndependentStepClass):
                     print("Channel: ", c)
                     print("Min Threshold: ", min_thresholds[-1])
                     print("Max Threshold: ", max_thresholds[-1])
-                    print("Mode Threshold: ", mode_threshold[-1])
+                    # print("Mode Threshold: ", mode_threshold[-1])
                     print("Median Threshold: ", median_threshold[-1])
                     print("Mean Threshold: ", mean_thresholds[-1])
                     print("Std Threshold: ", std_thresholds[-1])
