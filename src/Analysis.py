@@ -1648,6 +1648,11 @@ class GR_Confirmation(Analysis):
             self.am.select_datasets('illumination_profiles')
         )[0, :, :, :]
 
+        # Corrected illumination profile
+        self.corrected_IL_profile = da.from_array(
+            self.am.select_datasets('corrected_IL_profile')
+        )[0, :, :, :]
+
         # Images and masks (often shape: (n_fov, 1, n_channels, [z,] y, x))
         self.images, self.masks = self.am.get_images_and_masks()
 
