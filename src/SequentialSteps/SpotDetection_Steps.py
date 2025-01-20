@@ -156,13 +156,13 @@ class SpotDetection(SequentialStepsClass):
             # For clusters
             c_list_clusters = [cell_label[s[1], s[2]] for s in clusters] # TODO make this work for and 3D
             n_list_clusters = [nuc_label[s[1], s[2]] for s in clusters]
-            is_nuc_clusters = [(n>0 and c==0) for n,c in zip(n_list_clusters,c_list_clusters)]
+            is_nuc_clusters = [(n>0 and c>0) for n,c in zip(n_list_clusters,c_list_clusters)]
             errors_clusters = [(n>0 and c>0 and n!=c) for n,c in zip(n_list_clusters,c_list_clusters)]
             if any(errors_clusters):
                 raise ValueError('Miss matching cell labels in clusters')
             
-            clusters = np.hstack([clusters, np.array(is_nuc_clusters).reshape(-1, 1), np.array(c_list_clusters).reshape(-1, 1)])
-            spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(c_list).reshape(-1, 1)])
+            clusters = np.hstack([clusters, np.array(is_nuc_clusters).reshape(-1, 1), np.array(c_list_clusters).reshape(-1, 1), np.array(n_list_clusters).reshape(-1, 1)])
+            spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(c_list).reshape(-1, 1), np.array(n_list).reshape(-1, 1)])
         else:
             df = None
 
@@ -638,8 +638,8 @@ class BIGFISH_SpotDetection(SpotDetection):
                 cols_cluster.append(['y_px', 'x_px', 'nb_spots', 'cluster_index'])
             
             if df_cellresults is not None:
-                cols_spots.append(['is_nuc', 'cell_label'])
-                cols_cluster.append(['is_nuc', 'cell_label'])
+                cols_spots.append(['is_nuc', 'cell_label', 'nuc_label'])
+                cols_cluster.append(['is_nuc', 'cell_label', 'nuc_label'])
             
             cols_spots.append(['snr', 'signal'])
 

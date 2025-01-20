@@ -20,12 +20,13 @@ class AnalysisManager:
     This class is made to select data for further analysis.
     It provides methods to load, filter, and retrieve datasets from HDF5 files.
     """
-    def __init__(self, location:Union[str, list[str]]=None, log_location:str=None, mac:bool=False):
+    def __init__(self, location:Union[str, list[str]]=None, log_location:str=None, mac:bool=False, mode='r'):
         # given:
         # h5 locations
         #   give me a location
         #   give me a list of locations
         #   give me none -> got to here and display these \\munsky-nas.engr.colostate.edu\share\Users\Jack\All_Analysis
+        self.mode = mode
         if location is None: # TODO make these if statement better
             self.get_locations(log_location, mac)
         elif isinstance(location, str):
@@ -140,7 +141,7 @@ class AnalysisManager:
         self.h5_files = []
         for l in self.location:
             if l not in [h.filename for h in self.h5_files]:
-                self.h5_files.append(h5py.File(l, 'a'))
+                self.h5_files.append(h5py.File(l, self.mode))
     
     def get_images_and_masks(self):
         self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
@@ -756,17 +757,16 @@ class SpotDetection_Confirmation_ER(Analysis):
         self.cellspots = []
         for i, s in enumerate(h):
             # Spots
+            # try:
             df_spot = pd.read_hdf(s.filename, d_spot[i].name)
             df_spot['h5_idx'] = i
             self.spots.append(df_spot)
 
             # Clusters
-            try:
-                df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
-                df_clust['h5_idx'] = i
-                self.clusters.append(df_clust)
-            except AttributeError:
-                pass  # If missing cluster data
+            df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
+            df_clust['h5_idx'] = i
+            self.clusters.append(df_clust)
+
 
             # Cellprops
             df_prop = pd.read_hdf(s.filename, d_props[i].name)
@@ -777,6 +777,9 @@ class SpotDetection_Confirmation_ER(Analysis):
             df_cellres = pd.read_hdf(s.filename, d_cellres[i].name)
             df_cellres['h5_idx'] = i
             self.cellspots.append(df_cellres)
+            # except:
+            #     print(f'Someone has a hold on {s.filename}')
+
 
         # Concatenate
         self.spots = pd.concat(self.spots, axis=0)
