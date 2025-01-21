@@ -79,24 +79,30 @@ class AnalysisManager:
     def select_datasets(self, dataset_name) -> list:
         self.open()
         if hasattr(self, 'analysis_names'):
-            self.datasets = []
-            for l in self.analysis_names:
+            is_df = False
+            list_df = []
+            for i,l in enumerate(self.location):
                 with h5py.File(l, 'r') as f:
                     try:
-                        self.datasets.append(f[dataset_name])
-                    except KeyError:
-                        print(f'{l} missing datasets')
-                        self.datasets.append(None)
-            return self.datasets
+                        df = pd.read_hdf(f.filename, f"{self.analysis_names[i]}/{dataset_name}")
+                        df['h5_idx'] = i
+                        list_df.append(df)
+                        is_df = True
+                    except:
+                        raise Exception(f'IDK what to do with {dataset_name} data type, please add code to incoperate this data')
+            if is_df:
+                return(pd.concat(list_df, axis=0))
         else:
             print('select an anlysis')
 
     def list_datasets(self):
         if hasattr(self, 'analysis_names'):
+            keys = []
             for i, l in enumerate(self.location):
                 with h5py.File(l, 'r') as h:
-                    for k in h[self.analysis_names[i]].keys():
-                        print(k.name)
+                    keys.append(list(h[self.analysis_names[i]].keys()))
+            flat_keys = [item for sublist in keys for item in sublist]
+            print(set(flat_keys))
         else:
             print('select an analysis')
 
@@ -104,7 +110,7 @@ class AnalysisManager:
         # self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
         self.names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
         if analysis_name is not None:
-            self.analysis_names = [s for s in self.names if s == analysis_name]
+            self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if s == analysis_name]
 
     def _filter_on_date(self, date_range):
         self.dates = [s.split('_')[-1] for s in self.analysis_names]
@@ -143,7 +149,6 @@ class AnalysisManager:
                 self.h5_files.append(h5py.File(l, self.mode))
     
     def get_images_and_masks(self):
-        
         self.raw_images = []
         self.masks = []
 
@@ -260,44 +265,10 @@ class SpotDetection_Confirmation(Analysis):
         Loads spots, clusters, cellprops, cellspots from HDF5,
         plus images and masks.
         """
-        h = self.am.h5_files
-        d_spot     = self.am.select_datasets('spotresults')
-        d_cellres  = self.am.select_datasets('cellresults')
-        d_props    = self.am.select_datasets('cell_properties')
-        d_cluster  = self.am.select_datasets('clusterresults')
-
-        self.spots = []
-        self.clusters = []
-        self.cellprops = []
-        self.cellspots = []
-        for i, s in enumerate(h):
-            # Spots
-            df_spot = pd.read_hdf(s.filename, d_spot[i].name)
-            df_spot['h5_idx'] = i
-            self.spots.append(df_spot)
-
-            # Clusters
-            try:
-                df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
-                df_clust['h5_idx'] = i
-                self.clusters.append(df_clust)
-            except AttributeError:
-                pass  # If missing cluster data
-
-            # Cellprops
-            df_prop = pd.read_hdf(s.filename, d_props[i].name)
-            df_prop['h5_idx'] = i
-            self.cellprops.append(df_prop)
-
-            # Cellspots
-            df_cellres = pd.read_hdf(s.filename, d_cellres[i].name)
-            df_cellres['h5_idx'] = i
-            self.cellspots.append(df_cellres)
-
-        self.spots = pd.concat(self.spots, axis=0)
-        self.clusters = pd.concat(self.clusters, axis=0)
-        self.cellprops = pd.concat(self.cellprops, axis=0)
-        self.cellspots = pd.concat(self.cellspots, axis=0)
+        self.spots     = self.am.select_datasets('spotresults')
+        self.cellspots  = self.am.select_datasets('cellresults')
+        self.cellprop    = self.am.select_datasets('cell_properties')
+        self.clusters  = self.am.select_datasets('clusterresults')
 
         self.images, self.masks = self.am.get_images_and_masks()
 
@@ -751,49 +722,11 @@ class SpotDetection_Confirmation_ER(Analysis):
         Loads spots, clusters, cellprops, cellspots from HDF5,
         plus images and masks.
         """
-        h = self.am.h5_files
-        d_spot     = self.am.select_datasets('spotresults')
-        d_cellres  = self.am.select_datasets('cellresults')
-        d_props    = self.am.select_datasets('cell_properties')
-        d_cluster  = self.am.select_datasets('clusterresults')
+        self.spots     = self.am.select_datasets('spotresults')
+        self.cellspots  = self.am.select_datasets('cellresults')
+        self.cellprop    = self.am.select_datasets('cell_properties')
+        self.clusters  = self.am.select_datasets('clusterresults')
 
-        self.spots = []
-        self.clusters = []
-        self.cellprops = []
-        self.cellspots = []
-        for i, s in enumerate(h):
-            # Spots
-            # try:
-            df_spot = pd.read_hdf(s.filename, d_spot[i].name)
-            df_spot['h5_idx'] = i
-            self.spots.append(df_spot)
-
-            # Clusters
-            df_clust = pd.read_hdf(s.filename, d_cluster[i].name)
-            df_clust['h5_idx'] = i
-            self.clusters.append(df_clust)
-
-
-            # Cellprops
-            df_prop = pd.read_hdf(s.filename, d_props[i].name)
-            df_prop['h5_idx'] = i
-            self.cellprops.append(df_prop)
-
-            # Cellspots
-            df_cellres = pd.read_hdf(s.filename, d_cellres[i].name)
-            df_cellres['h5_idx'] = i
-            self.cellspots.append(df_cellres)
-            # except:
-            #     print(f'Someone has a hold on {s.filename}')
-
-
-        # Concatenate
-        self.spots = pd.concat(self.spots, axis=0)
-        self.clusters = pd.concat(self.clusters, axis=0)
-        self.cellprops = pd.concat(self.cellprops, axis=0)
-        self.cellspots = pd.concat(self.cellspots, axis=0)
-
-        # images, masks
         self.images, self.masks = self.am.get_images_and_masks()
 
     def save_data(self, location):
