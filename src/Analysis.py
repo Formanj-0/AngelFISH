@@ -36,8 +36,6 @@ class AnalysisManager:
         else:
             raise ValueError('Location is not properly defined')
         
-        self._load_in_h5()
-
     def get_locations(self, log_location, mac:bool=False) -> list[str]: 
         # log_location = r'Y:\Users\Jack\All_Analysis' # TODO: make this work for all users
         # get the log files 
@@ -62,69 +60,70 @@ class AnalysisManager:
             self.location.append(location)
 
     def select_analysis(self, analysis_name: str = None, date_range: list[str] = None):
+        self.open()
         self._find_analysis_names()
         self._filter_on_date(date_range)
         self._filter_on_name(analysis_name)
-        self._find_analysis() # this give you self.analysis
+        self._filter_locations()
         self._handle_duplicates()
-        return self.h5_files
+        self.close()
 
     def list_analysis_names(self):
+        self.open()
         self._find_analysis_names()
         for name in self.analysis_names:
             print(name)
+        self.close()
         return self.analysis_names
 
     def select_datasets(self, dataset_name) -> list:
-        if hasattr(self, 'analysis'):
+        self.open()
+        if hasattr(self, 'analysis_names'):
             self.datasets = []
-            for h in self.analysis:
-                try:
-                    self.datasets.append(h[dataset_name])
-                except KeyError:
-                    print(f'{h} missing datasets')
-                    self.datasets.append(None)
+            for l in self.analysis_names:
+                with h5py.File(l, 'r') as f:
+                    try:
+                        self.datasets.append(f[dataset_name])
+                    except KeyError:
+                        print(f'{l} missing datasets')
+                        self.datasets.append(None)
             return self.datasets
         else:
             print('select an anlysis')
 
     def list_datasets(self):
-        if hasattr(self, 'analysis'):
-            for d in self.analysis:
-                print(d.name, list(d.keys()))
+        if hasattr(self, 'analysis_names'):
+            for i, l in enumerate(self.location):
+                with h5py.File(l, 'r') as h:
+                    for k in h[self.analysis_names[i]].keys():
+                        print(k.name)
         else:
             print('select an analysis')
 
     def _filter_on_name(self, analysis_name):
         # self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
-        self.analysis_names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
+        self.names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
         if analysis_name is not None:
-            self.analysis_names = [s for s in self.analysis_names if s == analysis_name]
+            self.analysis_names = [s for s in self.names if s == analysis_name]
 
     def _filter_on_date(self, date_range):
-        self.dates = set([s.split('_')[-1] for s in self.analysis_names])
+        self.dates = [s.split('_')[-1] for s in self.analysis_names]
         if date_range is not None:
             start_date, end_date = date_range
-            self.dates = [date for date in self.dates if start_date <= date <= end_date]
-        self.dates = list(self.dates)
+            gooddates = [start_date <= date <= end_date for date in self.dates]
+            self.analysis_names = [a for i, a in enumerate(self.analysis_names) if gooddates[i]]
 
-    def _find_analysis(self):
-        # select data sets with self.data, and self.datasete
-        self.analysis = []
-        bad_idx = []
+    def _filter_locations(self):
+        # select data sets with self.data, and self.dataset
+        temp_locs = []
+        temp_names = []
         for h_idx, h in enumerate(self.h5_files):
-            for dataset_name in set(self.analysis_names):
-                combos = [f'Analysis_{dataset_name}_{date}' for date in self.dates]
-                if any(combo in h.keys() for combo in combos):
-                    for combo in combos: # seach for the combo
-                        if combo in h.keys():
-                            self.analysis.append(h[combo])
-                            break
-                else:
-                    bad_idx.append(h_idx)
-        for i in bad_idx:
-            self.h5_files[i].close()
-        self.h5_files = [h for i, h in enumerate(self.h5_files) if i not in bad_idx]
+            for n in self.analysis_names:
+                if n in h.keys():
+                    temp_locs.append(h.filename)
+                    temp_names.append(n)
+        self.location = temp_locs
+        self.analysis_names = temp_names
 
     def _handle_duplicates(self): # requires user input
         pass
@@ -137,19 +136,26 @@ class AnalysisManager:
         self.analysis_names = set([dataset for sublist in self.analysis_names for dataset in sublist])
         self.analysis_names = [d for d in self.analysis_names if 'Analysis' in d]
 
-    def _load_in_h5(self):
+    def open(self):
         self.h5_files = []
         for l in self.location:
             if l not in [h.filename for h in self.h5_files]:
                 self.h5_files.append(h5py.File(l, self.mode))
     
     def get_images_and_masks(self):
-        self.raw_images = [da.from_array(h['raw_images']) for h in self.h5_files]
-        self.masks = [da.from_array(h['masks']) for h in self.h5_files]
+        
+        self.raw_images = []
+        self.masks = []
+
+        for l in self.location:
+            with h5py.File(l, 'r') as h:
+                self.raw_images.append(da.from_array(h['raw_images']))
+                self.masks.append(da.from_array(h['masks']))
         return self.raw_images, self.masks
     
     def close(self):
         for h in self.h5_files:
+            h.flush()
             h.close()
 
     def delete_selected_analysis(self, password):
