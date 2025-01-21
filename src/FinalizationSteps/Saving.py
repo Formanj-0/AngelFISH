@@ -186,36 +186,38 @@ class Save_Parameters(Saving):
 
         for i, locaction in enumerate(local_dataset_location):
             # save the parameters to the h5 file
-            h5_file = h5py.File(locaction, 'r+')
-            group_name = f'Analysis_{Analysis_name}_{date}'
-            if group_name in h5_file:
-                group = h5_file[group_name]
-            else:
-                group = h5_file.create_group(group_name)
+            with h5py.File(locaction, 'r+') as h5_file:
+            # h5_file = h5py.File(locaction, 'r+')
+                group_name = f'Analysis_{Analysis_name}_{date}'
+                if group_name in h5_file:
+                    group = h5_file[group_name]
+                else:
+                    group = h5_file.create_group(group_name)
 
-            # save the parameters to the h5 file
-            # remove params_to_ignore
-            for key in params_to_ignore:
-                if key in params:
-                    del params[key]
+                # save the parameters to the h5 file
+                # remove params_to_ignore
+                for key in params_to_ignore:
+                    if key in params:
+                        del params[key]
+                
+                params = handle_dict(params)
+
+                # if dataset is already made, delete it
+                if 'parameters' in group:
+                    del group['parameters']
+
+                recursively_save_dict_contents_to_group(group, 'parameters', params)
+
+                # save the nuc channel and cyto channel and fish channel at the top level
+                if 'nucChannel' in params:
+                    group.attrs['nucChannel'] = params['nucChannel']
+                if 'cytoChannel' in params:
+                    group.attrs['cytoChannel'] = params['cytoChannel']
+                if 'FISHChannel' in params:
+                    group.attrs['FISHChannel'] = params['FISHChannel']
             
-            params = handle_dict(params)
-
-            # if dataset is already made, delete it
-            if 'parameters' in group:
-                del group['parameters']
-
-            recursively_save_dict_contents_to_group(group, 'parameters', params)
-
-            # save the nuc channel and cyto channel and fish channel at the top level
-            if 'nucChannel' in params:
-                group.attrs['nucChannel'] = params['nucChannel']
-            if 'cytoChannel' in params:
-                group.attrs['cytoChannel'] = params['cytoChannel']
-            if 'FISHChannel' in params:
-                group.attrs['FISHChannel'] = params['FISHChannel']
-        
-            h5_file.close()
+                h5_file.flush()
+                h5_file.close()
 
 
 class Save_Images(Saving):
@@ -237,23 +239,25 @@ class Save_Images(Saving):
 
         # save the images to the h5 file
         for i, locaction in enumerate(local_dataset_location):
-            if h5_file[i]:
-                h5_file[i].close()
-            h5 = h5py.File(locaction, 'r+')
-            group_name = f'Analysis_{Analysis_name}_{date}'
-            if group_name in h5:
-                group = h5[group_name]
-            else:
-                group = h5.create_group(group_name)
+            # if h5_file[i]:
+            #     h5_file[i].close()
+            with h5py.File(locaction, 'r+') as h5:
+                h5 = h5py.File(locaction, 'r+')
+                group_name = f'Analysis_{Analysis_name}_{date}'
+                if group_name in h5:
+                    group = h5[group_name]
+                else:
+                    group = h5.create_group(group_name)
 
-            # if dataset is already made, delete it
-            if 'images' in group:
-                del group['images']
+                # if dataset is already made, delete it
+                if 'images' in group:
+                    del group['images']
 
-            # save the images to the h5 file
-            group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]])
+                # save the images to the h5 file
+                group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]])
 
-            h5.close()
+                h5.flush()
+                h5.close()
 
 
 class Save_Masks(Saving):
@@ -282,7 +286,7 @@ class Save_Masks(Saving):
 
                         chunk_size = (1,) + masks.shape[1:]  # Define chunk size
                         h5.create_dataset('/masks', data=masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
-                        
+                        h5.flush()
 
 
 
