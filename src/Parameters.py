@@ -134,14 +134,16 @@ class Parameters(ABC):
         params = {}
         if self.state == 'global':
             for instance in Parameters()._instances:
+                instance._update()
                 # check for duplicates and raise an error if found
                 duplicate_keys = list(set(params.keys()).intersection(set(instance.todict().keys())))
-                duplicate_keys = [key for key in duplicate_keys if key not in {'kwargs', 'state', 'instances'}]
+                duplicate_keys = [key for key in duplicate_keys if key not in {'kwargs', 'state', 'instances', 'init'}]
                 if duplicate_keys:
                     raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
                 params.update(instance.todict())
         else:
             for instance in self.instances:
+                instance._update()
                 # check for duplicates and raise an error if found
                 duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
                 if duplicate_keys:
@@ -157,6 +159,8 @@ class Parameters(ABC):
             i.state = self.state
         self.clear_instances()
 
+    def _update(self):
+        pass
 
 class ScopeClass(Parameters):
     """
@@ -177,10 +181,12 @@ class ScopeClass(Parameters):
                  spot_yx: int = 360,
                 **kwargs):
         super().__init__()
-        self.state = 'global'
-        self.voxel_size_yx = voxel_size_yx
-        self.spot_z = spot_z
-        self.spot_yx = spot_yx
+        if not hasattr(self, 'init'):
+            self.state = 'global'
+            self.voxel_size_yx = voxel_size_yx
+            self.spot_z = spot_z
+            self.spot_yx = spot_yx
+            self.init = True
 
         if kwargs is not None: # TODO this needs to be moved up but it has issues being in parmaeters class
             for key, value in kwargs.items():
@@ -196,15 +202,6 @@ class Experiment(Parameters):
 
     The data must already be downloaded at this point and are in tiff for each image
     """
-    initial_data_location: Union[str, list[str]] = None
-    index_dict: dict = None
-    nucChannel: int = None
-    cytoChannel: int = None
-    FISHChannel: Union[list[int], int] = None
-    voxel_size_z: int = 300  # This is voxel
-    independent_params: Union[dict, list[dict]] = field(default_factory=lambda: [{}])
-    kwargs: dict = None
-    timestep_s: float = None
 
     def __init__(self, 
                     initial_data_location: Union[str, list[str]] = None,
@@ -218,14 +215,16 @@ class Experiment(Parameters):
                     **kwargs):
         super().__init__()
         self.state = 'global'
-        self.initial_data_location = initial_data_location
-        self.index_dict = index_dict
-        self.nucChannel = nucChannel
-        self.cytoChannel = cytoChannel
-        self.FISHChannel = FISHChannel
-        self.voxel_size_z = voxel_size_z
-        self.independent_params = independent_params
-        self.timestep_s = timestep_s
+        if not hasattr(self, 'init'):
+            self.initial_data_location = initial_data_location
+            self.index_dict = index_dict
+            self.nucChannel = nucChannel
+            self.cytoChannel = cytoChannel
+            self.FISHChannel = FISHChannel
+            self.voxel_size_z = voxel_size_z
+            self.independent_params = independent_params
+            self.timestep_s = timestep_s
+            self.init = True
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -276,13 +275,15 @@ class DataContainer(Parameters):
                 clear_after_error: bool = True,
                 **kwargs):
         super().__init__()
-        self.local_dataset_location = local_dataset_location
-        self.h5_file = h5_file
-        self.total_num_chunks = total_num_chunks
-        self.images = images
-        self.masks = masks
-        self.temp = temp
-        self.clear_after_error = clear_after_error
+        if not hasattr(self, 'init'):
+            self.local_dataset_location = local_dataset_location
+            self.h5_file = h5_file
+            self.total_num_chunks = total_num_chunks
+            self.images = images
+            self.masks = masks
+            self.temp = temp
+            self.clear_after_error = clear_after_error
+            self.init = True
 
         self.state = 'global'
         if kwargs is not None:
@@ -473,12 +474,11 @@ class DataContainer(Parameters):
     def delete_temp(self):
         self.temp.cleanup()
 
+    def _update(self):
+        self.load_temp_data()
 
 repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-@dataclass
 class Settings(Parameters):
-
-
     def __init__(self,     
                     name: str = None,
                     return_data_to_NAS: bool = True,
@@ -492,17 +492,20 @@ class Settings(Parameters):
                     order: str = 'pt',
                     **kwargs):
         super().__init__()
-        self.name = name
-        self.return_data_to_NAS = return_data_to_NAS
-        self.NUMBER_OF_CORES = NUMBER_OF_CORES
-        self.save_files = save_files
-        self.num_chunks_to_run = num_chunks_to_run
-        self.connection_config_location = connection_config_location
-        self.display_plots = display_plots
-        self.load_in_mask = load_in_mask
-        self.mask_structure = mask_structure
-        self.order = order
-        self.state = 'global'
+        if not hasattr(self, 'init'):
+            self.name = name
+            self.return_data_to_NAS = return_data_to_NAS
+            self.NUMBER_OF_CORES = NUMBER_OF_CORES
+            self.save_files = save_files
+            self.num_chunks_to_run = num_chunks_to_run
+            self.connection_config_location = connection_config_location
+            self.display_plots = display_plots
+            self.load_in_mask = load_in_mask
+            self.mask_structure = mask_structure
+            self.order = order
+            self.state = 'global'
+            self.init = True
+
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
