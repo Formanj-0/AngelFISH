@@ -255,12 +255,6 @@ class DataContainer(Parameters):
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
-        self.__post_init__()
-
-    def __post_init__(self):
-        if self.temp is None:
-            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
-        self.load_temp_data()
 
     def __setattr__(self, name, value):
         if name == 'total_num_chunks':
@@ -282,6 +276,8 @@ class DataContainer(Parameters):
             self.local_dataset_location = [self.local_dataset_location]
 
     def save_results(self, kwargs: dict, p:int = None, t:int = None, parameters = None):
+        if self.temp is None:
+            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
         parameters = Parameters() if parameters is None else parameters
         if kwargs is not None:
             for name, value in kwargs.items():
@@ -379,6 +375,9 @@ class DataContainer(Parameters):
         np.save(os.path.join(folder_path, f'{name}_{file_index}.npy'), value)
 
     def load_temp_data(self):
+        if self.temp is None:
+            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
+
         # Load masks and images
         if self.images is not None:
             del self.images
