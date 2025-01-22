@@ -24,6 +24,7 @@ from src.Parameters import Parameters
 from src.NASConnection import NASConnection
 
 
+
 #%% Useful Functions
 def get_first_executing_folder():
     # Get the current stack
@@ -47,18 +48,25 @@ class DataTypeBridge(IndependentStepClass):
             load_in_mask, nucChannel, cytoChannel, 
             independent_params, local_dataset_location: list[str] = None,
             **kwargs):
+        # TODO: change - the location that the h5 file is saved (dataBase) par_dir
+        # TODO: check - if h5 is in folder on nas or in parent then download h5 instead
+        # TODO: 
+
         # save to a single location
         database_loc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         database_loc = os.path.join(database_loc, 'dataBases')
+
         # if data is local
         if local_dataset_location is not None:
             if isinstance(local_dataset_location, str):
                 local_dataset_location = [local_dataset_location]
-            
+
             # if data is h5 format already
             if local_dataset_location[0].endswith('h5'):
                 h5_names = [os.path.basename(f) for f in local_dataset_location]
                 folders = [os.path.dirname(f) for f in local_dataset_location]
+
+                # this case folder should be par_dir
 
             # if data is hiding in a folder
             elif os.path.isdir(local_dataset_location[0]):
@@ -68,30 +76,49 @@ class DataTypeBridge(IndependentStepClass):
                         h5_name = os.path.basename(ds) + '.h5'
                         h5_names.append(h5_name)
                         self.convert_folder_to_H5(ds, h5_name, nucChannel, cytoChannel)
-                folders = local_dataset_location
-                
+                folders = os.path.dirname(local_dataset_location)
+
+
         # if data is on originates from the nas
         else:
             if type(initial_data_location) == str:
                 initial_data_location = [initial_data_location]
+            # TODO check if name ends in a . something and download that file
+            is_folder = all(not initial_data_location[0].endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
             names = [os.path.basename(location) for location in initial_data_location]
-            folders = [os.path.join(database_loc, n) for n in names]
+ 
+            if not is_folder:
+                names = [os.path.splitext(n)[0] for n in names]
+                folders = [database_loc]*len(names)
+            else:
+                folders = [os.path.join(database_loc, n) for n in names]
             h5_names = [n + '.h5' for n in names]
             for i, location in enumerate(initial_data_location):
-                folder = folders[i]
+                destination = folders[i]
                 h5_name = h5_names[i]
-                self.download_folder_from_NAS(location, folder, connection_config_location)
-                self.convert_folder_to_H5(folder, h5_name, nucChannel, cytoChannel)
+                if is_folder:
+                    self.download_folder_from_NAS(location, destination, connection_config_location)
+                else:
+                    self.download_file_from_NAS(location, destination, connection_config_location)
+                self.convert_folder_to_H5(destination, h5_name, nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
-        return self.load_in_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location)
+        return self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
 
-    def download_folder_from_NAS(self, remote_folder_path, local_folder_path, connection_config_location):
+    def download_folder_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
         if not os.path.exists(local_folder_path):
             nas = NASConnection(pathlib.Path(connection_config_location))
             os.makedirs(local_folder_path, exist_ok=True)
-            nas.copy_folder(remote_folder_path=pathlib.Path(remote_folder_path), 
+            nas.copy_folder(remote_folder_path=pathlib.Path(remote_path), 
+                        local_folder_path=local_folder_path)
+            
+    def download_file_from_NAS(self, remote_path, local_folder_path, connection_config_location):
+        # Downloads a folder from the NAS, confirms that the it has not already been downloaded
+        if not os.path.exists(os.path.join(local_folder_path, os.path.basename(remote_path))):
+            nas = NASConnection(pathlib.Path(connection_config_location))
+            os.makedirs(local_folder_path, exist_ok=True)
+            nas.download_file(remote_file_path=pathlib.Path(remote_path), 
                         local_folder_path=local_folder_path)
 
     @abstractmethod
@@ -100,7 +127,7 @@ class DataTypeBridge(IndependentStepClass):
         # that the data originally came from
         ...
 
-    def load_in_dataset(self, locations, H5_names, load_in_mask, independent_params, NAS_locations) -> DataContainer:
+    def load_in_h5_dataset(self, locations, H5_names, load_in_mask, independent_params, nas_location) -> DataContainer:
         # given an h5 file this will load in the dat in a uniform manner
 
         H5_locations = [os.path.join(location, H5_name) for location, H5_name in zip(locations, H5_names)]
@@ -138,16 +165,16 @@ class DataTypeBridge(IndependentStepClass):
             ip = {}
             for i, p in enumerate(position_indexs):
                 if independent_params is not None and len(independent_params) > 1:
-                    if NAS_locations is not None:
-                        independent_params[i]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
+                    if nas_location is not None:
+                        independent_params[i]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
                     if i == 0:
                         temp = {p_idx: independent_params[i] for p_idx in range(p)}
                     else:
                         temp = {p_idx: independent_params[i] for p_idx in range(position_indexs[i-1], p)}
                     ip = {**ip, **temp}
                 elif independent_params is not None and len(independent_params) == 1:
-                    if NAS_locations is not None:
-                        independent_params[0]['NAS_location'] = os.path.join(NAS_locations[i], H5_names[i])
+                    if nas_location is not None:
+                        independent_params[0]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
                     if i == 0:
                         temp = {p_idx: independent_params[0] for p_idx in range(p)}
                     else:
@@ -299,8 +326,15 @@ class FFF2NativeDataType(DataTypeBridge):
         # save the data to a NDTIFF Dataset
 
 
+class SingleTIFF2NativeDataType(DataTypeBridge):
+    def __init__(self):
+        super().__init__()
 
-
+    def convert_folder_to_H5(self, folder, H5_name, nucChannel, cytoChannel):
+        if os.path.exists(os.path.join(folder, H5_name)):
+            return 'already exists'
+        
+        
 
 #%% Auxilary Functions
 class Avg_Parameters(IndependentStepClass):
