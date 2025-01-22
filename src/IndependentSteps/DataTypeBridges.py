@@ -88,11 +88,11 @@ class DataTypeBridge(IndependentStepClass):
             names = [os.path.basename(location) for location in initial_data_location]
  
             if not is_folder:
-                names = [os.path.splitext(n)[0] for n in names]
+                h5_names = [os.path.splitext(n)[0] + '.h5' for n in names]
                 folders = [database_loc]*len(names)
             else:
                 folders = [os.path.join(database_loc, n) for n in names]
-            h5_names = [n + '.h5' for n in names]
+                h5_names = [n + '.h5' for n in names]
             
             for i, location in enumerate(initial_data_location):
                 destination = folders[i]
@@ -101,7 +101,7 @@ class DataTypeBridge(IndependentStepClass):
                     self.download_folder_from_NAS(location, destination, connection_config_location)
                 else:
                     self.download_file_from_NAS(location, destination, connection_config_location)
-                self.convert_folder_to_H5(destination, h5_name, nucChannel, cytoChannel)
+                self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
         return self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
@@ -123,7 +123,7 @@ class DataTypeBridge(IndependentStepClass):
                         local_folder_path=local_folder_path)
 
     @abstractmethod
-    def convert_folder_to_H5(self, folder, h5_name, nucChannel, cytoChannel):
+    def convert_folder_to_H5(self, folder, h5_name, name, nucChannel, cytoChannel):
         # For any standardized data type this will convert it to a h5 file and save that file in the folder
         # that the data originally came from
         ...
@@ -204,7 +204,7 @@ class Pycromanager2NativeDataType(DataTypeBridge):
     def __init__(self):
         super().__init__()
 
-    def convert_folder_to_H5(self, folder, H5_name, nucChannel, cytoChannel):
+    def convert_folder_to_H5(self, folder, H5_name, name, nucChannel, cytoChannel):
         # check if h5 file already exists
         if os.path.exists(os.path.join(folder, H5_name)):
             return 'already exists'
@@ -220,7 +220,7 @@ class FFF2NativeDataType(DataTypeBridge):
     def __init__(self):
         super().__init__()
 
-    def convert_folder_to_H5(self, folder, H5_name, nucChannel, cytoChannel): 
+    def convert_folder_to_H5(self, folder, H5_name, name, nucChannel, cytoChannel): 
         # check if h5 file already exists
         if os.path.exists(os.path.join(folder, H5_name)):
             return 'already exists'
@@ -328,11 +328,11 @@ class SingleTIFF2NativeDataType(DataTypeBridge):
     def __init__(self):
         super().__init__()
 
-    def convert_folder_to_H5(self, folder, H5_name, nucChannel, cytoChannel):
+    def convert_folder_to_H5(self, folder, H5_name, name, nucChannel, cytoChannel):
         if os.path.exists(os.path.join(folder, H5_name)):
             return 'already exists'
         
-        img = tifffile.imread(r'C:\Users\Jack\Documents\GitHub\AngelFISH\dataBases\Full 24 hour scratch assay.tif')
+        img = tifffile.imread(os.path.join(folder, name))
 
         img = img[np.newaxis, :, np.newaxis, np.newaxis, :, :]
         img = da.from_array(img)
