@@ -93,6 +93,7 @@ class DataTypeBridge(IndependentStepClass):
             else:
                 folders = [os.path.join(database_loc, n) for n in names]
             h5_names = [n + '.h5' for n in names]
+            
             for i, location in enumerate(initial_data_location):
                 destination = folders[i]
                 h5_name = h5_names[i]
@@ -321,9 +322,6 @@ class FFF2NativeDataType(DataTypeBridge):
         del imgs
         del masks
         del metadata_str
-                
-
-        # save the data to a NDTIFF Dataset
 
 
 class SingleTIFF2NativeDataType(DataTypeBridge):
@@ -334,7 +332,18 @@ class SingleTIFF2NativeDataType(DataTypeBridge):
         if os.path.exists(os.path.join(folder, H5_name)):
             return 'already exists'
         
-        
+        img = tifffile.imread(r'C:\Users\Jack\Documents\GitHub\AngelFISH\dataBases\Full 24 hour scratch assay.tif')
+
+        img = img[np.newaxis, :, np.newaxis, np.newaxis, :, :]
+        img = da.from_array(img)
+        img = img.rechunk((1, 1, -1, -1, -1, -1))
+
+        masks = da.zeros(img.shape)
+
+        masks = masks.rechunk((1, 1, -1, -1, -1, -1))
+        da.to_hdf5(os.path.join(folder, H5_name), {'/raw_images': img, '/masks': masks}, compression='gzip')
+
+
 
 #%% Auxilary Functions
 class Avg_Parameters(IndependentStepClass):
