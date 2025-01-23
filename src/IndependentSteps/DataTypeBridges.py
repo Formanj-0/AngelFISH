@@ -100,7 +100,7 @@ class DataTypeBridge(IndependentStepClass):
                     nas = NASConnection(pathlib.Path(connection_config_location))
                     list_dir = nas.read_files(os.path.dirname(location))
                     if h5_name in list_dir:
-                        location = os.path.join(os.path.pardir(location), h5_name)
+                        location = os.path.join(os.path.dirname(location), h5_name)
                         is_folder = False
                     if is_folder:
                         self.download_folder_from_NAS(location, destination, connection_config_location)
