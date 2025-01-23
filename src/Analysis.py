@@ -724,7 +724,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         """
         self.spots     = self.am.select_datasets('spotresults')
         self.cellspots  = self.am.select_datasets('cellresults')
-        self.cellprop    = self.am.select_datasets('cell_properties')
+        self.cellprops    = self.am.select_datasets('cell_properties')
         self.clusters  = self.am.select_datasets('clusterresults')
 
         self.images, self.masks = self.am.get_images_and_masks()
@@ -779,11 +779,16 @@ class SpotDetection_Confirmation_ER(Analysis):
         Shows nucleus channel + mask (left),
         cytoplasm channel + mask (right).
         """
-        img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-        img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        if self.h5_idx is None or self.fov is None:
+            raise ValueError("h5_idx or fov is not set. Cannot display segmentation.")
 
-        mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
-        mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        try:
+            img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
+            img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
+            mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
+            mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
+        except Exception as e:
+            raise ValueError(f"Error accessing datasets: {e}")
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
         for ax in axs:
