@@ -48,10 +48,9 @@ class DataTypeBridge(IndependentStepClass):
             load_in_mask, nucChannel, cytoChannel, 
             independent_params, local_dataset_location: list[str] = None,
             **kwargs):
-        # TODO: change - the location that the h5 file is saved (dataBase) par_dir
-        # TODO: check - if h5 is in folder on nas or in parent then download h5 instead
-        # TODO: change - save initial_data_location to par dir on nas
-
+        # TODO: improve the logical flow of this method,
+        # the goal is to be given data in whatever format it is in and produce an h5 file and read it in
+        
         # save to a single location
         database_loc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         database_loc = os.path.join(database_loc, 'dataBases')
@@ -111,10 +110,9 @@ class DataTypeBridge(IndependentStepClass):
 
                     if not os.path.exists(os.path.join(database_loc, h5_name)):
                         self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
-                    else:
-                        folders[i] = database_loc
-                else:
-                    folders[i] = database_loc
+                
+                folders[i] = database_loc
+
 
         # Load in H5 and build independent params
         H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
