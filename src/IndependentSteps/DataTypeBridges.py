@@ -50,7 +50,7 @@ class DataTypeBridge(IndependentStepClass):
             **kwargs):
         # TODO: change - the location that the h5 file is saved (dataBase) par_dir
         # TODO: check - if h5 is in folder on nas or in parent then download h5 instead
-        # TODO: 
+        # TODO: change - save initial_data_location to par dir on nas
 
         # save to a single location
         database_loc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -78,7 +78,6 @@ class DataTypeBridge(IndependentStepClass):
                         self.convert_folder_to_H5(ds, h5_name, nucChannel, cytoChannel)
                 folders = os.path.dirname(local_dataset_location)
 
-
         # if data is on originates from the nas
         else:
             if type(initial_data_location) == str:
@@ -97,28 +96,40 @@ class DataTypeBridge(IndependentStepClass):
             for i, location in enumerate(initial_data_location):
                 destination = folders[i]
                 h5_name = h5_names[i]
-                if is_folder:
-                    self.download_folder_from_NAS(location, destination, connection_config_location)
-                else:
-                    self.download_file_from_NAS(location, destination, connection_config_location)
-                self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
+                if not os.path.exists(os.path.join(location, h5_name)):
+                    nas = NASConnection(pathlib.Path(connection_config_location))
+                    list_dir = nas.read_files(os.path.dirname(location))
+                    if h5_name in list_dir:
+                        location = os.path.join(os.path.pardir(location), h5_name)
+                        is_folder = False
+                    if is_folder:
+                        self.download_folder_from_NAS(location, destination, connection_config_location)
+                    else:
+                        self.download_file_from_NAS(location, destination, connection_config_location)
+
+                    self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
-        return self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
+        
+        H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
+        return {'local_dataset_location':H5_locations, 'h5_file': h5_files, 
+                'total_num_chunks': num_chuncks, 'images': images, 'masks': masks,
+                'independent_params': ip, 'position_indexs': position_indexs,
+                'initial_data_location': [os.path.dirname(l) for l in initial_data_location] if initial_data_location is not None else None}
 
     def download_folder_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
         if not os.path.exists(local_folder_path):
-            nas = NASConnection(pathlib.Path(connection_config_location))
             os.makedirs(local_folder_path, exist_ok=True)
+            nas = NASConnection(pathlib.Path(connection_config_location))
             nas.copy_folder(remote_folder_path=pathlib.Path(remote_path), 
                         local_folder_path=local_folder_path)
             
     def download_file_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
         if not os.path.exists(os.path.join(local_folder_path, os.path.basename(remote_path))):
-            nas = NASConnection(pathlib.Path(connection_config_location))
             os.makedirs(local_folder_path, exist_ok=True)
+            nas = NASConnection(pathlib.Path(connection_config_location))
             nas.download_file(remote_file_path=pathlib.Path(remote_path), 
                         local_folder_path=local_folder_path)
 
@@ -184,8 +195,7 @@ class DataTypeBridge(IndependentStepClass):
                 else:
                     print('Something is broken')
 
-        return {'local_dataset_location':H5_locations, 'h5_file': h5_files, 'total_num_chunks': num_chuncks, 'images': images, 'masks': masks,
-                'independent_params': ip, 'position_indexs': position_indexs}
+        return H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs
     
     def delete_folder(self, folder):
         shutil.rmtree(folder)
