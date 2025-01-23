@@ -18,3 +18,4 @@ config_nas.yml
 *.json
 /src/__pycache__
 /src/SequentialSteps/__pycache__
+*.pyc
