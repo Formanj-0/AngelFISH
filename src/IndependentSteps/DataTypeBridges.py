@@ -96,10 +96,12 @@ class DataTypeBridge(IndependentStepClass):
             for i, location in enumerate(initial_data_location):
                 destination = folders[i]
                 h5_name = h5_names[i]
-                if not os.path.exists(os.path.join(location, h5_name)):
+                if not os.path.exists(os.path.join(database_loc, h5_name)):
                     nas = NASConnection(pathlib.Path(connection_config_location))
                     list_dir = nas.read_files(os.path.dirname(location))
                     if h5_name in list_dir:
+                        destination = database_loc
+                        folders[i] = destination
                         location = os.path.join(os.path.dirname(location), h5_name)
                         is_folder = False
                     if is_folder:
@@ -107,10 +109,14 @@ class DataTypeBridge(IndependentStepClass):
                     else:
                         self.download_file_from_NAS(location, destination, connection_config_location)
 
-                    self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
+                    if not os.path.exists(os.path.join(database_loc, h5_name)):
+                        self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
+                    else:
+                        folders[i] = database_loc
+                else:
+                    folders[i] = database_loc
 
         # Load in H5 and build independent params
-        
         H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
         return {'local_dataset_location':H5_locations, 'h5_file': h5_files, 
                 'total_num_chunks': num_chuncks, 'images': images, 'masks': masks,
@@ -232,7 +238,7 @@ class FFF2NativeDataType(DataTypeBridge):
 
     def convert_folder_to_H5(self, folder, H5_name, name, nucChannel, cytoChannel): 
         # check if h5 file already exists
-        if os.path.exists(os.path.join(folder, H5_name)):
+        if os.path.exists(os.path.join(os.path.dirname(folder), H5_name)):
             return 'already exists'
         
         files = os.listdir(folder)
@@ -321,10 +327,10 @@ class FFF2NativeDataType(DataTypeBridge):
         imgs = imgs.rechunk((1, 1, -1, -1, -1, -1))
         masks = masks.rechunk((1, 1, -1, -1, -1, -1))
         
-        da.to_hdf5(os.path.join(folder, H5_name), {'/raw_images': imgs, '/masks': masks}, compression='gzip')
+        da.to_hdf5(os.path.join(os.path.dirname(folder), H5_name), {'/raw_images': imgs, '/masks': masks}, compression='gzip')
 
         metadata_str = json.dumps(img_metadata)
-        with h5py.File(os.path.join(folder, H5_name), 'a') as h5f:
+        with h5py.File(os.path.join(os.path.dirname(folder), H5_name), 'a') as h5f:
             if '/metadata' in h5f:
                 del h5f['/metadata']
             h5f.create_dataset('/metadata', data=metadata_str)
