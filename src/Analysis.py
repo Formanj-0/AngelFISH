@@ -153,9 +153,10 @@ class AnalysisManager:
         self.masks = []
 
         for l in self.location:
-            with h5py.File(l, 'r') as h:
-                self.raw_images.append(da.from_array(h['raw_images']))
-                self.masks.append(da.from_array(h['masks']))
+            # with h5py.File(l, 'r') as h:
+            self.h5_files.append(h5py.File(l))
+            self.raw_images.append(da.from_array(self.h5_files[-1]['raw_images']))
+            self.masks.append(da.from_array(self.h5_files[-1]['masks']))
         return self.raw_images, self.masks
     
     def close(self):
@@ -782,13 +783,10 @@ class SpotDetection_Confirmation_ER(Analysis):
         if self.h5_idx is None or self.fov is None:
             raise ValueError("h5_idx or fov is not set. Cannot display segmentation.")
 
-        try:
-            img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
-            img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
-            mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
-            mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
-        except Exception as e:
-            raise ValueError(f"Error accessing datasets: {e}")
+        img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
+        img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
+        mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
+        mask_cyto = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
         for ax in axs:
