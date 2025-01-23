@@ -724,7 +724,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         """
         self.spots     = self.am.select_datasets('spotresults')
         self.cellspots  = self.am.select_datasets('cellresults')
-        self.cellprop    = self.am.select_datasets('cell_properties')
+        self.cellprops    = self.am.select_datasets('cell_properties')
         self.clusters  = self.am.select_datasets('clusterresults')
 
         self.images, self.masks = self.am.get_images_and_masks()

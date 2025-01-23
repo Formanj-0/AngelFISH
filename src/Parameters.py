@@ -409,70 +409,71 @@ class DataContainer(Parameters):
         np.save(os.path.join(folder_path, f'{name}_{file_index}.npy'), value)
 
     def load_temp_data(self):
-        if self.temp is None:
-            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
+        if self.temp is not None:
+            # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
-        # Load masks and images
-        if self.images is not None:
-            del self.images
-        if self.masks is not None:
-            del self.masks
-        gc.collect()
+            # Load masks and images
+            if self.images is not None:
+                del self.images
+            if self.masks is not None:
+                del self.masks
+            gc.collect()
 
-        # Load everything else:
-        # go through all remaining folders in temp
-        data = {}
-        for folder in os.listdir(self.temp.name):
-            folder_path = os.path.join(self.temp.name, folder)
-            files = os.listdir(folder_path)
-            csv_files = [f for f in files if f.endswith('.csv')]
-            json_files = [f for f in files if f.endswith('.json')]
-            npy_files = [f for f in files if f.endswith('.npy')]
+            # Load everything else:
+            # go through all remaining folders in temp
+            data = {}
+            for folder in os.listdir(self.temp.name):
+                folder_path = os.path.join(self.temp.name, folder)
+                files = os.listdir(folder_path)
+                csv_files = [f for f in files if f.endswith('.csv')]
+                json_files = [f for f in files if f.endswith('.json')]
+                npy_files = [f for f in files if f.endswith('.npy')]
 
-            if len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
-                if len(csv_files) == 1:
-                    df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
-                else:
-                    df = []
-                    for c in csv_files:
-                        df.append(pd.read_csv(os.path.join(folder_path, c)))
-                    df = pd.concat(df, axis=0)
-                setattr(self, folder, df)
-                data[folder] = df
-
-            elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
-                if len(json_files) == 1:
-                    with open(os.path.join(folder_path, json_files[0]), 'r') as f:
-                        json_data = json.load(f)
-                else:
-                    json_data = []
-                    for j in json_files:
-                        with open(os.path.join(folder_path, j), 'r') as f:
-                            json_data.append(json.load(f))
-                setattr(self, folder, json_data)
-                data[folder] = json_data
-
-            elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
-                try:
-                    npy_data = da.from_npy_stack(folder_path)
-                except:
-                    if len(npy_files) == 1:
-                        npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                if len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
+                    if len(csv_files) == 1:
+                        df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
                     else:
-                        npy_data = []
-                        for n in npy_files:
-                            npy_data.append(np.load(os.path.join(folder_path, n)))
-                        npy_data = np.concatenate(npy_data, axis=0)
-                setattr(self, folder, npy_data)
-                data[folder] = npy_data
+                        df = []
+                        for c in csv_files:
+                            df.append(pd.read_csv(os.path.join(folder_path, c)))
+                        df = pd.concat(df, axis=0)
+                    setattr(self, folder, df)
+                    data[folder] = df
 
-            else:
-                raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+                elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
+                    if len(json_files) == 1:
+                        with open(os.path.join(folder_path, json_files[0]), 'r') as f:
+                            json_data = json.load(f)
+                    else:
+                        json_data = []
+                        for j in json_files:
+                            with open(os.path.join(folder_path, j), 'r') as f:
+                                json_data.append(json.load(f))
+                    setattr(self, folder, json_data)
+                    data[folder] = json_data
 
-        return data
+                elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
+                    try:
+                        npy_data = da.from_npy_stack(folder_path)
+                    except:
+                        if len(npy_files) == 1:
+                            npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                        else:
+                            npy_data = []
+                            for n in npy_files:
+                                npy_data.append(np.load(os.path.join(folder_path, n)))
+                            npy_data = np.concatenate(npy_data, axis=0)
+                    setattr(self, folder, npy_data)
+                    data[folder] = npy_data
+
+                else:
+                    raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+
+            return data
 
     def delete_temp(self):
-        self.temp.cleanup()
+        if self.temp is not None:
+            self.temp.cleanup()
 
     def _update(self):
         self.load_temp_data()
