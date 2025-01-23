@@ -17,7 +17,6 @@ from skimage.io import imsave
 import tempfile
 import json
 
-@dataclass
 class Parameters(ABC):
     """
     This class is used to store the parameters of the pipeline.
@@ -34,6 +33,7 @@ class Parameters(ABC):
         return instance
 
     def __init__(self):
+        super().__init__()
         self.state = 'global'
         self.instances = []
     
@@ -115,7 +115,8 @@ class Parameters(ABC):
     def todict(self):
         # Convert all attributes of the instance to a dictionary
         # return {field.name: getattr(self, field.name) for field in fields(self)}
-        return {**{field.name: getattr(self, field.name) for field in fields(self)}, **vars(self)}
+        # return {**{field.name: getattr(self, field.name) for field in fields(self)}, **vars(self)}
+        return vars(self)
     
     def reset(self):
         for field in fields(self):
@@ -133,14 +134,16 @@ class Parameters(ABC):
         params = {}
         if self.state == 'global':
             for instance in Parameters()._instances:
+                instance._update()
                 # check for duplicates and raise an error if found
-                duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
+                duplicate_keys = list(set(params.keys()).intersection(set(instance.todict().keys())))
+                duplicate_keys = [key for key in duplicate_keys if key not in {'kwargs', 'state', 'instances', 'init'}]
                 if duplicate_keys:
-                    if duplicate_keys != {'kwargs'} and duplicate_keys != {'state'}:
-                        raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
+                    raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
                 params.update(instance.todict())
         else:
             for instance in self.instances:
+                instance._update()
                 # check for duplicates and raise an error if found
                 duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
                 if duplicate_keys:
@@ -156,7 +159,9 @@ class Parameters(ABC):
             i.state = self.state
         self.clear_instances()
 
-@dataclass
+    def _update(self):
+        pass
+
 class ScopeClass(Parameters):
     """
     Class to store the parameters of the microscope.
@@ -168,19 +173,26 @@ class ScopeClass(Parameters):
     Default values will be for Terminator Scope
     
     """
-    voxel_size_yx: int = 130
-    spot_z: int = 500
-    spot_yx: int = 360
-    microscope_saving_format: str = 'pycromanager'
 
-    def __init__(self, **kwargs):
-        self.state = 'global'
+
+    def __init__(self,    
+                 voxel_size_yx: int = 130,
+                 spot_z: int = 500,
+                 spot_yx: int = 360,
+                **kwargs):
+        super().__init__()
+        if not hasattr(self, 'init'):
+            self.state = 'global'
+            self.voxel_size_yx = voxel_size_yx
+            self.spot_z = spot_z
+            self.spot_yx = spot_yx
+            self.init = True
+
         if kwargs is not None: # TODO this needs to be moved up but it has issues being in parmaeters class
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
 
-@dataclass
 class Experiment(Parameters):
     """
     
@@ -190,18 +202,29 @@ class Experiment(Parameters):
 
     The data must already be downloaded at this point and are in tiff for each image
     """
-    initial_data_location: Union[str, list[str]] = None
-    index_dict: dict = None
-    nucChannel: int = None
-    cytoChannel: int = None
-    FISHChannel: Union[list[int], int] = None
-    voxel_size_z: int = 300  # This is voxel
-    independent_params: Union[dict, list[dict]] = None
-    kwargs: dict = None
-    timestep_s: float = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, 
+                    initial_data_location: Union[str, list[str]] = None,
+                    index_dict: dict = None,
+                    nucChannel: int = None,
+                    cytoChannel: int = None,
+                    FISHChannel: Union[list[int], int] = None,
+                    voxel_size_z: int = 300,
+                    independent_params: Union[dict, list[dict]] = [{}],
+                    timestep_s: float = None,
+                    **kwargs):
+        super().__init__()
         self.state = 'global'
+        if not hasattr(self, 'init'):
+            self.initial_data_location = initial_data_location
+            self.index_dict = index_dict
+            self.nucChannel = nucChannel
+            self.cytoChannel = cytoChannel
+            self.FISHChannel = FISHChannel
+            self.voxel_size_z = voxel_size_z
+            self.independent_params = independent_params
+            self.timestep_s = timestep_s
+            self.init = True
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -240,27 +263,32 @@ class Experiment(Parameters):
             self.independent_params = [{}]
 
 
-@dataclass
-class DataContainer(Parameters):
-    local_dataset_location: Union[list[pathlib.Path], pathlib.Path] = None
-    h5_file: h5py.File = None
-    total_num_chunks: int = None
-    images: da = None
-    masks: da = None
-    temp: tempfile.TemporaryDirectory = None
-    clear_after_error: bool = True
 
-    def __init__(self, **kwargs):
+class DataContainer(Parameters):
+    def __init__(self, 
+                local_dataset_location: Union[list[pathlib.Path], pathlib.Path] = None,
+                h5_file: h5py.File = None,
+                total_num_chunks: int = None,
+                images: da = None,
+                masks: da = None,
+                temp: tempfile.TemporaryDirectory = None,
+                clear_after_error: bool = True,
+                **kwargs):
+        super().__init__()
+        if not hasattr(self, 'init'):
+            self.local_dataset_location = local_dataset_location
+            self.h5_file = h5_file
+            self.total_num_chunks = total_num_chunks
+            self.images = images
+            self.masks = masks
+            self.temp = temp
+            self.clear_after_error = clear_after_error
+            self.init = True
+
         self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
-        self.__post_init__()
-
-    def __post_init__(self):
-        if self.temp is None:
-            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
-        self.load_temp_data()
 
     def __setattr__(self, name, value):
         if name == 'total_num_chunks':
@@ -282,6 +310,8 @@ class DataContainer(Parameters):
             self.local_dataset_location = [self.local_dataset_location]
 
     def save_results(self, kwargs: dict, p:int = None, t:int = None, parameters = None):
+        if self.temp is None:
+            self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
         parameters = Parameters() if parameters is None else parameters
         if kwargs is not None:
             for name, value in kwargs.items():
@@ -379,98 +409,118 @@ class DataContainer(Parameters):
         np.save(os.path.join(folder_path, f'{name}_{file_index}.npy'), value)
 
     def load_temp_data(self):
-        # Load masks and images
-        if self.images is not None:
-            del self.images
-        if self.masks is not None:
-            del self.masks
-        gc.collect()
+        if self.temp is not None:
+            # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
-        # Load everything else:
-        # go through all remaining folders in temp
-        data = {}
-        for folder in os.listdir(self.temp.name):
-            folder_path = os.path.join(self.temp.name, folder)
-            files = os.listdir(folder_path)
-            csv_files = [f for f in files if f.endswith('.csv')]
-            json_files = [f for f in files if f.endswith('.json')]
-            npy_files = [f for f in files if f.endswith('.npy')]
+            # Load masks and images
+            if self.images is not None:
+                del self.images
+            if self.masks is not None:
+                del self.masks
+            gc.collect()
 
-            if len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
-                if len(csv_files) == 1:
-                    df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
-                else:
-                    df = []
-                    for c in csv_files:
-                        df.append(pd.read_csv(os.path.join(folder_path, c)))
-                    df = pd.concat(df, axis=0)
-                setattr(self, folder, df)
-                data[folder] = df
+            # Load everything else:
+            # go through all remaining folders in temp
+            data = {}
+            for folder in os.listdir(self.temp.name):
+                folder_path = os.path.join(self.temp.name, folder)
+                files = os.listdir(folder_path)
+                csv_files = [f for f in files if f.endswith('.csv')]
+                json_files = [f for f in files if f.endswith('.json')]
+                npy_files = [f for f in files if f.endswith('.npy')]
 
-            elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
-                if len(json_files) == 1:
-                    with open(os.path.join(folder_path, json_files[0]), 'r') as f:
-                        json_data = json.load(f)
-                else:
-                    json_data = []
-                    for j in json_files:
-                        with open(os.path.join(folder_path, j), 'r') as f:
-                            json_data.append(json.load(f))
-                setattr(self, folder, json_data)
-                data[folder] = json_data
-
-            elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
-                try:
-                    npy_data = da.from_npy_stack(folder_path)
-                except:
-                    if len(npy_files) == 1:
-                        npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                if len(csv_files) > 0 and len(json_files) == 0 and len(npy_files) == 0:
+                    if len(csv_files) == 1:
+                        df = pd.read_csv(os.path.join(folder_path, csv_files[0]))
                     else:
-                        npy_data = []
-                        for n in npy_files:
-                            npy_data.append(np.load(os.path.join(folder_path, n)))
-                        npy_data = np.concatenate(npy_data, axis=0)
-                setattr(self, folder, npy_data)
-                data[folder] = npy_data
+                        df = []
+                        for c in csv_files:
+                            df.append(pd.read_csv(os.path.join(folder_path, c)))
+                        df = pd.concat(df, axis=0)
+                    setattr(self, folder, df)
+                    data[folder] = df
 
-            else:
-                raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+                elif len(csv_files) == 0 and len(json_files) > 0 and len(npy_files) == 0:
+                    if len(json_files) == 1:
+                        with open(os.path.join(folder_path, json_files[0]), 'r') as f:
+                            json_data = json.load(f)
+                    else:
+                        json_data = []
+                        for j in json_files:
+                            with open(os.path.join(folder_path, j), 'r') as f:
+                                json_data.append(json.load(f))
+                    setattr(self, folder, json_data)
+                    data[folder] = json_data
 
-        return data
+                elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
+                    try:
+                        npy_data = da.from_npy_stack(folder_path)
+                    except:
+                        if len(npy_files) == 1:
+                            npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                        else:
+                            npy_data = []
+                            for n in npy_files:
+                                npy_data.append(np.load(os.path.join(folder_path, n)))
+                            npy_data = np.concatenate(npy_data, axis=0)
+                    setattr(self, folder, npy_data)
+                    data[folder] = npy_data
+
+                else:
+                    raise ValueError('All temp files must either be csv, json, or npy and not a mix')
+
+            return data
 
     def delete_temp(self):
-        self.temp.cleanup()
+        if self.temp is not None:
+            self.temp.cleanup()
 
+    def _update(self):
+        self.load_temp_data()
 
 repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-@dataclass
 class Settings(Parameters):
-    name: str = None
-    return_data_to_NAS: bool = True
-    NUMBER_OF_CORES: int = 4
-    save_files: bool = True
-    num_chunks_to_run: int = 100_000
-    download_data_from_NAS: bool = True  # 0 for local, 1 for NAS
-    connection_config_location: str = str(os.path.join(repo_path, 'config_nas.yml')) #r"C:\Users\Jack\Desktop\config_nas.yml" # r"/home/formanj/FISH_Processing_JF/FISH_Processing/config.yml"
-    share_name: str = 'share'
-    display_plots: bool = True
-    load_in_mask: bool = False
-    mask_structure: dict = None
-    order: str = 'pt'
+    def __init__(self,     
+                    name: str = None,
+                    return_data_to_NAS: bool = True,
+                    NUMBER_OF_CORES: int = 4,
+                    save_files: bool = True,
+                    num_chunks_to_run: int = 100_000,
+                    connection_config_location: str = str(os.path.join(repo_path, 'config_nas.yml')),
+                    display_plots: bool = True,
+                    load_in_mask: bool = False,
+                    mask_structure: dict = None,
+                    order: str = 'pt',
+                    share_name: str = 'share',
+                    **kwargs):
+        super().__init__()
+        if not hasattr(self, 'init'):
+            self.name = name
+            self.return_data_to_NAS = return_data_to_NAS
+            self.NUMBER_OF_CORES = NUMBER_OF_CORES
+            self.save_files = save_files
+            self.num_chunks_to_run = num_chunks_to_run
+            self.connection_config_location = connection_config_location
+            self.display_plots = display_plots
+            self.load_in_mask = load_in_mask
+            self.mask_structure = mask_structure
+            self.order = order
+            self.state = 'global'
+            self.share_name = share_name
+            self.init = True
 
-    def __init__(self, **kwargs):
-        self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
-        
         if self.connection_config_location is None:
             self.connection_config_location = str(os.path.join(repo_path, 'config_nas.yml'))
-        
         if self.mask_structure is None:
             self.mask_structure = {'masks': ('ptczyx', None, None), 
                                    'cell_mask': ('zyx', 'cytoChannel', 'masks'), 
                                    'nuc_mask': ('zyx', 'nucChannel', 'masks')}
+        if kwargs is not None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
     def validate_parameters(self):
         if self.name is None:
