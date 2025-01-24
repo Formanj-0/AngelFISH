@@ -132,6 +132,12 @@ class Parameters(ABC):
     def get_parameters(self) -> dict:
         # Get all the parameters of all instances of the class
         params = {}
+
+        # Ensure all instances have the 'state' attribute
+        for instance in Parameters._instances:
+            if not hasattr(instance, 'state'):
+                instance.state = 'global'  # Assign a default value if missing
+
         if self.state == 'global':
             for instance in Parameters()._instances:
                 instance._update()
