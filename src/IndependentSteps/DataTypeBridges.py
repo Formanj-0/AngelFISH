@@ -82,19 +82,10 @@ class DataTypeBridge(IndependentStepClass):
             if type(initial_data_location) == str:
                 initial_data_location = [initial_data_location]
             # TODO check if name ends in a . something and download that file
-            # is_folder = all(not initial_data_location[0].endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
-            # names = [os.path.basename(location) for location in initial_data_location]
             names = []
             h5_names = []
             folders = []
 
-            # if not is_folder:
-            #     h5_names = [os.path.splitext(n)[0] + '.h5' for n in names]
-            #     folders = [database_loc]*len(names)
-            # else:
-            #     folders = [os.path.join(database_loc, n) for n in names]
-            #     h5_names = [n + '.h5' for n in names]
-            
             for i, location in enumerate(initial_data_location):
                 is_folder = all(not location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
                 name = os.path.basename(location)
@@ -132,8 +123,6 @@ class DataTypeBridge(IndependentStepClass):
                 # conver to an h5
                 if not os.path.exists(os.path.join(database_loc, h5_name)):
                     self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
-                
-
 
         # Load in H5 and build independent params
         H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
