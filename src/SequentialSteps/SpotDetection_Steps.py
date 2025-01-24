@@ -57,7 +57,7 @@ class SpotDetection(SequentialStepsClass):
     def extract_cell_level_results(self, image, spots, clusters, nucChannel, FISHChannel, 
                                    nuc_mask, cell_mask, timepoint, fov,
                                     verbose, display_plots) -> pd.DataFrame:
-        if (nuc_mask is not None and nuc_mask.max() != 0 or cell_mask is not None and cell_mask.max() != 0):
+        if ((nuc_mask is not None and nuc_mask.max() != 0) and (cell_mask is not None and cell_mask.max() != 0)):
             #### Extract cell level results
             nuc = image[nucChannel, :, :, :].squeeze().compute()
             rna = image[FISHChannel, :, :, :].squeeze().compute()

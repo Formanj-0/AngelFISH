@@ -82,36 +82,57 @@ class DataTypeBridge(IndependentStepClass):
             if type(initial_data_location) == str:
                 initial_data_location = [initial_data_location]
             # TODO check if name ends in a . something and download that file
-            is_folder = all(not initial_data_location[0].endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
-            names = [os.path.basename(location) for location in initial_data_location]
- 
-            if not is_folder:
-                h5_names = [os.path.splitext(n)[0] + '.h5' for n in names]
-                folders = [database_loc]*len(names)
-            else:
-                folders = [os.path.join(database_loc, n) for n in names]
-                h5_names = [n + '.h5' for n in names]
+            # is_folder = all(not initial_data_location[0].endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
+            # names = [os.path.basename(location) for location in initial_data_location]
+            names = []
+            h5_names = []
+            folders = []
+
+            # if not is_folder:
+            #     h5_names = [os.path.splitext(n)[0] + '.h5' for n in names]
+            #     folders = [database_loc]*len(names)
+            # else:
+            #     folders = [os.path.join(database_loc, n) for n in names]
+            #     h5_names = [n + '.h5' for n in names]
             
             for i, location in enumerate(initial_data_location):
-                destination = folders[i]
-                h5_name = h5_names[i]
-                if not os.path.exists(os.path.join(database_loc, h5_name)):
+                is_folder = all(not location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
+                name = os.path.basename(location)
+
+                if is_folder: # if it is a folder (aka pyromanager datasets)
+                    h5_name = name + '.h5'
+                    destination = os.path.join(database_loc, name)
+
+                    # check if the data set has already been converted to an h5 and is in par dir
                     nas = NASConnection(pathlib.Path(connection_config_location))
                     list_dir = nas.read_files(os.path.dirname(location))
-                    if h5_name in list_dir:
+                    if h5_name in list_dir: 
                         destination = database_loc
-                        folders[i] = destination
                         location = os.path.join(os.path.dirname(location), h5_name)
                         is_folder = False
-                    if is_folder:
-                        self.download_folder_from_NAS(location, destination, connection_config_location)
-                    else:
-                        self.download_file_from_NAS(location, destination, connection_config_location)
 
-                    if not os.path.exists(os.path.join(database_loc, h5_name)):
-                        self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
+                else: # if it is an h5 or single file
+                    h5_name = os.path.splitext(name)[0] + '.h5'
+                    destination = database_loc
+
+                folders.append(database_loc)
+                h5_names.append(h5_name)
+                names.append(name)
+
+                # stops if h5 is already there
+                if os.path.exists(os.path.join(database_loc, h5_name)):
+                    continue
+
+                # download the data
+                if is_folder:
+                    self.download_folder_from_NAS(location, destination, connection_config_location)
+                else:
+                    self.download_file_from_NAS(location, destination, connection_config_location)
+
+                # conver to an h5
+                if not os.path.exists(os.path.join(database_loc, h5_name)):
+                    self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
                 
-                folders[i] = database_loc
 
 
         # Load in H5 and build independent params
