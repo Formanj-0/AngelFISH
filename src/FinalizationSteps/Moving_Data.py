@@ -44,7 +44,7 @@ class return_to_NAS(Moving_Data):
 
 class remove_local_data(Moving_Data):
     def main(self, local_dataset_location, **kwargs):
-        for folder in local_dataset_location:
+        for folder in local_dataset_location: # TODO: fix this so that it does not remove the entire directory
             shutil.rmtree(os.path.dirname(folder))
 
 class remove_local_data_but_keep_h5(Moving_Data):
@@ -57,18 +57,10 @@ class remove_local_data_but_keep_h5(Moving_Data):
                 else:
                     os.remove(os.path.join(os.path.dirname(folder), file))
 
-class remove_temp(Moving_Data):
-    def main(self, **kwargs):
-        if os.path.exists(DataContainer().temp.name):
-            DataContainer().delete_temp()
-
 class remove_all_temp(Moving_Data):
-    def main(self, temp_name, **kwargs):
-        for root, dirs, files in os.walk(temp_name):
-            for dir in dirs:
-                if 'temp' in dir:
-                    shutil.rmtree(os.path.join(root, dir))
-        shutil.rmtree(temp_name)
+    def main(self, temp, **kwargs):
+        temp.cleanup()
+
 
 
 

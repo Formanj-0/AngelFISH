@@ -1,1 +1,1 @@
-from .DataTypeBridges import Pycromanager2NativeDataType, FFF2NativeDataType, Avg_Parameters, NativeDataType
+from .DataTypeBridges import Pycromanager2NativeDataType, FFF2NativeDataType, Avg_Parameters, NativeDataType, SingleTIFF2NativeDataType

@@ -48,7 +48,7 @@ class Pipeline:
         # check if all required parameters are present
         params = self.get_parameters()
 
-        params_to_ignore = ['nuc_mask', 'cell_mask', 'masks', 'images', 'image', 'fov', 'timepoint', 'data_container', 'parameters']
+        params_to_ignore = ['nuc_mask', 'cell_mask', 'masks', 'images', 'image', 'fov', 'timepoint', 'data_container', 'parameters', 'kwargs']
 
         # check if all no default parameters are present
         for param in self.no_default_params:
@@ -119,9 +119,9 @@ class Pipeline:
         if self.experiment_location is None:
             self.experiment_location = params['initial_data_location']
         if self.steps is None:
-            self.steps = [*[i.__class__.__name__ for i in self.get_independent_steps()._instances], 
-                          *[i.__class__.__name__ for i in self.get_sequential_steps()._instances],
-                          *[i.__class__.__name__ for i in self.get_finalization_steps()._instances]]
+            self.steps = [*[i.__class__.__name__ for i in self.get_independent_steps()], 
+                          *[i.__class__.__name__ for i in self.get_sequential_steps()],
+                          *[i.__class__.__name__ for i in self.get_finalization_steps()]]
         
 
         # self.modify_kwargs(params)

@@ -62,7 +62,7 @@ def handle_dict(d):
 
 
 class Save_Outputs(Saving):
-    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
+    def run(self, p: int = None, t:int = None, data_container = None, parameters = None): # TODO confirm - local_dataset_location is where the h5_file is in the correct dataBase
         data_container = DataContainer() if data_container is None else data_container
         parameters = Parameters() if parameters is None else parameters
         kwargs = self.load_in_parameters(p, t, parameters)
@@ -149,6 +149,7 @@ class Save_Outputs(Saving):
                             print(f'saving {key}')
                             group.create_dataset(key, data=data)
 
+                            h5_file.flush()
                             h5_file.close()
 
 
