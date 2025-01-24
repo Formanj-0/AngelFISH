@@ -415,7 +415,7 @@ class DataContainer(Parameters):
         np.save(os.path.join(folder_path, f'{name}_{file_index}.npy'), value)
 
     def load_temp_data(self):
-        if self.temp is not None:
+        if self.temp is not None and os.path.exists(self.temp.name):
             # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
             # Load masks and images
