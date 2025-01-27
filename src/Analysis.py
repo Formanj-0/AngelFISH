@@ -83,13 +83,18 @@ class AnalysisManager:
             list_df = []
             for i,l in enumerate(self.location):
                 with h5py.File(l, 'r') as f:
-                    try:
+                    ds = f[dataset_name]
+                    if ds.dtype == pd.DataFrame:
                         df = pd.read_hdf(f.filename, f"{self.analysis_names[i]}/{dataset_name}")
                         df['h5_idx'] = i
                         list_df.append(df)
                         is_df = True
-                    except:
-                        raise Exception(f'IDK what to do with {dataset_name} data type, please add code to incoperate this data')
+                    elif ds.dtype == np.dtype('O'):
+                        array = da.from_array(ds)
+                        list_df.append(array)
+                    else:
+                        raise Exception(f'IDK what to do with {dataset_name}, {ds.dtype} data type, please add code to incorporate this data')
+
             if is_df:
                 return(pd.concat(list_df, axis=0))
         else:
