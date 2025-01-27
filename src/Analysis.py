@@ -250,7 +250,7 @@ def draw_spot_arrow(ax, x, y, color='gold'):
 ########################################
 # Main Class
 ########################################
-class SpotDetection_Confirmation(Analysis):
+class SpotDetection_SNRConfirmation(Analysis):
     """
     SpotDetection_Confirmation class with:
       1) Full-FOV segmentation (nucleus & cytoplasm)
@@ -668,10 +668,7 @@ class SpotDetection_Confirmation(Analysis):
         pass
 
 
-
-########################################
-# Helper functions for drawing spots
-########################################
+#%%
 def draw_spot_circle(ax, x, y, radius=4, color='gold'):
     """
     Draws an unfilled circle around (x,y).
@@ -680,34 +677,16 @@ def draw_spot_circle(ax, x, y, radius=4, color='gold'):
                              edgecolor=color, linewidth=2)
     ax.add_patch(circle)
 
-def draw_spot_arrow(ax, x, y, color='gold'):
+def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
     """
-    Draws a small arrow from (x, y) to (x+3, y).
+    Draws a small arrow from (x + offset, y) to (x, y).
+    By default offset is negative => arrow from left to right.
     """
-    ax.arrow(x-4, y, 3, 0, head_width=3,
+    ax.arrow(x + offset, y, -offset, 0, head_width=5,
              color=color, length_includes_head=True)
 
 
-########################################
-# Main Class
-########################################
-class SpotDetection_Confirmation_ER(Analysis):
-    """
-    SpotDetection_Confirmation class that ensures the same cell and same chosen spot
-    are shown across all displays:
-
-      1) Full-FOV segmentation (nucleus & cytoplasm)
-      2) Zoom on the same cell with percentile-based contrast (circles/arrows for spots)
-      3) Further zoom on the same single spot
-      4) 2x2 figure for SNR thresholds (all referencing the same cell/spot)
-         plus printing spots before/after threshold
-      5) Histograms and scatter plots for the same cell's spots (SNR thresholds)
-      6) Further zoom on that same single spot for each threshold T
-      7) Single figure (1x3) for Weighted Approach
-      8) Further zoom on that single spot for Weighted threshold
-      9) Weighted SNR logic: discard SNR < 2, remove bottom 20% in [2,5), keep others -> keep_wsnr
-    """
-
+class Spot_Cluster_Analysis_WeightedSNR(Analysis):
     def __init__(self, am, seed=None):
         super().__init__(am, seed)
         self.fov = None
@@ -717,11 +696,12 @@ class SpotDetection_Confirmation_ER(Analysis):
         # Weighted threshold new attribute:
         self.snr_cutoff_2_5 = None  # 20th percentile in [2,5)
 
-        # We will store the "chosen_spot" once we pick it, for re-use
+        # We store the chosen_spot and chosen_ts for re-use
         self.chosen_spot = None
+        self.chosen_ts   = None  # NEW: store the "chosen" TS if you want only one
 
     ############################################################
-    # 0) Data loading and saving
+    # Data loading and saving
     ############################################################
     def get_data(self):
         """
@@ -743,7 +723,6 @@ class SpotDetection_Confirmation_ER(Analysis):
         self.clusters.to_csv(os.path.join(location, 'clusters.csv'), index=False)
         self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
         self.cellspots.to_csv(os.path.join(location, 'cellspots.csv'), index=False)
-
 
     ############################################################
     # Weighted SNR: snr < 2 => discard, [2,5) => remove bottom 20%, keep >=5
@@ -777,6 +756,47 @@ class SpotDetection_Confirmation_ER(Analysis):
 
         return self.snr_cutoff_2_5
 
+    ###########################################################################
+    # 0) Choose the FOV / cell such that the cell definitely has a TS (if possible)
+    ###########################################################################
+    def _pick_random_FOV_and_cell_with_TS(self):
+        """
+        1) Picks a random h5_idx, then a random FOV among it.
+        2) Tries to pick a cell that has at least one TS (is_nuc=1).
+           If none found, it picks any cell.
+        """
+        self.h5_idx = np.random.choice(self.spots['h5_idx'])
+        possible_fovs = self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'].unique()
+        self.fov = np.random.choice(possible_fovs)
+
+        # All cell labels in this FOV
+        valid_cells = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] != 0)
+        ]['cell_label'].unique()
+
+        if len(valid_cells) == 0:
+            print(f"No valid cells in FOV={self.fov}. Aborting.")
+            return
+
+        # Among these cells, find which have a TS
+        cells_with_TS = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['is_nuc'] == 1)
+        ]['cell_label'].unique()
+
+        # If none has TS, just pick any random cell
+        if len(cells_with_TS) == 0:
+            self.cell_label = np.random.choice(valid_cells)
+            print(f"No cell in FOV={self.fov} has TS => picked random cell_label={self.cell_label}")
+        else:
+            # pick from among cells_with_TS
+            chosen = np.random.choice(cells_with_TS)
+            self.cell_label = chosen
+            print(f"Chose cell_label={chosen} which has TS (FOV={self.fov}).")
+
     ############################################################
     # 1) Full-FOV segmentation (nucleus & cytoplasm)
     ############################################################
@@ -788,6 +808,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         if self.h5_idx is None or self.fov is None:
             raise ValueError("h5_idx or fov is not set. Cannot display segmentation.")
 
+        # self.fov was chosen already, so now we just read & visualize it
         img_nuc = self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
         img_cyto = self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :].compute()
         mask_nuc = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :].compute()
@@ -810,14 +831,17 @@ class SpotDetection_Confirmation_ER(Analysis):
         plt.tight_layout()
         plt.show()
 
-    ############################################################
-    # 2) Zoom on cell with percentile-based contrast
-    ############################################################
+    ###########################################################################
+    # 2) Zoom on cell with percentile-based contrast (modified to pick a spot not in TS)
+    ###########################################################################
     def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
         """
         Zoom on bounding box, compute percentile-based contrast,
-        then overlay spots with circles or arrows. 
-        We'll store the chosen_spot in self.chosen_spot so it can be used by all subsequent displays.
+        then overlay:
+          - gold circles for all 'regular' spots
+          - chosen_spot in blue circle
+          - TS in magenta arrows (with cluster size)
+          - foci in cyan arrows
         """
         cdf = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
@@ -827,6 +851,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         if cdf.empty:
             print("Cell not found. Aborting cell zoom.")
             self.chosen_spot = None
+            self.chosen_ts   = None
             return None
 
         row_min = int(cdf['cell_bbox-0'].iloc[0])
@@ -855,36 +880,71 @@ class SpotDetection_Confirmation_ER(Analysis):
         mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
         mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
 
-        crop_nuc_dask = mask_nuc_2d[row_min:row_max, col_min:col_max]
-        crop_nucmask = crop_nuc_dask.compute() if hasattr(crop_nuc_dask, "compute") else crop_nuc_dask
+        crop_nucmask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = mask_cyto_2d[row_min:row_max, col_min:col_max]
 
-        crop_cyto_dask = mask_cyto_2d[row_min:row_max, col_min:col_max]
-        crop_cytomask = crop_cyto_dask.compute() if hasattr(crop_cyto_dask, "compute") else crop_cyto_dask
-
-        # Spots in this cell
+        # All spots in this cell
         cell_spots = self.spots[
             (self.spots['h5_idx'] == self.h5_idx) &
             (self.spots['fov'] == self.fov) &
             (self.spots['cell_label'] == self.cell_label)
         ]
-        if cell_spots.empty:
-            print("No spots found in the cell.")
-            self.chosen_spot = None
-            return None
 
-        # Randomly choose one spot in this cell => store it
-        chosen_spot = cell_spots.sample(1).iloc[0]
-        self.chosen_spot = chosen_spot
+        # Transcription sites in this cell
+        cell_TS = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['cell_label'] == self.cell_label) &
+            (self.clusters['is_nuc'] == 1)
+        ]
+        # Foci in this cell
+        cell_foci = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['cell_label'] == self.cell_label) &
+            (self.clusters['is_nuc'] == -1)
+        ]
+
+        if cell_foci.empty:
+            print('No Foci in this cell')
+            return
+
+        if cell_spots.empty:
+            print("No spots in this cell.")
+            self.chosen_spot = None
+            self.chosen_ts   = None
+        else:
+            # Pick a TS if it exists, for reference in the next steps
+            if not cell_TS.empty:
+                # For example, pick one TS (largest or random)
+                self.chosen_ts = cell_TS.sample(1).iloc[0]
+            else:
+                self.chosen_ts = None
+
+            # We want a spot that is NOT in any TS cluster
+            if not cell_TS.empty:
+                ts_cluster_ids = cell_TS['cluster_index'].unique()
+                non_ts_spots = cell_spots[~cell_spots['cluster_index'].isin(ts_cluster_ids)]
+                if non_ts_spots.empty:
+                    # If *all* spots are in TS, fallback = just pick any
+                    chosen_spot = cell_spots.sample(1).iloc[0]
+                else:
+                    chosen_spot = non_ts_spots.sample(1).iloc[0]
+            else:
+                # No TS => pick any spot
+                chosen_spot = cell_spots.sample(1).iloc[0]
+
+            self.chosen_spot = chosen_spot
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
-        # Left: raw spot channel + mask overlay
+        # Left: raw channel + mask overlay
         axs[0].imshow(crop_spot_stretched, cmap='gray')
         axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
         axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
         axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
 
-        # Right: contrast-stretched channel
+        # Right: contrast-stretched
         axs[1].imshow(crop_spot_stretched, cmap='gray')
         axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
         axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
@@ -892,30 +952,49 @@ class SpotDetection_Confirmation_ER(Analysis):
 
         dx, dy = col_min, row_min
 
-        # Mark spots
+        # Draw all spots in gold circles
         for _, spot in cell_spots.iterrows():
             sx = spot['x_px'] - dx
             sy = spot['y_px'] - dy
-            color = 'blue' if (spot['x_px'] == chosen_spot['x_px'] and spot['y_px'] == chosen_spot['y_px']) else 'gold'
-            draw_spot_circle(axs[1], sx, sy, radius=4, color=color)
+            # if it's the chosen spot => color in blue
+            if self.chosen_spot is not None and (spot['x_px'] == self.chosen_spot['x_px']) and (spot['y_px'] == self.chosen_spot['y_px']):
+                draw_spot_circle(axs[1], sx, sy, radius=4, color='blue')
+            else:
+                draw_spot_circle(axs[1], sx, sy, radius=4, color='gold')
+
+        # Mark TS in magenta arrows
+        for _, tsrow in cell_TS.iterrows():
+            # If your cluster DF has centroid x_px,y_px => we can arrow that
+            sx = tsrow['x_px'] - dx
+            sy = tsrow['y_px'] - dy
+            draw_spot_arrow(axs[1], sx, sy, offset=-5, color='magenta')
+            cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
+            axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
+
+        # Mark foci in cyan arrows
+        for _, frow in cell_foci.iterrows():
+            sx = frow['x_px'] - dx
+            sy = frow['y_px'] - dy
+            draw_spot_arrow(axs[1], sx, sy, offset=5, color='cyan')
+            foci_size = getattr(frow, 'nb_spots', 1)
+            axs[1].text(sx - 12, yy, f'{foci_size}', color='cyan', fontsize=10)
 
         for ax in axs:
             ax.axis("off")
         plt.tight_layout()
         plt.show()
 
-        return chosen_spot
+        return self.chosen_spot
 
-    ############################################################
-    # 3) Further zoom on the same single spot
-    ############################################################
+    ###########################################################################
+    # 3) Further zoom on the same single spot - now also highlight TS
+    ###########################################################################
     def _display_zoom_on_one_spot(self, spotChannel):
         """
-        Further zoom on the same chosen_spot. 
-        If chosen_spot is None, do nothing.
+        Further zoom on the same chosen_spot. Also mark the chosen TS (magenta arrow).
         """
         if self.chosen_spot is None:
-            print("No chosen spot available for further zoom.")
+            print("No chosen_spot available for further zoom.")
             return
 
         chosen_spot = self.chosen_spot
@@ -936,9 +1015,7 @@ class SpotDetection_Confirmation_ER(Analysis):
 
         if sub_img.size > 0:
             p1, p99 = np.percentile(sub_img, (1, 99))
-            sub_img_stretched = exposure.rescale_intensity(
-                sub_img, in_range=(p1, p99), out_range=(0, 1)
-            )
+            sub_img_stretched = exposure.rescale_intensity(sub_img, in_range=(p1, p99), out_range=(0, 1))
         else:
             sub_img_stretched = sub_img
 
@@ -949,7 +1026,19 @@ class SpotDetection_Confirmation_ER(Analysis):
         # Mark chosen spot in blue
         draw_spot_circle(ax, pad, pad, radius=4, color='blue')
 
-        # Mark other spots in gold if they are in the patch
+        # If we have a chosen_ts, draw arrow for it if it's in our patch
+        if self.chosen_ts is not None:
+            tx = int(self.chosen_ts['x_px'])
+            ty = int(self.chosen_ts['y_px'])
+            rx = tx - x1
+            ry = ty - y1
+            if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
+                draw_spot_arrow(ax, rx, ry, offset=-5, color='magenta')
+                # Optionally annotate TS size:
+                csize = getattr(self.chosen_ts, 'nb_spots', 1)
+                ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
+
+        # Mark other spots in gold if they are inside the patch
         cell_spots = self.spots[
             (self.spots['h5_idx'] == self.h5_idx) &
             (self.spots['fov'] == self.fov) &
@@ -960,8 +1049,8 @@ class SpotDetection_Confirmation_ER(Analysis):
             ry = srow['y_px'] - y1
             if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
                 continue
-            # Avoid drawing the chosen spot in gold:
-            if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
+            # Avoid drawing chosen_spot in gold
+            if (srow['x_px'] == chosen_spot['x_px']) and (srow['y_px'] == chosen_spot['y_px']):
                 continue
             draw_spot_circle(ax, rx, ry, radius=3, color='gold')
 
@@ -969,17 +1058,13 @@ class SpotDetection_Confirmation_ER(Analysis):
         plt.tight_layout()
         plt.show()
 
-
-    ############################################################
-    # 4) Single figure with 2x2 subplots for SNR thresholds
-    ############################################################
+    ###########################################################################
+    # 4) SNR threshold figure – unchanged logic, but also draw TS in magenta
+    ###########################################################################
     def _display_snr_thresholds(self, spotChannel, cytoChannel, nucChannel, thresholds=[0, 2, 3, 4]):
         """
-        Show a figure for each threshold T in 'thresholds':
-        - Left subplot: gold circles for spots above SNR >= T, 
-                        red circles for spots below T 
-        - Right subplot: only gold circles for spots with SNR >= T
-        All still referencing the same cell/fov. The chosen_spot is drawn accordingly.
+        We simply add TS arrow in each subplot so that TS is always shown,
+        ignoring SNR threshold for TS spots.
         """
         cdf = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
@@ -995,7 +1080,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         row_max = int(cdf['cell_bbox-2'].iloc[0])
         col_max = int(cdf['cell_bbox-3'].iloc[0])
 
-        # Max-projection
+        # 2D max-projection
         img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
         img_spot_2d = np.max(img_spot_3d, axis=0)
 
@@ -1010,18 +1095,15 @@ class SpotDetection_Confirmation_ER(Analysis):
         else:
             crop_spot_stretched = crop_spot
 
-        # Masks
         mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
         mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
         mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
         mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
 
-        crop_nuc = mask_nuc_2d[row_min:row_max, col_min:col_max]
-        crop_nucmask = crop_nuc.compute() if hasattr(crop_nuc, 'compute') else crop_nuc
-        crop_cyto = mask_cyto_2d[row_min:row_max, col_min:col_max]
-        crop_cytomask = crop_cyto.compute() if hasattr(crop_cyto, 'compute') else crop_cyto
+        crop_nucmask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = mask_cyto_2d[row_min:row_max, col_min:col_max]
 
-        fig, axs = plt.subplots(len(thresholds), 2, figsize=(12, len(thresholds)*6))
+        fig, axs = plt.subplots(len(thresholds), 2, figsize=(12, len(thresholds)*5))
         dx, dy = col_min, row_min
 
         cell_spots_all = self.spots[
@@ -1029,8 +1111,15 @@ class SpotDetection_Confirmation_ER(Analysis):
             (self.spots['fov'] == self.fov) &
             (self.spots['cell_label'] == self.cell_label)
         ]
+        # TS in this cell
+        cell_TS = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['cell_label'] == self.cell_label) &
+            (self.clusters['is_nuc'] == 1)
+        ]
 
-        # Different red shades
+        # For coloring sub-threshold spots
         shades_of_red = [
             (1, 0.8, 0.8),
             (1, 0.6, 0.6),
@@ -1040,41 +1129,50 @@ class SpotDetection_Confirmation_ER(Analysis):
 
         for i, thr in enumerate(thresholds):
             # Left
-            ax = axs[i, 0]
-            ax.imshow(crop_spot_stretched, cmap='gray')
-            ax.imshow(crop_nucmask, cmap='Blues', alpha=0.2)
-            ax.imshow(crop_cytomask, cmap='Reds', alpha=0.2)
-            ax.set_title(f"SNR >= {thr} (Shaded Reds, Gold)")
+            axL = axs[i, 0]
+            axL.imshow(crop_spot_stretched, cmap='gray')
+            axL.imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+            axL.imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+            axL.set_title(f"SNR >= {thr} (Reds + Gold)")
 
-            # Spots below threshold(s)
-            for j, t in enumerate(thresholds[:i + 1]):
-                low_spots = cell_spots_all[
-                    (cell_spots_all['snr'] < t)
-                    & (cell_spots_all['snr'] >= (thresholds[j-1] if j>0 else 0))
-                ]
-                shade_color = shades_of_red[j % len(shades_of_red)]
-                for _, spot in low_spots.iterrows():
-                    sx = spot['x_px'] - dx
-                    sy = spot['y_px'] - dy
-                    draw_spot_circle(ax, sx, sy, radius=4, color=shade_color)
+            # Show TS in magenta
+            for _, tsrow in cell_TS.iterrows():
+                sx = tsrow['x_px'] - dx
+                sy = tsrow['y_px'] - dy
+                draw_spot_arrow(axL, sx, sy, offset=-5, color='magenta')
 
-            # Spots above threshold in gold
-            in_spots = cell_spots_all[cell_spots_all['snr'] >= thr]
-            for _, spot in in_spots.iterrows():
+            # Draw below-thr spots in gradation of reds
+            above_spots = cell_spots_all[cell_spots_all['snr'] >= thr]
+            below_spots = cell_spots_all[cell_spots_all['snr'] < thr]
+            shade_color = shades_of_red[i]
+            # Mark below in red
+            for _, spot in below_spots.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
-                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
-            ax.axis("off")
+                draw_spot_circle(axL, sx, sy, radius=4, color=shade_color)
+
+            # Mark above threshold in gold
+            for _, spot in above_spots.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(axL, sx, sy, radius=4, color='gold')
+            axL.axis("off")
 
             # Right
-            ax = axs[i, 1]
-            ax.imshow(crop_spot_stretched, cmap='gray')
-            ax.set_title(f"SNR >= {thr} (Detected Spots)")
-            for _, spot in in_spots.iterrows():
+            axR = axs[i, 1]
+            axR.imshow(crop_spot_stretched, cmap='gray')
+            axR.set_title(f"SNR >= {thr} (Detected Spots Only)")
+            # again draw TS
+            for _, tsrow in cell_TS.iterrows():
+                sx = tsrow['x_px'] - dx
+                sy = tsrow['y_px'] - dy
+                draw_spot_arrow(axR, sx, sy, offset=-5, color='magenta')
+
+            for _, spot in above_spots.iterrows():
                 sx = spot['x_px'] - dx
                 sy = spot['y_px'] - dy
-                draw_spot_circle(ax, sx, sy, radius=4, color='gold')
-            ax.axis("off")
+                draw_spot_circle(axR, sx, sy, radius=4, color='gold')
+            axR.axis("off")
 
         plt.tight_layout()
         plt.show()
@@ -1095,7 +1193,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         for thr in thresholds:
             n_before = len(cell_spots_all)
             n_passed = len(cell_spots_all[cell_spots_all['snr'] >= thr])
-            print(f"Threshold SNR >= {thr}: {n_passed} kept / {n_before} total spots.")
+            print(f"Threshold SNR >= {thr}: {n_passed} kept / {n_before} total spots.")        
 
     ############################################################
     # 5) Histograms and scatter plots for SNR thresholds
@@ -1373,16 +1471,78 @@ class SpotDetection_Confirmation_ER(Analysis):
         ax.axis("off")
         plt.tight_layout()
         plt.show()
+    ###########################################################################
+    # 4b) Overview bar-plot by 'time': fraction of cells with 1,2,3,>=4 TS
+    ###########################################################################
+    def _display_ts_barplot_by_time(self):
+        """
+        For each 'time', display the fraction (percentage) of cells
+        that have exactly 1, 2, 3, or >=4 TS.
+        We consider all cells that appear in `cellprops`.
+        """
+        # TS = is_nuc==1 in cluster df
+        ts_df = self.clusters[self.clusters['is_nuc'] == 1]
 
+        # Count how many TS per (time, fov, cell_label)
+        ts_count_df = (
+            ts_df.groupby(['h5_idx','time','fov','cell_label'])
+                .size()
+                .reset_index(name='ts_count')
+        )
 
-    ############################################################
-    # Extra: overview 1x3 plots for entire DataFrame (not just one cell)
-    ############################################################
+        # Merge with all possible cells to ensure cells with 0 TS appear
+        all_cells = self.cellprops[['h5_idx','fov','cell_label']].drop_duplicates()
+        merged = pd.merge(all_cells, ts_count_df,
+                          on=['h5_idx','fov','cell_label'],
+                          how='left')
+        merged['ts_count'] = merged['ts_count'].fillna(0)
+
+        # Categorize
+        def cat_func(x):
+            if x == 1:
+                return '1'
+            elif x == 2:
+                return '2'
+            elif x == 3:
+                return '3'
+            elif x >= 4:
+                return '>=4'
+            else:
+                return None  # 0 or negative => not in 1,2,3,>=4
+
+        merged['ts_cat'] = merged['ts_count'].apply(cat_func)
+
+        # For fraction, we consider all cells at that time as denominator
+        grouped = merged.groupby(['time','ts_cat']).size().reset_index(name='count')
+
+        total_by_time = merged.groupby('time').size().reset_index(name='total')
+        grouped = pd.merge(grouped, total_by_time, on='time')
+        grouped['fraction'] = grouped['count'] / grouped['total']
+
+        # pivot so each row= time, columns= ts_cat, value= fraction
+        pivoted = grouped.pivot(index='time', columns='ts_cat', values='fraction').fillna(0)
+
+        # Just keep columns = ['1','2','3','>=4'] if they exist
+        existing_cols = [c for c in ['1','2','3','>=4'] if c in pivoted.columns]
+        pivoted = pivoted[existing_cols]
+
+        ax = pivoted.plot(kind='bar', stacked=False, figsize=(8,5))
+        ax.set_xlabel("time")
+        ax.set_ylabel("Fraction of cells")
+        ax.set_title("Fraction of cells with 1,2,3, >=4 TS by time")
+        plt.legend(title="TS count")
+        plt.tight_layout()
+        plt.show()
+
+    ###########################################################################
+    # 12) Overview plots: Intensity, snr (Hitograms and scatter plots) & TS distribution bar-plot
+    ###########################################################################
     def _display_overview_plots(self):
         """
         1) SNR histogram (ALL spots in entire dataset)
         2) Intensity histogram (ALL spots)
         3) Scatter (signal vs. snr) for ALL
+        4) Bar plot of fraction of cells with 1,2,3,>=4 TS per time
         """
         if self.spots.empty:
             print("No spots to display in overview plots.")
@@ -1390,20 +1550,20 @@ class SpotDetection_Confirmation_ER(Analysis):
 
         fig, axs = plt.subplots(1, 3, figsize=(18,5))
 
-        # SNR histogram
+        # 1) SNR histogram
         axs[0].hist(self.spots['snr'], bins=60, alpha=0.7, edgecolor='black')
         axs[0].set_title("SNR Histogram (All Spots)")
         axs[0].set_xlabel("SNR")
         axs[0].set_ylabel("Count")
 
-        # Intensity histogram
+        # 2) Intensity histogram
         axs[1].hist(self.spots['signal'], bins=60, alpha=0.7, edgecolor='black')
         axs[1].set_title("Intensity Histogram (All Spots)")
-        axs[1].set_xlabel("Intensity")
+        axs[1].set_xlabel("Signal")
         axs[1].set_ylabel("Count")
         axs[1].set_yscale("log")
 
-        # Scatter: signal vs. snr
+        # 3) Scatter: signal vs. snr
         axs[2].scatter(self.spots['signal'], self.spots['snr'], s=10, alpha=0.6)
         axs[2].set_title("Signal vs. SNR (All Spots)")
         axs[2].set_xlabel("Signal")
@@ -1414,9 +1574,13 @@ class SpotDetection_Confirmation_ER(Analysis):
         plt.tight_layout()
         plt.show()
 
-    ############################################################
-    # MAIN DISPLAY: orchestrates the steps
-    ############################################################
+        # 4) Now show the bar plot for TS distribution by time
+        self._display_ts_barplot_by_time()
+
+
+    ###########################################################################
+    # MAIN display orchestrator
+    ###########################################################################
     def display(
         self, 
         newFOV=True, 
@@ -1428,18 +1592,18 @@ class SpotDetection_Confirmation_ER(Analysis):
     ):
         """
         Steps:
-          1) Weighted SNR threshold assigned
-          2) Possibly pick random FOV/cell (only once)
+          1) Weighted SNR threshold assigned (keep_wsnr)
+          2) Possibly pick random FOV/cell that has a TS if possible
           3) Full-FOV segmentation
-          4) Zoom on cell (pick ONE chosen_spot) -> stored in self.chosen_spot
-          5) Zoom on that same chosen_spot
-          6) 2x2 figure for SNR thresholds -> same cell
+          4) Zoom on cell (pick ONE chosen_spot not in TS) -> store in self.chosen_spot
+          5) Zoom on that same chosen_spot + chosen_ts
+          6) 2x2 figure for SNR thresholds -> same cell (TS in magenta)
           7) Print spots before/after threshold
           8) Histograms & scatter for SNR thresholds -> same cell
           9) Further zoom for each threshold T, re-using the same chosen_spot
          10) Weighted threshold figure (1x3)
-         11) Weighted threshold further zoom on same chosen_spot
-         12) Optional overview for entire dataset
+         11) Weighted threshold further zoom
+         12) Overview for entire dataset (including new TS bar-plot)
         """
 
         # 1) Weighted threshold logic
@@ -1447,28 +1611,29 @@ class SpotDetection_Confirmation_ER(Analysis):
         print(f"[INFO] Weighted threshold in [2,5): bottom 20% => {thr_val:.2f}")
 
         # 2) Possibly pick new FOV/cell (once)
-        if self.fov is None or newFOV:
-            self.h5_idx = np.random.choice(self.spots['h5_idx'])
-            self.fov = np.random.choice(self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'])
+        if newFOV or self.fov is None:
+            self._pick_random_FOV_and_cell_with_TS()
 
-        if self.cell_label is None or newCell:
-            valid_labels = self.cellprops[
+        elif newCell or self.cell_label is None:
+            # Force picking a new cell from the same FOV
+            valid_cells = self.cellprops[
                 (self.cellprops['h5_idx'] == self.h5_idx) &
                 (self.cellprops['fov'] == self.fov) &
                 (self.cellprops['cell_label'] != 0)
             ]['cell_label'].unique()
-            if len(valid_labels) == 0:
+            if len(valid_cells) == 0:
                 print(f"No valid cell_label in FOV={self.fov}. Aborting.")
                 return
-            self.cell_label = np.random.choice(valid_labels)
+            self.cell_label = np.random.choice(valid_cells)
+            print(f"Chose new random cell_label={self.cell_label} in same FOV={self.fov}.")
 
         # 3) Full-FOV segmentation
         self._display_full_fov_segmentation(cytoChannel, nucChannel)
 
-        # 4) Zoom on cell -> picks ONE chosen_spot
+        # 4) Zoom on cell
         self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
         if self.chosen_spot is None:
-            return  # no spot found, skip
+            return  # no spot => abort
 
         # 5) Zoom on that same chosen_spot
         self._display_zoom_on_one_spot(spotChannel)
@@ -1482,7 +1647,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         # 8) Histograms & scatter for SNR thresholds (cell-based)
         self._display_threshold_histograms_scatter(thresholds)
 
-        # 9) Further zoom for each threshold T -> same chosen_spot
+        # 9) Further zoom for each threshold T
         self._display_further_zoom_for_thresholds(spotChannel, thresholds)
 
         # 10) Weighted threshold figure (1x3)
@@ -1491,7 +1656,7 @@ class SpotDetection_Confirmation_ER(Analysis):
         # 11) Weighted threshold further zoom
         self._display_weighted_zoom_on_spot(spotChannel)
 
-        # 12) Optional overview for entire dataset
+        # 12) Overview for entire dataset (including bar plot of TS distribution)
         self._display_overview_plots()
 
     ############################################################
@@ -1545,7 +1710,7 @@ class SpotDetection_Confirmation_ER(Analysis):
     def gate():
         pass
 
-
+#%%
 class GR_Confirmation(Analysis):
     """
     GR_Confirmation is a class designed to confirm the accuracy of image processing results 
@@ -1580,20 +1745,18 @@ class GR_Confirmation(Analysis):
     def __init__(self, am, seed=None):
         super().__init__(am, seed)
 
+    ############################################################
+    # Data loading and saving
+    ############################################################
     def get_data(self):
-        """ Load data from the AnalysisManager. """
-        h = self.am.h5_files
-        d = self.am.select_datasets('cell_properties')
+        """
+        Loads cellprops from HDF5,
+        plus images and masks.
+        """
+        self.cellprops    = self.am.select_datasets('cell_properties')
+        self.images, self.masks = self.am.get_images_and_masks()
 
-        # Concatenate cellprops from each file, track which h5 they came from
-        self.cellprops = []
-        for i, s in enumerate(h):
-            df = pd.read_hdf(s.filename, d[i].name)
-            df['h5_idx'] = [i] * len(df)
-            self.cellprops.append(df)
-        self.cellprops = pd.concat(self.cellprops, axis=0)
-
-        # Illumination profiles (assume shape: (n_channels, y, x))
+        # Illumination profiles (assume shape: (n_channels, y, x)) #TODO Fix this to get profiles...
         self.illumination_profiles = da.from_array(
             self.am.select_datasets('illumination_profiles')
         )[0, :, :, :]
@@ -1601,14 +1764,13 @@ class GR_Confirmation(Analysis):
         # Corrected illumination profile
         self.corrected_IL_profile = da.from_array(
             self.am.select_datasets('corrected_IL_profile')
-        )[0, :, :, :]
-
-        # Images and masks (often shape: (n_fov, 1, n_channels, [z,] y, x))
-        self.images, self.masks = self.am.get_images_and_masks()
+        )[0, :, :, :]        
 
     def save_data(self, location):
-        """ Save cell properties to CSV. """
-        self.cellprops.to_csv(location, index=False)
+        """
+        Saves the DataFrames to CSV.
+        """
+        self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
 
     def display(self, GR_Channel: int = 0, Nuc_Channel: int = 1):
         """
@@ -1920,15 +2082,6 @@ class GR_Confirmation(Analysis):
         return pd.DataFrame(
             rows,
             columns=['measurement', 'numpy calculated', 'step calculated', 'are close?']
-        )        
-
-if __name__ == '__main__':
-    ana = AnalysisManager(r'\\munsky-nas.engr.colostate.edu\share\smFISH_images\Eric_smFISH_images\20220225\DUSP1_Dex_0min_20220224\DUSP1_Dex_0min_20220224.h5')
-    print(ana.location)
-    print(ana.h5_files)
-    ana.list_analysis_names()
-    ana.select_analysis()
-    ana.list_datasets()
-    print(ana.select_datasets('df_spotresults'))
+        )       
 
 
