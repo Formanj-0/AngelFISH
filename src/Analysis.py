@@ -76,27 +76,32 @@ class AnalysisManager:
         self.close()
         return self.analysis_names
 
-    def select_datasets(self, dataset_name) -> list:
+    def select_datasets(self, dataset_name, dtype = None) -> list:
         self.open()
         if hasattr(self, 'analysis_names'):
             is_df = False
+            is_array = False
             list_df = []
+            list_arrays = []
             for i,l in enumerate(self.location):
                 with h5py.File(l, 'r') as f:
-                    ds = f[dataset_name]
-                    if ds.dtype == pd.DataFrame:
+                    if dtype is not None and dtype == 'dataframe':
                         df = pd.read_hdf(f.filename, f"{self.analysis_names[i]}/{dataset_name}")
                         df['h5_idx'] = i
                         list_df.append(df)
                         is_df = True
-                    elif ds.dtype == np.dtype('O'):
-                        array = da.from_array(ds)
-                        list_df.append(array)
+                    elif dtype is not None and dtype == 'array':
+                        array = da.from_array(f[f'{self.analysis_names[i]}/{dataset_name}'])
+                        list_arrays.append(array)
+                        is_array = True
                     else:
-                        raise Exception(f'IDK what to do with {dataset_name}, {ds.dtype} data type, please add code to incorporate this data')
+                        raise Exception(f'IDK what to do with {dataset_name} data type, accepted types are dataframe, array. please add code to incorporate this data')
 
             if is_df:
                 return(pd.concat(list_df, axis=0))
+            
+            if is_array:
+                return list_arrays
         else:
             print('select an anlysis')
 
@@ -1749,22 +1754,15 @@ class GR_Confirmation(Analysis):
     # Data loading and saving
     ############################################################
     def get_data(self):
-        """
-        Loads cellprops from HDF5,
-        plus images and masks.
-        """
-        self.cellprops    = self.am.select_datasets('cell_properties')
-        self.images, self.masks = self.am.get_images_and_masks()
+        """ Load data from the AnalysisManager. """
+        h = self.am.h5_files
+        self.cellprops = self.am.select_datasets('cell_properties', 'dataframe')
 
-        # Illumination profiles (assume shape: (n_channels, y, x)) #TODO Fix this to get profiles...
-        self.illumination_profiles = da.from_array(
-            self.am.select_datasets('illumination_profiles')
-        )[0, :, :, :]
+        # Illumination profiles (assume shape: (n_channels, y, x))
+        self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
 
         # Corrected illumination profile
-        self.corrected_IL_profile = da.from_array(
-            self.am.select_datasets('corrected_IL_profile')
-        )[0, :, :, :]        
+        self.corrected_IL_profile = self.am.select_datasets('corrected_IL_profile', 'array')[0]
 
     def save_data(self, location):
         """
@@ -1799,8 +1797,8 @@ class GR_Confirmation(Analysis):
         pseudo_cyto_3d = gr_mask - nuc_mask
 
         # Illumination for GR
-        gr_illum = self.illumination_profiles[GR_Channel]  # (y, x)
-        gr_corrected = self.corrected_IL_profile[GR_Channel]  # (y, x)
+        gr_illum = self.illumination_profiles[GR_Channel].compute()  # (y, x)
+        gr_corrected = self.corrected_IL_profile[GR_Channel].compute()  # (y, x)
 
         # ------------------------------------------------
         # 1. ILLUMINATION CORRECTION
