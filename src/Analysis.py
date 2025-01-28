@@ -13,7 +13,7 @@ import matplotlib.patches as mpatches
 import copy
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-
+from datetime import datetime
 
 class AnalysisManager:
     """
@@ -122,12 +122,43 @@ class AnalysisManager:
         if analysis_name is not None:
             self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if s == analysis_name]
 
-    def _filter_on_date(self, date_range):
-        self.dates = [s.split('_')[-1] for s in self.analysis_names]
+    def _filter_on_date(self, date_range: tuple):
+        """
+        Filters self.analysis_names and corresponding HDF5 file locations based on a given date range.
+        
+        Parameters:
+            date_range (tuple): A tuple (start_date, end_date) where dates are in the format 'YYYY-MM-DD'.
+        """
         if date_range is not None:
+            # Parse start and end dates
             start_date, end_date = date_range
-            gooddates = [start_date <= date <= end_date for date in self.dates]
-            self.analysis_names = [a for i, a in enumerate(self.analysis_names) if gooddates[i]]
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+            # Filter locations based on their dates in the file paths or analysis names
+            filtered_locations = []
+            filtered_analysis_names = []
+
+            for loc, analysis in zip(self.location, self.analysis_names):
+                # Extract the date from the file path or analysis name (e.g., "20220707")
+                try:
+                    date_str = analysis.split('_')[-1]  # Assuming the date is part of the analysis name
+                    file_date = datetime.strptime(date_str, '%Y-%m-%d')
+                except ValueError:
+                    # Handle cases where the date is not properly formatted
+                    continue
+                
+                # Check if the date is within the range
+                if start_date <= file_date <= end_date:
+                    filtered_locations.append(loc)
+                    filtered_analysis_names.append(analysis)
+            
+            # Update self.location and self.analysis_names with the filtered results
+            self.location = filtered_locations
+            self.analysis_names = filtered_analysis_names
+
+            print(f"Filtered locations: {self.location}")
+            print(f"Filtered analysis names: {self.analysis_names}")
 
     def _filter_locations(self):
         # select data sets with self.data, and self.dataset
