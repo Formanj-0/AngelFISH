@@ -713,10 +713,10 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         Loads spots, clusters, cellprops, cellspots from HDF5,
         plus images and masks.
         """
-        self.spots     = self.am.select_datasets('spotresults')
-        self.cellspots  = self.am.select_datasets('cellresults')
-        self.cellprops    = self.am.select_datasets('cell_properties')
-        self.clusters  = self.am.select_datasets('clusterresults')
+        self.spots     = self.am.select_datasets('spotresults', dtype = 'dataframe')
+        self.cellspots  = self.am.select_datasets('cellresults', dtype = 'dataframe')
+        self.cellprops    = self.am.select_datasets('cell_properties', dtype = 'dataframe')
+        self.clusters  = self.am.select_datasets('clusterresults', dtype = 'dataframe')
 
         self.images, self.masks = self.am.get_images_and_masks()
 
@@ -767,14 +767,18 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
     def _pick_random_FOV_and_cell_with_TS(self):
         """
         1) Picks a random h5_idx, then a random FOV among it.
-        2) Tries to pick a cell that has at least one TS (is_nuc=1).
-           If none found, it picks any cell.
+        2) Tries to pick a cell with:
+        - TS (is_nuc=1), Foci (is_nuc=-1), and Spot (priority).
+        - If no such cell, tries TS and Spot.
+        - If no such cell, tries Spot only.
+        - If no such cell, picks any valid cell.
         """
+        # Step 1: Randomly pick h5_idx and FOV
         self.h5_idx = np.random.choice(self.spots['h5_idx'])
         possible_fovs = self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'].unique()
         self.fov = np.random.choice(possible_fovs)
 
-        # All cell labels in this FOV
+        # Step 2: Find all valid cells in this FOV
         valid_cells = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
             (self.cellprops['fov'] == self.fov) &
@@ -785,22 +789,45 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             print(f"No valid cells in FOV={self.fov}. Aborting.")
             return
 
-        # Among these cells, find which have a TS
+        # Step 3: Find cells with TS (is_nuc == 1)
         cells_with_TS = self.clusters[
             (self.clusters['h5_idx'] == self.h5_idx) &
             (self.clusters['fov'] == self.fov) &
             (self.clusters['is_nuc'] == 1)
         ]['cell_label'].unique()
 
-        # If none has TS, just pick any random cell
-        if len(cells_with_TS) == 0:
-            self.cell_label = np.random.choice(valid_cells)
-            print(f"No cell in FOV={self.fov} has TS => picked random cell_label={self.cell_label}")
+        # Step 4: Find cells with Foci (is_nuc == -1)
+        cells_with_Foci = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['is_nuc'] == -1)
+        ]['cell_label'].unique()
+
+        # Step 5: Find cells with Spot
+        cells_with_Spot = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov)
+        ]['cell_label'].unique()
+
+        # Step 6: Apply selection logic
+        # Priority: TS + Foci + Spot > TS + Spot > Spot > Any valid cell
+        cells_with_TS_Foci_Spot = np.intersect1d(np.intersect1d(cells_with_TS, cells_with_Foci), cells_with_Spot)
+        cells_with_TS_Spot = np.intersect1d(cells_with_TS, cells_with_Spot)
+        cells_with_Spot_only = cells_with_Spot
+
+        if len(cells_with_TS_Foci_Spot) > 0:
+            self.cell_label = np.random.choice(cells_with_TS_Foci_Spot)
+            print(f"Chose cell_label={self.cell_label} with TS, Foci, and Spot (FOV={self.fov}).")
+        elif len(cells_with_TS_Spot) > 0:
+            self.cell_label = np.random.choice(cells_with_TS_Spot)
+            print(f"Chose cell_label={self.cell_label} with TS and Spot (FOV={self.fov}).")
+        elif len(cells_with_Spot_only) > 0:
+            self.cell_label = np.random.choice(cells_with_Spot_only)
+            print(f"Chose cell_label={self.cell_label} with Spot only (FOV={self.fov}).")
         else:
-            # pick from among cells_with_TS
-            chosen = np.random.choice(cells_with_TS)
-            self.cell_label = chosen
-            print(f"Chose cell_label={chosen} which has TS (FOV={self.fov}).")
+            # Final fallback: pick any valid cell
+            self.cell_label = np.random.choice(valid_cells)
+            print(f"No cell with TS, Foci, or Spot => picked random cell_label={self.cell_label} (FOV={self.fov}).")
 
     ############################################################
     # 1) Full-FOV segmentation (nucleus & cytoplasm)
@@ -912,7 +939,6 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         if cell_foci.empty:
             print('No Foci in this cell')
-            return
 
         if cell_spots.empty:
             print("No spots in this cell.")
@@ -1490,19 +1516,19 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # Count how many TS per (time, fov, cell_label)
         ts_count_df = (
-            ts_df.groupby(['h5_idx','time','fov','cell_label'])
+            ts_df.groupby(['h5_idx', 'time', 'fov', 'cell_label'])
                 .size()
                 .reset_index(name='ts_count')
         )
 
         # Merge with all possible cells to ensure cells with 0 TS appear
-        all_cells = self.cellprops[['h5_idx','fov','cell_label']].drop_duplicates()
+        all_cells = self.cellprops[['h5_idx', 'fov', 'cell_label']].drop_duplicates()
         merged = pd.merge(all_cells, ts_count_df,
-                          on=['h5_idx','fov','cell_label'],
-                          how='left')
+                        on=['h5_idx', 'fov', 'cell_label'],
+                        how='left')
         merged['ts_count'] = merged['ts_count'].fillna(0)
 
-        # Categorize
+        # Categorize: Include all cells in denominator but exclude TS == 0 in the plot
         def cat_func(x):
             if x == 1:
                 return '1'
@@ -1513,28 +1539,33 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             elif x >= 4:
                 return '>=4'
             else:
-                return None  # 0 or negative => not in 1,2,3,>=4
+                return '0'  # Explicitly mark 0 for clarity
 
         merged['ts_cat'] = merged['ts_count'].apply(cat_func)
 
-        # For fraction, we consider all cells at that time as denominator
-        grouped = merged.groupby(['time','ts_cat']).size().reset_index(name='count')
+        # For fraction, we consider all cells (including TS == 0) at that time as denominator
+        grouped = merged.groupby(['time', 'ts_cat']).size().reset_index(name='count')
 
+        # Calculate total cells per time point
         total_by_time = merged.groupby('time').size().reset_index(name='total')
         grouped = pd.merge(grouped, total_by_time, on='time')
         grouped['fraction'] = grouped['count'] / grouped['total']
 
-        # pivot so each row= time, columns= ts_cat, value= fraction
+        # Exclude TS == 0 from the plot (but they are still in the denominator)
+        grouped = grouped[grouped['ts_cat'] != '0']
+
+        # Pivot so each row= time, columns= ts_cat, value= fraction
         pivoted = grouped.pivot(index='time', columns='ts_cat', values='fraction').fillna(0)
 
-        # Just keep columns = ['1','2','3','>=4'] if they exist
-        existing_cols = [c for c in ['1','2','3','>=4'] if c in pivoted.columns]
+        # Just keep columns = ['1', '2', '3', '>=4'] if they exist
+        existing_cols = [c for c in ['1', '2', '3', '>=4'] if c in pivoted.columns]
         pivoted = pivoted[existing_cols]
 
-        ax = pivoted.plot(kind='bar', stacked=False, figsize=(8,5))
+        # Plotting the stacked bar chart
+        ax = pivoted.plot(kind='bar', stacked=False, figsize=(8, 5))
         ax.set_xlabel("time")
         ax.set_ylabel("Fraction of cells")
-        ax.set_title("Fraction of cells with 1,2,3, >=4 TS by time")
+        ax.set_title("Fraction of cells with 1, 2, 3, >=4 TS by time")
         plt.legend(title="TS count")
         plt.tight_layout()
         plt.show()
