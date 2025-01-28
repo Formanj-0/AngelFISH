@@ -1542,7 +1542,10 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         that have exactly 1, 2, 3, or >=4 TS.
         We consider all cells that appear in `cellprops`.
         """
-        # TS = is_nuc==1 in cluster df
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        
+        # TS = is_nuc==1 in clusters df
         ts_df = self.clusters[self.clusters['is_nuc'] == 1]
 
         # Count how many TS per (time, fov, cell_label)
@@ -1552,14 +1555,19 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
                 .reset_index(name='ts_count')
         )
 
-        # Merge with all possible cells to ensure cells with 0 TS appear
-        all_cells = self.cellprops[['h5_idx', 'fov', 'cell_label']].drop_duplicates()
-        merged = pd.merge(all_cells, ts_count_df,
-                        on=['h5_idx', 'fov', 'cell_label'],
-                        how='left')
+        # Ensure we have each cell at each time in "all_cells"
+        all_cells = self.cellprops[['h5_idx', 'time', 'fov', 'cell_label']].drop_duplicates()
+
+        # Merge with ts_count_df so cells with no transcription sites get ts_count = 0
+        merged = pd.merge(
+            all_cells,
+            ts_count_df,
+            on=['h5_idx', 'time', 'fov', 'cell_label'],
+            how='left'
+        )
         merged['ts_count'] = merged['ts_count'].fillna(0)
 
-        # Categorize: Include all cells in denominator but exclude TS == 0 in the plot
+        # Categorize ts_count
         def cat_func(x):
             if x == 1:
                 return '1'
@@ -1570,11 +1578,11 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             elif x >= 4:
                 return '>=4'
             else:
-                return '0'  # Explicitly mark 0 for clarity
+                return '0'  # explicitly mark 0
 
         merged['ts_cat'] = merged['ts_count'].apply(cat_func)
 
-        # For fraction, we consider all cells (including TS == 0) at that time as denominator
+        # Count how many cells per time & ts_cat
         grouped = merged.groupby(['time', 'ts_cat']).size().reset_index(name='count')
 
         # Calculate total cells per time point
@@ -1582,17 +1590,17 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         grouped = pd.merge(grouped, total_by_time, on='time')
         grouped['fraction'] = grouped['count'] / grouped['total']
 
-        # Exclude TS == 0 from the plot (but they are still in the denominator)
+        # Exclude TS == 0 from the final plot (but they remain in the denominator)
         grouped = grouped[grouped['ts_cat'] != '0']
 
-        # Pivot so each row= time, columns= ts_cat, value= fraction
+        # Pivot so each row = time, columns = ts_cat, values = fraction
         pivoted = grouped.pivot(index='time', columns='ts_cat', values='fraction').fillna(0)
 
-        # Just keep columns = ['1', '2', '3', '>=4'] if they exist
+        # Reorder columns if they exist
         existing_cols = [c for c in ['1', '2', '3', '>=4'] if c in pivoted.columns]
         pivoted = pivoted[existing_cols]
 
-        # Plotting the stacked bar chart
+        # Plot a stacked bar chart
         ax = pivoted.plot(kind='bar', stacked=False, figsize=(8, 5))
         ax.set_xlabel("time")
         ax.set_ylabel("Fraction of cells")
