@@ -713,10 +713,10 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         Loads spots, clusters, cellprops, cellspots from HDF5,
         plus images and masks.
         """
-        self.spots     = self.am.select_datasets('spotresults', dtype = 'dataframe')
-        self.cellspots  = self.am.select_datasets('cellresults', dtype = 'dataframe')
-        self.cellprops    = self.am.select_datasets('cell_properties', dtype = 'dataframe')
-        self.clusters  = self.am.select_datasets('clusterresults', dtype = 'dataframe')
+        self.spots     = self.am.select_datasets('spotresults', 'dataframe')
+        self.cellspots  = self.am.select_datasets('cellresults', 'dataframe')
+        self.cellprops    = self.am.select_datasets('cell_properties', 'dataframe')
+        self.clusters  = self.am.select_datasets('clusterresults', 'dataframe')
 
         self.images, self.masks = self.am.get_images_and_masks()
 
