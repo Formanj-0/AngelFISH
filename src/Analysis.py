@@ -734,7 +734,8 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # We store the chosen_spot and chosen_ts for re-use
         self.chosen_spot = None
-        self.chosen_ts   = None  # NEW: store the "chosen" TS if you want only one
+        self.chosen_ts   = None 
+        self.chosen_foci = None
 
     ############################################################
     # Data loading and saving
@@ -831,7 +832,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         cells_with_Foci = self.clusters[
             (self.clusters['h5_idx'] == self.h5_idx) &
             (self.clusters['fov'] == self.fov) &
-            (self.clusters['is_nuc'] == -1)
+            (self.clusters['is_nuc'] == 0)
         ]['cell_label'].unique()
 
         # Step 5: Find cells with Spot
@@ -915,6 +916,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             print("Cell not found. Aborting cell zoom.")
             self.chosen_spot = None
             self.chosen_ts   = None
+            self.chosen_foci = None
             return None
 
         row_min = int(cdf['cell_bbox-0'].iloc[0])
@@ -960,12 +962,13 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             (self.clusters['cell_label'] == self.cell_label) &
             (self.clusters['is_nuc'] == 1)
         ]
+
         # Foci in this cell
         cell_foci = self.clusters[
             (self.clusters['h5_idx'] == self.h5_idx) &
             (self.clusters['fov'] == self.fov) &
             (self.clusters['cell_label'] == self.cell_label) &
-            (self.clusters['is_nuc'] == -1)
+            (self.clusters['is_nuc'] == 0)
         ]
 
         if cell_foci.empty:
@@ -975,14 +978,21 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             print("No spots in this cell.")
             self.chosen_spot = None
             self.chosen_ts   = None
+            self.chosen_foci = None
         else:
             # Pick a TS if it exists, for reference in the next steps
             if not cell_TS.empty:
-                # For example, pick one TS (largest or random)
-                self.chosen_ts = cell_TS.sample(1).iloc[0]
+                # For example, pick one TS (largest)
+                self.chosen_ts = cell_TS.iloc[0]
             else:
                 self.chosen_ts = None
-
+            
+            # Pick a foci if it exists, for reference in the next steps
+            if not cell_foci.empty:
+                # For example, pick one foci
+                self.chosen_foci = cell_foci.sample(1).iloc[0]
+            else:
+                self.chosen_foci = None
             # We want a spot that is NOT in any TS cluster
             if not cell_TS.empty:
                 ts_cluster_ids = cell_TS['cluster_index'].unique()
@@ -1029,7 +1039,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             # If your cluster DF has centroid x_px,y_px => we can arrow that
             sx = tsrow['x_px'] - dx
             sy = tsrow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=-5, color='magenta')
+            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='magenta')
             cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
             axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
 
@@ -1037,16 +1047,16 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         for _, frow in cell_foci.iterrows():
             sx = frow['x_px'] - dx
             sy = frow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=5, color='cyan')
+            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='cyan')
             foci_size = getattr(frow, 'nb_spots', 1)
-            axs[1].text(sx - 12, yy, f'{foci_size}', color='cyan', fontsize=10)
+            axs[1].text(sx - 12, sy, f'{foci_size}', color='cyan', fontsize=10)
 
         for ax in axs:
             ax.axis("off")
         plt.tight_layout()
         plt.show()
 
-        return self.chosen_spot
+        return self.chosen_spot, self.chosen_ts, self.chosen_foci
 
     ###########################################################################
     # 3) Further zoom on the same single spot - now also highlight TS
@@ -1095,10 +1105,22 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             rx = tx - x1
             ry = ty - y1
             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_arrow(ax, rx, ry, offset=-5, color='magenta')
+                draw_spot_arrow(ax, rx, ry, offset=-10, color='magenta')
                 # Optionally annotate TS size:
                 csize = getattr(self.chosen_ts, 'nb_spots', 1)
                 ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
+
+        # If we have a chosen_foci, draw arrow for it if it's in our patch
+        if self.chosen_foci is not None:
+            tx = int(self.chosen_foci['x_px'])
+            ty = int(self.chosen_foci['y_px'])
+            rx = tx - x1
+            ry = ty - y1
+            if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
+                draw_spot_arrow(ax, rx, ry, offset=-10, color='cyan')
+                # Optionally annotate TS size:
+                csize = getattr(self.chosen_foci, 'nb_spots', 1)
+                ax.text(rx - 12, ry, f"{csize}", color='cyan', fontsize=10)
 
         # Mark other spots in gold if they are inside the patch
         cell_spots = self.spots[
@@ -1180,7 +1202,13 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             (self.clusters['cell_label'] == self.cell_label) &
             (self.clusters['is_nuc'] == 1)
         ]
-
+        # Foci in this cell
+        cell_foci = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['cell_label'] == self.cell_label) &
+            (self.clusters['is_nuc'] == 0)
+        ]
         # For coloring sub-threshold spots
         shades_of_red = [
             (1, 0.8, 0.8),
