@@ -120,7 +120,7 @@ class AnalysisManager:
         # self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
         self.names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
         if analysis_name is not None:
-            self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if s == analysis_name]
+            self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if analysis_name in s]
 
     def _filter_on_date(self, date_range: tuple):
         """
