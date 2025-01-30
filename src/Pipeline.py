@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from itertools import cycle, islice
 import json
 import copy
+import numpy as np
 
 from . import StepClass
 from .Parameters import Parameters, Experiment, Settings, ScopeClass, DataContainer
@@ -178,7 +179,7 @@ class Pipeline:
         if not os.path.exists(pipeline_dir):
             os.makedirs(pipeline_dir)
         
-        self.pipeline_dictionary_location = os.path.join(pipeline_dir, f'{name}.txt')
+        self.pipeline_dictionary_location = os.path.join(pipeline_dir, f'{name}_{np.random.randint(0, 1000000)}.txt') # TODO: make this not shit
         with open(self.pipeline_dictionary_location, 'w') as f:
             json.dump(pipeline, f)
 
