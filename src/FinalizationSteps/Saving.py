@@ -171,7 +171,7 @@ class Save_Parameters(Saving):
                 else:
                     h5file[f"{path}/{key}"] = item
         
-        params = parameters.todict()
+        params = parameters.get_parameters()
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
 
         h5_file = kwargs['h5_file']

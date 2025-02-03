@@ -81,13 +81,13 @@ class DataTypeBridge(IndependentStepClass):
         else:
             if type(initial_data_location) == str:
                 initial_data_location = [initial_data_location]
-            # TODO check if name ends in a . something and download that file
+                initial_data_location = [location.replace('\\', '/') for location in initial_data_location]
             names = []
             h5_names = []
             folders = []
 
             for i, location in enumerate(initial_data_location):
-                is_folder = all(not location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
+                is_folder = not all(location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
                 name = os.path.basename(location)
 
                 if is_folder: # if it is a folder (aka pyromanager datasets)

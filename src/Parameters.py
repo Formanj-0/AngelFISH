@@ -28,7 +28,9 @@ class Parameters(ABC):
         for instance in cls._instances:
             if instance.__class__ == cls:
                 return instance
+            
         instance = super().__new__(cls)
+        instance.__init__(*args, **kwargs)
         cls._instances.append(instance)
         return instance
 
