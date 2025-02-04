@@ -128,17 +128,14 @@ class DilationedCytoMask(SequentialStepsClass):
         # match nuc and cell mask
         nuc_mask, cell_mask = multistack.match_nuc_cell(nuc_mask.astype(np.uint8), cell_mask.astype(np.uint8), single_nuc=False, cell_alone=False)
 
-        # Subtract for pseudoCyto mask
-        pseudo_cyto_mask = mask.astype(np.uint8) - (nuc_mask > 0).astype(np.uint8)
-
         if display_plots:
             fig, axs = plt.subplots(1, 2)
             axs[0].imshow(nuc_mask)
-            axs[1].imshow(pseudo_cyto_mask)
+            axs[1].imshow(cell_mask)
             # axs[2].imshow(cyto_mask)
             plt.show()
 
-        return {'cytoChannel': psuedoCyto, 'cell_mask': pseudo_cyto_mask}
+        return {'cytoChannel': psuedoCyto, 'cell_mask': cell_mask}
 
 
 class SimpleCellposeSegmentaion(CellSegmentation):
