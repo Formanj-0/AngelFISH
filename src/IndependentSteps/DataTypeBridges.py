@@ -45,8 +45,8 @@ def get_first_executing_folder():
 #%% Abstract Class
 class DataTypeBridge(IndependentStepClass):
     def main(self, initial_data_location, connection_config_location, 
-            load_in_mask, nucChannel, cytoChannel, 
-            independent_params, local_dataset_location: list[str] = None,
+            load_in_mask, nucChannel, cytoChannel, mask_structure,
+            independent_params, local_dataset_location: list[str] = None, 
             **kwargs):
         # TODO: improve the logical flow of this method,
         # the goal is to be given data in whatever format it is in and produce an h5 file and read it in
@@ -87,7 +87,8 @@ class DataTypeBridge(IndependentStepClass):
             folders = []
 
             for i, location in enumerate(initial_data_location):
-                is_folder = not all(location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
+                is_file = any(location.endswith(ext) for ext in ['.h5', '.tif', '.zip', '.log'])
+                is_folder = not is_file
                 name = os.path.basename(location)
 
                 if is_folder: # if it is a folder (aka pyromanager datasets)
@@ -125,11 +126,17 @@ class DataTypeBridge(IndependentStepClass):
                     self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
-        H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, h5_names, load_in_mask, independent_params, initial_data_location) # TODO make this take in a [locations] and IPs and load in masks
+        H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, 
+                                                                                                         h5_names, 
+                                                                                                         load_in_mask, 
+                                                                                                         independent_params, 
+                                                                                                         initial_data_location,
+                                                                                                         mask_structure) # TODO make this take in a [locations] and IPs and load in masks
         return {'local_dataset_location':H5_locations, 'h5_file': h5_files, 
-                'total_num_chunks': num_chuncks, 'images': images, 'masks': masks,
+                'total_num_chunks': num_chuncks, 'images': images,
                 'independent_params': ip, 'position_indexs': position_indexs,
-                'initial_data_location': [os.path.dirname(l) for l in initial_data_location] if initial_data_location is not None else None}
+                'initial_data_location': [os.path.dirname(l) for l in initial_data_location] if initial_data_location is not None else None,
+                **masks}
 
     def download_folder_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
@@ -153,7 +160,7 @@ class DataTypeBridge(IndependentStepClass):
         # that the data originally came from
         ...
 
-    def load_in_h5_dataset(self, locations, H5_names, load_in_mask, independent_params, nas_location) -> DataContainer:
+    def load_in_h5_dataset(self, locations, H5_names, load_in_mask, independent_params, nas_location, mask_structure) -> DataContainer:
         # given an h5 file this will load in the dat in a uniform manner
 
         H5_locations = [os.path.join(location, H5_name) for location, H5_name in zip(locations, H5_names)]
@@ -167,12 +174,17 @@ class DataTypeBridge(IndependentStepClass):
         position_indexs = [img.shape[0] for img in images]
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))
+        masks = {}
         if load_in_mask:
-            masks = [da.from_array(h5['masks']) for h5 in h5_files]
-            masks = da.concatenate(masks, axis=0)
-            masks = masks.rechunk((1, 1, -1, -1, -1, -1))
+            for key, ms in mask_structure.items():
+                if ms[2] is None:
+                    masks[key] = [da.from_array(h5[key]) for h5 in h5_files]
+                    masks[key] = da.concatenate(masks[key], axis=0)
+                    masks[key] = masks[key].rechunk((1, 1, -1, -1, -1, -1))
         else:
-            masks = da.zeros([images.shape[0], images.shape[1], images.shape[2], images.shape[3], images.shape[4], images.shape[5]]) # TODO This may give problems in the future but will live with it
+            for key, ms in mask_structure.items():
+                if ms[2] is None:
+                    masks[key] = da.zeros([images.shape[0], images.shape[1], images.shape[2], images.shape[3], images.shape[4], images.shape[5]]) # TODO This may give problems in the future but will live with it
 
         num_chuncks = images.shape[0] * images.shape[1]
 

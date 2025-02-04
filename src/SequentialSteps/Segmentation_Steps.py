@@ -21,6 +21,8 @@ from copy import copy
 from src import SequentialStepsClass
 
 from src.Parameters import Parameters
+from skimage.segmentation import watershed
+from scipy.ndimage import distance_transform_edt
 
 
 
@@ -41,12 +43,10 @@ class CellSegmentation(SequentialStepsClass):
             self.plot_segmentation(display_plots, image, nuc_mask, cell_mask, nucChannel, cytoChannel, do_3D_Segmentation)
 
             return {'cell_mask':cell_mask, 'nuc_mask':nuc_mask}
-        
-    @abstractmethod
+
     def segment_nuclei(self, **kwargs):
         pass
 
-    @abstractmethod
     def segment_cells(self, **kwargs):
         pass
 
@@ -444,6 +444,234 @@ class BoxCells(SequentialStepsClass):
             tifffile.imwrite(file_path, cropped_nuc)
     
         os.makedirs(save_mask_location, exist_ok=True)
+
+
+class GeneralCellposeSegmentation(CellSegmentation):
+    """
+    A class for performing cell segmentation using the Cellpose model.
+    Methods
+    -------
+    main(image, cytoChannel, nucChannel, masks, timepoint, fov, cellpose_model_type, cellpose_diameter, 
+         cellpose_channel_axis, cellpose_invert, cellpose_normalize, do_3D_Segmentation, cellpose_min_size, 
+         cellpose_flow_threshold, cellpose_cellprob_threshold, cellpose_pretrained_model, display_plots, **kwargs)
+        Main method to perform segmentation on the given image.
+    Parameters
+    ----------
+    image : ndarray
+        The input image to be segmented.
+    cytoChannel : int
+        The channel index for cytoplasm.
+    nucChannel : int
+        The channel index for nuclei.
+    masks : list
+        List to store the segmentation masks.
+    timepoint : int
+        The timepoint index for the image.
+    fov : int
+        The field of view index for the image.
+    cellpose_model_type : str or list of str, optional
+        The type of Cellpose model to use. Default is ['cyto3', 'nuclei'].
+    cellpose_diameter : float or list of float, optional
+        The diameter of the cells to be segmented. Default is 180.
+    cellpose_channel_axis : int, optional
+        The axis of the channels in the image. Default is 0.
+    cellpose_invert : bool or list of bool, optional
+        Whether to invert the image for segmentation. Default is False.
+    cellpose_normalize : bool, optional
+        Whether to normalize the image for segmentation. Default is True.
+    do_3D_Segmentation : bool, optional
+        Whether to perform 3D segmentation. Default is False.
+    cellpose_min_size : float or list of float, optional
+        The minimum size of the cells to be segmented. Default is 500.
+    cellpose_flow_threshold : float or list of float, optional
+        The flow threshold for the Cellpose model. Default is 0.
+    cellpose_cellprob_threshold : float or list of float, optional
+        The cell probability threshold for the Cellpose model. Default is 0.
+    cellpose_pretrained_model : str or list of str, optional
+        The path to the pretrained Cellpose model. Default is False.
+    display_plots : bool, optional
+        Whether to display plots of the segmentation results. Default is False.
+    **kwargs : dict
+        Additional keyword arguments.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def main(self, 
+             image, 
+             cytoChannel, 
+             nucChannel, 
+             FISHChannel,
+             mask_structure: dict,
+             cellpose_model_type: str | list[str] = ['cyto3', 'nuclei'], 
+             cellpose_diameter: float | list[float] = 180, 
+             cellpose_channel_axis: int = 0,
+             cellpose_invert: bool | list = False, 
+             cellpose_normalize: bool = True, 
+             do_3D_Segmentation: bool = False, # This is not implemented
+             cellpose_min_size: float | list[float] = 500, 
+             cellpose_flow_threshold: float | list[float] = 0, 
+             cellpose_cellprob_threshold: float | list[float] = 0,
+             cellpose_pretrained_model: str | list[str] = False,
+             display_plots: bool = False,
+               **kwargs):
+        if image.shape[1] >= 1:
+            image = np.max(image, axis=1)
+        
+        results = {}
+        mask_structure = {name: ms for (name, ms) in mask_structure.items() if ms[2] is not None}
+        for i, (name, ms) in enumerate(mask_structure.items()):
+            structure = ms[0]
+            channel = ms[1]
+            parent = ms[2]
+
+            if channel == 'nucChannel':
+                channel = nucChannel
+            elif channel == 'cytoChannel':
+                channel = cytoChannel
+            elif channel == 'FISHChannel':
+                channel = FISHChannel
+            else:
+                channel = channel
+
+            mask = self.segment(image, channel, cellpose_min_size, cellpose_flow_threshold,
+                                cellpose_cellprob_threshold, cellpose_model_type, cellpose_diameter,
+                                cellpose_channel_axis, cellpose_invert, cellpose_normalize, do_3D_Segmentation,
+                                cellpose_pretrained_model, i)
+
+            results[name] = mask
+
+        nuc_key = next((key for key in results.keys() if 'nuc' in key.lower()), None)
+        cell_key = next((key for key in results.keys() if 'cell' in key.lower()), None)
+        if nuc_key and cell_key:
+            results[nuc_key], results[cell_key] = self.align_nuc_cell_masks(results[nuc_key], results[cell_key])
+        self.plot_segmentation(display_plots, image, results)
+
+        return results
+        
+    def unpack_lists(self, cellpose_min_size, 
+             cellpose_flow_threshold, 
+             cellpose_cellprob_threshold,
+             cellpose_model_type,
+             cellpose_diameter,
+             pretrained_model, i):
+        if isinstance(cellpose_min_size, list):
+            min_size = cellpose_min_size[i]
+        else:
+            min_size = cellpose_min_size
+        
+        if isinstance(cellpose_flow_threshold, list):
+            flow_threshold = cellpose_flow_threshold[i]
+        else:
+            flow_threshold = cellpose_flow_threshold
+        
+        if isinstance(cellpose_cellprob_threshold, list):
+            cellprob_threshold = cellpose_cellprob_threshold[i]
+        else:
+            cellprob_threshold = cellpose_cellprob_threshold
+
+        if isinstance(cellpose_model_type, list):
+            model_type = cellpose_model_type[i]
+        else:
+            model_type = cellpose_model_type
+
+        if isinstance(cellpose_diameter, list):
+            diameter = cellpose_diameter[i]
+        else:
+            diameter = cellpose_diameter
+
+        if isinstance(pretrained_model, list):
+            pretrained_model = pretrained_model[i]
+        else:
+            pretrained_model = pretrained_model
+
+        return (min_size, flow_threshold, cellprob_threshold, 
+                model_type, diameter, pretrained_model) 
+
+    def segment(self, image, channel, cellpose_min_size, cellpose_flow_threshold, 
+                       cellpose_cellprob_threshold, cellpose_model_type, cellpose_diameter, 
+                       cellpose_channel_axis, cellpose_invert, cellpose_normalize, cellpose_do_3D,
+                       cellpose_pretrained_model, i):
+        (min_size, flow_threshold, cellprob_threshold, 
+        model_type, diameter, pretrained_model)  = self.unpack_lists(cellpose_min_size, 
+                                                                cellpose_flow_threshold, 
+                                                                cellpose_cellprob_threshold,
+                                                                cellpose_model_type,
+                                                                cellpose_diameter,
+                                                                cellpose_pretrained_model, i)
+            
+        model_location = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')
+        pretrained_model = os.path.join(model_location, pretrained_model) if pretrained_model else None
+
+        cp = models.CellposeModel(model_type=model_type, gpu=True, pretrained_model=pretrained_model)
+        sz = models.SizeModel(cp)
+
+        model = models.Cellpose(gpu=True)
+        model.cp = cp
+        model.sz = sz
+
+        channels = [0, 0]
+        image = image[channel, :, :].compute()
+        mask, flows, styles, diams = model.eval(image,
+                                            channels=channels, 
+                                            diameter=diameter, 
+                                            invert=cellpose_invert, 
+                                            normalize=cellpose_normalize, 
+                                            channel_axis=cellpose_channel_axis, 
+                                            do_3D=cellpose_do_3D,
+                                            min_size=min_size, 
+                                            flow_threshold=flow_threshold, 
+                                            cellprob_threshold=cellprob_threshold)
+                                            # net_avg=True
+        return mask
+
+    def align_masks(self, mask_dict):
+        # Find the mask with the largest number of objects
+        largest_mask_name = max(mask_dict, key=lambda k: np.max(mask_dict[k]))
+        largest_mask = mask_dict[largest_mask_name]
+
+        # Initialize the final aligned masks with the largest mask
+        aligned_masks = {name: np.zeros_like(mask) for name, mask in mask_dict.items()}
+        aligned_masks[largest_mask_name] = largest_mask
+
+        # Iterate over each mask and align with the largest mask
+        for name, mask in mask_dict.items():
+            if name == largest_mask_name:
+                continue
+
+            # Create markers for watershed
+            markers = np.zeros_like(mask, dtype=int)
+            distance = distance_transform_edt(mask > 0)
+            for label in np.unique(largest_mask):
+                if label == 0:
+                    continue
+                d = distance.copy()
+                d[largest_mask != label] = 0
+                center = np.unravel_index(np.argmax(d), distance.shape)
+                markers[center] = label
+
+            # Apply watershed to align masks
+            aligned_mask = watershed(-distance, markers, mask=mask > 0)
+            aligned_masks[name] = aligned_mask
+
+        return aligned_masks
+
+    def plot_segmentation(self, display_plots, image, mask_dict):
+        if display_plots:
+            num_sub_plots = len(mask_dict) + 1
+            fig, axs = plt.subplots(1, num_sub_plots, figsize=(15, 5))
+            axs[0].imshow(np.max(image, axis=0))
+            axs[0].set_title('Original Image')
+            axs[0].axis('off')
+            i = 1
+            for name, mask in mask_dict.items():
+                axs[i].imshow(mask, cmap='nipy_spectral')
+                axs[i].set_title(name)
+                axs[i].axis('off')
+                i += 1
+            plt.tight_layout()
+            plt.show()
 
 
 
