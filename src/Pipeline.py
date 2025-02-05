@@ -37,6 +37,10 @@ class Pipeline:
         else:
             raise Exception('Who knows what you did')
         
+        print(Parameters().get_parameters())
+        print(self.parameters.get_parameters())
+
+        
         self.get_independent_steps()
         self.get_sequential_steps()
         self.get_finalization_steps()
