@@ -305,11 +305,8 @@ class DataContainer(Parameters):
                     l = [instance.num_chunks_to_run, value]
                     instance.num_chunks_to_run = min(i for i in l if i is not None)
 
-        if name == 'images':
-            self._images_modified = True
-
-        if name == 'masks':
-            self._masks_modified = True
+        if name == 'images' and value is not None:
+            (self.PP, self.TT, self.CC, self.ZZ, self.YY, self.XX) = value.shape
             
         super().__setattr__(name, value)
     
@@ -324,11 +321,11 @@ class DataContainer(Parameters):
         if kwargs is not None:
             for name, value in kwargs.items():
                 # check if it a mask
-                if 'mask' in name:
+                if 'mask' in name.lower():
                     self.save_masks(name, value, p, t, parameters)
 
                 # check if it a image
-                elif 'image' in name:
+                elif 'image' in name.lower():
                     self.save_images(name, value, p, t)
 
                 elif isinstance(value, pd.DataFrame):
