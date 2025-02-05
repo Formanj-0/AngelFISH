@@ -83,10 +83,9 @@ class Pipeline:
         FinalizingStepClass.execute(self.data_container, self.parameters, self.finalization_steps)
 
     def __post_init__(self):
+        self.parameters.pipeline_init()
         self.check_requirements()
         self.save_location = self.DataContainer.save_location()
-        
-        self.parameters.pipeline_init()
 
     def modify_kwargs(self, modify_kwargs: dict):
         self.parameters.update_parameters(modify_kwargs)
