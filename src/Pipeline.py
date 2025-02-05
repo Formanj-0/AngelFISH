@@ -123,7 +123,7 @@ class Pipeline:
                           *[i.__class__.__name__ for i in self.get_sequential_steps()],
                           *[i.__class__.__name__ for i in self.get_finalization_steps()]]
         
-
+        print(params)
         # self.modify_kwargs(params)
         self._run(self.experiment_location , self.steps)
 
