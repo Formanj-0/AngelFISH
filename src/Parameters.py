@@ -134,6 +134,9 @@ class Parameters(ABC):
     def get_parameters(self) -> dict:
         # Get all the parameters of all instances of the class
         params = {}
+        acceptableDuplicateKeys = ['kwargs', 'state', 'instances', 'init', 'state']
+        keys2remove = ['_instances', 'instances']
+
 
         # Ensure all instances have the 'state' attribute
         for instance in Parameters._instances:
@@ -144,7 +147,8 @@ class Parameters(ABC):
             for instance in Parameters()._instances:
                 instance._update()
                 # check for duplicates and raise an error if found
-                duplicate_keys = list(set(params.keys()).intersection(set(instance.todict().keys())))
+                keys2add = set(instance.todict().keys())
+                duplicate_keys = list(set(params.keys()).intersection(keys2add))
                 duplicate_keys = [key for key in duplicate_keys if key not in {'kwargs', 'state', 'instances', 'init'}]
                 if duplicate_keys:
                     raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
@@ -153,11 +157,21 @@ class Parameters(ABC):
             for instance in self.instances:
                 instance._update()
                 # check for duplicates and raise an error if found
-                duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
+                keys2add = set(instance.todict().keys())
+                data2add = instance.todict()
+                duplicate_keys = list(set(params.keys()).intersection(keys2add))
                 if duplicate_keys:
-                    if duplicate_keys != {'kwargs'} and duplicate_keys != {'state'}:
+                    for key in acceptableDuplicateKeys:
+                        if key in duplicate_keys:
+                            duplicate_keys.remove(key)
+                            data2add.pop(key)
+                    if duplicate_keys:
                         raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
-                params.update(instance.todict())
+                keys_to_remove = [key for key in data2add.keys() if key in keys2remove]
+                for key in keys_to_remove:
+                    data2add.pop(key)
+    
+                params.update(data2add)
         return params
 
     def isolate(self):
