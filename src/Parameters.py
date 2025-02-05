@@ -87,7 +87,7 @@ class Parameters(ABC):
         if kwargs is None:
             return None
         used_keys = []
-        instances = Parameters._instances if self.state == 'global' else self.instances
+        instances = Parameters()._instances if self.state == 'global' else self.instances
         for instance in instances:
             for key, value in kwargs.items():
                 # check if the key exists in the instance
