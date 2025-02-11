@@ -825,8 +825,9 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         for cell_label in cell_labels_in_df:
             cell_mask = mask == cell_label
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
-            for contour in contours:
-                ax.plot(contour[:, 1], contour[:, 0], linewidth=2, label=f'Cell {cell_label}')
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0], linewidth=2, label=f'Cell {cell_label}')
 
         # Find the cell_labels that are in the mask but not in the dataframes and color them red
         cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
@@ -834,8 +835,9 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         for cell_label in cell_labels_not_in_df:
             cell_mask = mask == cell_label
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
-            for contour in contours:
-                ax.plot(contour[:, 1], contour[:, 0], 'r', linewidth=2, label=f'Cell {cell_label} (not in df)')
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0], 'r', linewidth=2, label=f'Cell {cell_label} (not in df)')
         plt.legend()
         plt.show()
 
