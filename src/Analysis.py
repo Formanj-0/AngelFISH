@@ -752,6 +752,101 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         self.images, self.masks = self.am.get_images_and_masks()
 
+
+    def display_gating(self):
+        GR_Channel = 0
+        Nuc_Channel = 0
+        required_columns = ['unique_cell_id']
+
+        # Ensure each DataFrame has a unique cell id (uci)
+        for df_name, df in [('spots', self.spots), ('cellprops', self.cellprops), ('clusters', self.clusters)]:
+            if not all(col in df.columns for col in required_columns):
+                raise ValueError(f"DataFrame '{df_name}' does not contain the required columns: {required_columns}")
+
+        # Check for unique 'uci' in each DataFrame
+        for df_name, df in [('cellprops', self.cellprops)]:
+            if df['unique_cell_id'].duplicated().any():
+                raise ValueError(f"DataFrame '{df_name}' contains duplicate 'unique_cell_id' values.")
+
+        # Remove UCIs that are not present in all dataframes
+        common_uci = set(self.spots['unique_cell_id']).intersection(
+            self.cellprops['unique_cell_id'],
+            self.clusters['unique_cell_id'],
+        )
+
+        self.spots = self.spots[self.spots['unique_cell_id'].isin(common_uci)]
+        self.cellprops = self.cellprops[self.cellprops['unique_cell_id'].isin(common_uci)]
+        self.clusters = self.clusters[self.clusters['unique_cell_id'].isin(common_uci)]
+
+        # select a h5_index at random
+        id = np.random.choice(self.cellprops.shape[0])
+        spot_row = self.spots.iloc[id]
+        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        print(f'Selected H5 Index: {h5_idx}')
+        print(f'Nas Location: {nas_location}')
+        print(f'FOV: {fov}' )
+
+        img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
+        mask = np.max(mask, axis=1) # This should make czyx to cyz
+        img = np.max(img, axis=1)
+        mask.compute()
+        img.compute()
+
+        # Find data frames of UCIs that have h5_idx, fov, nas_location
+        spots_df = self.spots[
+            (self.spots['h5_idx'] == h5_idx) &
+            (self.spots['fov'] == fov) &
+            (self.spots['NAS_location'] == nas_location)
+        ]
+
+        cellprops_df = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov) &
+            (self.cellprops['NAS_location'] == nas_location)
+        ]
+
+        clusters_df = self.clusters[
+            (self.clusters['h5_idx'] == h5_idx) &
+            (self.clusters['fov'] == fov) &
+            (self.clusters['NAS_location'] == nas_location)
+        ]
+
+        print(f"Spots DataFrame: {spots_df.shape}")
+        print(f"Cell Properties DataFrame: {cellprops_df.shape}")
+        print(f"Clusters DataFrame: {clusters_df.shape}")
+
+        # Find the cell_labels that are in the dataframes and color them in vibrant colors
+        cell_labels_in_df = set(self.cellprops['cell_label'].unique())
+        cell_labels_in_mask = set(np.unique(mask.compute()))
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(np.max(img, axis=0), cmap='gray')
+
+        for cell_label in cell_labels_in_df:
+            cell_mask = mask == cell_label
+            contours = find_contours(np.max(cell_mask, axis=0).compute(), 0.5)
+            for contour in contours:
+                ax.plot(contour[:, 1], contour[:, 0], linewidth=2, label=f'Cell {cell_label}')
+
+        # Find the cell_labels that are in the mask but not in the dataframes and color them red
+        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+
+        for cell_label in cell_labels_not_in_df:
+            cell_mask = mask == cell_label
+            contours = find_contours(np.max(cell_mask, axis=0).compute(), 0.5)
+            for contour in contours:
+                ax.plot(contour[:, 1], contour[:, 0], 'r', linewidth=2, label=f'Cell {cell_label} (not in df)')
+        plt.legend()
+        plt.show()
+
+
+
+
+        
+
+
+
+
     def save_data(self, location):
         """
         Saves the DataFrames to CSV.
