@@ -754,8 +754,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
 
     def display_gating(self):
-        GR_Channel = 0
-        Nuc_Channel = 0
+        Cyto_Channel = 1
         required_columns = ['unique_cell_id']
 
         # Ensure each DataFrame has a unique cell id (uci)
@@ -769,9 +768,9 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
                 raise ValueError(f"DataFrame '{df_name}' contains duplicate 'unique_cell_id' values.")
 
         # Remove UCIs that are not present in all dataframes
-        common_uci = set(self.spots['unique_cell_id']).intersection(
-            self.cellprops['unique_cell_id'],
-            self.clusters['unique_cell_id'],
+        common_uci = set(self.cellprops['unique_cell_id']).intersection(
+            self.spots['unique_cell_id'],
+            # self.clusters['unique_cell_id'],
         )
 
         self.spots = self.spots[self.spots['unique_cell_id'].isin(common_uci)]
@@ -779,7 +778,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         self.clusters = self.clusters[self.clusters['unique_cell_id'].isin(common_uci)]
 
         # select a h5_index at random
-        id = np.random.choice(self.cellprops.shape[0])
+        id = np.random.choice(len(self.spots))
         spot_row = self.spots.iloc[id]
         h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
         print(f'Selected H5 Index: {h5_idx}')
@@ -793,38 +792,39 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         img.compute()
 
         # Find data frames of UCIs that have h5_idx, fov, nas_location
-        spots_df = self.spots[
+        spots_frame = self.spots[
             (self.spots['h5_idx'] == h5_idx) &
             (self.spots['fov'] == fov) &
             (self.spots['NAS_location'] == nas_location)
         ]
 
-        cellprops_df = self.cellprops[
+        cellprops_frame = self.cellprops[
             (self.cellprops['h5_idx'] == h5_idx) &
             (self.cellprops['fov'] == fov) &
             (self.cellprops['NAS_location'] == nas_location)
         ]
 
-        clusters_df = self.clusters[
+        clusters_frame = self.clusters[
             (self.clusters['h5_idx'] == h5_idx) &
             (self.clusters['fov'] == fov) &
             (self.clusters['NAS_location'] == nas_location)
         ]
 
-        print(f"Spots DataFrame: {spots_df.shape}")
-        print(f"Cell Properties DataFrame: {cellprops_df.shape}")
-        print(f"Clusters DataFrame: {clusters_df.shape}")
+        print(f"Spots DataFrame: {spots_frame.shape}")
+        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+        print(f"Clusters DataFrame: {clusters_frame.shape}")
 
         # Find the cell_labels that are in the dataframes and color them in vibrant colors
-        cell_labels_in_df = set(self.cellprops['cell_label'].unique())
+        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
         cell_labels_in_mask = set(np.unique(mask.compute()))
+        cell_labels_in_mask.discard(0)
 
         fig, ax = plt.subplots(figsize=(10, 10))
-        ax.imshow(np.max(img, axis=0), cmap='gray')
+        ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
 
         for cell_label in cell_labels_in_df:
             cell_mask = mask == cell_label
-            contours = find_contours(np.max(cell_mask, axis=0).compute(), 0.5)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             for contour in contours:
                 ax.plot(contour[:, 1], contour[:, 0], linewidth=2, label=f'Cell {cell_label}')
 
@@ -833,7 +833,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         for cell_label in cell_labels_not_in_df:
             cell_mask = mask == cell_label
-            contours = find_contours(np.max(cell_mask, axis=0).compute(), 0.5)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             for contour in contours:
                 ax.plot(contour[:, 1], contour[:, 0], 'r', linewidth=2, label=f'Cell {cell_label} (not in df)')
         plt.legend()
