@@ -21,3 +21,4 @@ config_nas.yml
 *.pyc
 *.yml
 /.venv
+*.yml
