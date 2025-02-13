@@ -819,17 +819,25 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         cell_labels_in_mask = set(np.unique(mask.compute()))
         cell_labels_in_mask.discard(0)
 
+    # Define colors: Avoid shades of red
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # Distinct non-red colors
+        removed_color = 'red'
+
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
+
+        # Assign colors to each valid cell
+        color_map = {cell_label: kept_colors[i % len(kept_colors)] for i, cell_label in enumerate(cell_labels_in_df)}
 
         for cell_label in cell_labels_in_df:
             cell_mask = mask == cell_label
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0], linewidth=2, label=f'Cell {cell_label}')
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0], linewidth=2,
+                        label=f'Cell {cell_label}', color=color_map[cell_label])
 
-        # Find the cell_labels that are in the mask but not in the dataframes and color them red
+        # Cells removed from df
         cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
 
         for cell_label in cell_labels_not_in_df:
@@ -837,7 +845,9 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0], 'r', linewidth=2, label=f'Cell {cell_label} (not in df)')
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0], color=removed_color, linewidth=2,
+                        label=f'Removed: Cell {cell_label}', linestyle='dashed')
+
         plt.legend()
         plt.show()
 
@@ -1952,6 +1962,8 @@ class GR_Confirmation(Analysis):
         """ Load data from the AnalysisManager. """
         h = self.am.h5_files
         self.cellprops = self.am.select_datasets('cell_properties', 'dataframe')
+        
+        self.images, self.masks = self.am.get_images_and_masks()
 
         # Illumination profiles (assume shape: (n_channels, y, x))
         self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
