@@ -262,30 +262,6 @@ class Analysis(ABC):
     def close(self):
         self.am.close()
 
-#%%
-# Analysis children
-########################################
-# Helper functions for drawing spots
-########################################
-def draw_spot_circle(ax, x, y, radius=4, color='gold'):
-    """
-    Draws an unfilled circle around (x,y).
-    """
-    circle = mpatches.Circle((x, y), radius=radius, fill=False,
-                             edgecolor=color, linewidth=2)
-    ax.add_patch(circle)
-
-def draw_spot_arrow(ax, x, y, color='gold'):
-    """
-    Draws a small arrow from (x, y) to (x+3, y).
-    """
-    ax.arrow(x-4, y, 3, 0, head_width=3,
-             color=color, length_includes_head=True)
-
-
-########################################
-# Main Class
-########################################
 class SpotDetection_SNRConfirmation(Analysis):
     """
     SpotDetection_Confirmation class with:
@@ -705,6 +681,9 @@ class SpotDetection_SNRConfirmation(Analysis):
 
 
 #%%
+########################################
+# Helper functions
+########################################
 def draw_spot_circle(ax, x, y, radius=4, color='gold'):
     """
     Draws an unfilled circle around (x,y).
@@ -721,7 +700,9 @@ def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
     ax.arrow(x + offset, y, -offset, 0, head_width=5,
              color=color, length_includes_head=True)
 
-
+########################################
+# Main Class
+########################################
 class Spot_Cluster_Analysis_WeightedSNR(Analysis):
     def __init__(self, am, seed=None):
         super().__init__(am, seed)
@@ -781,6 +762,8 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         id = np.random.choice(len(self.spots))
         spot_row = self.spots.iloc[id]
         h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        self.h5_idx = h5_idx
+        self.fov = fov
         print(f'Selected H5 Index: {h5_idx}')
         print(f'Nas Location: {nas_location}')
         print(f'FOV: {fov}' )
@@ -790,6 +773,12 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         img = np.max(img, axis=1)
         mask.compute()
         img.compute()
+
+        # Rescale the image exposure
+        p1, p99 = np.percentile(img, (1, 99))
+        img = exposure.rescale_intensity(
+            img, in_range=(p1, p99), out_range=(0, 1)
+        )
 
         # Find data frames of UCIs that have h5_idx, fov, nas_location
         spots_frame = self.spots[
@@ -814,50 +803,49 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
         print(f"Clusters DataFrame: {clusters_frame.shape}")
 
-        # Find the cell_labels that are in the dataframes and color them in vibrant colors
+        # Identify which cell_labels appear in cellprops => "kept"
         cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+        # Identify which appear in the mask
         cell_labels_in_mask = set(np.unique(mask.compute()))
-        cell_labels_in_mask.discard(0)
+        if 0 in cell_labels_in_mask:
+            cell_labels_in_mask.remove(0)
 
-    # Define colors: Avoid shades of red
-        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # Distinct non-red colors
+        # Colors
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # distinct non-red
         removed_color = 'red'
 
+        # Show gating overlay
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
 
-        # Assign colors to each valid cell
-        color_map = {cell_label: kept_colors[i % len(kept_colors)] for i, cell_label in enumerate(cell_labels_in_df)}
-
+        # A) Plot the "kept" cell outlines
+        color_map = {
+            cell_label: kept_colors[i % len(kept_colors)]
+            for i, cell_label in enumerate(cell_labels_in_df)
+        }
         for cell_label in cell_labels_in_df:
-            cell_mask = mask == cell_label
+            cell_mask = (mask == cell_label)
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0], linewidth=2,
-                        label=f'Cell {cell_label}', color=color_map[cell_label])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        linewidth=2, color=color_map[cell_label],
+                        label=f'Cell {cell_label}')
 
-        # Cells removed from df
+        # B) Plot "discarded" cell outlines
         cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
-
         for cell_label in cell_labels_not_in_df:
-            cell_mask = mask == cell_label
+            cell_mask = (mask == cell_label)
             contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0], color=removed_color, linewidth=2,
-                        label=f'Removed: Cell {cell_label}', linestyle='dashed')
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        color=removed_color, linewidth=2, linestyle='dashed',
+                        label=f'Removed: Cell {cell_label}')
 
         plt.legend()
         plt.show()
-
-
-
-
-        
-
-
-
+ 
 
     def save_data(self, location):
         """
@@ -1868,9 +1856,53 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # 12) Overview for entire dataset (including bar plot of TS distribution)
         self._display_overview_plots()
-
-    ############################################################
    
+    ###########################################################################
+    # display_gating_plus_display
+    ###########################################################################
+    def display_gating_plus_display(
+        self,
+        spotChannel=0,
+        cytoChannel=1,
+        nucChannel=2
+    ):
+        """
+        1) Calls display_gating() to pick a random FOV/h5_idx + show gating overlay.
+        2) We then pick one "kept" cell from cellprops in that FOV for further sub-plots.
+        3) Runs these sub-displays in order:
+            (1) _display_full_fov_segmentation
+            (2) _display_zoom_on_cell
+            (3) _display_weighted_threshold_figure
+            (4) _display_weighted_zoom_on_spot
+            (5) _display_overview_plots
+        NOTE: This assumes you have *already* pruned your spots DataFrame
+              to keep only those that pass the weighted SNR threshold
+              (e.g. spots = spots[spots['keep_wsnr']]).
+        """
+
+        # 1) Call display_gating => sets self.h5_idx, self.fov, prints gating overlay
+        self.display_gating()
+
+        # 2) Among the cellprops for (h5_idx, fov), pick a single cell_label
+        #    that presumably is "kept" (i.e. it appears in the gating overlay as non-red).
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov)
+        ]
+        if cellprops_frame.empty:
+            print("No 'kept' cells found in this FOV => cannot do further display.")
+            return
+
+        # pick one
+        self.cell_label = np.random.choice(cellprops_frame['cell_label'].unique())
+        print(f"Chosen cell_label = {self.cell_label} for further display steps.")
+
+        # 3) Now run your five sub-routines in sequence
+        # self._display_full_fov_segmentation(cytoChannel, nucChannel)
+        self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
+        self._display_weighted_zoom_on_spot(spotChannel)
+        self._display_overview_plots()
+
     def validate(self):
             # check cyto, cell, and nuc labels are the same
             if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
@@ -1976,6 +2008,83 @@ class GR_Confirmation(Analysis):
         Saves the DataFrames to CSV.
         """
         self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
+
+    def display_gating(self):
+        Cyto_Channel = 1
+        required_columns = ['unique_cell_id']
+
+        # Check if required columns are present
+        if not all(col in self.cellprops.columns for col in required_columns):
+            print("Required columns missing in cellprops DataFrame.")
+            return
+
+        # select a h5_index at random
+        id = np.random.choice(len(self.cellprops))
+        spot_row = self.cellprops.iloc[id]
+        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        self.h5_idx = h5_idx
+        self.fov = fov
+        print(f'Selected H5 Index: {h5_idx}')
+        print(f'Nas Location: {nas_location}')
+        print(f'FOV: {fov}' )
+
+        img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
+        mask = np.max(mask, axis=1) # This should make czyx to cyz
+        img = np.max(img, axis=1)
+        mask.compute()
+        img.compute()
+
+
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov) &
+            (self.cellprops['NAS_location'] == nas_location)
+        ]
+        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+
+
+        # Identify which cell_labels appear in cellprops => "kept"
+        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+        # Identify which appear in the mask
+        cell_labels_in_mask = set(np.unique(mask.compute()))
+        if 0 in cell_labels_in_mask:
+            cell_labels_in_mask.remove(0)
+
+        # Colors
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # distinct non-red
+        removed_color = 'red'
+
+        # Show gating overlay
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
+
+        # A) Plot the "kept" cell outlines
+        color_map = {
+            cell_label: kept_colors[i % len(kept_colors)]
+            for i, cell_label in enumerate(cell_labels_in_df)
+        }
+        for cell_label in cell_labels_in_df:
+            cell_mask = (mask == cell_label)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        linewidth=2, color=color_map[cell_label],
+                        label=f'Cell {cell_label}')
+
+        # B) Plot "discarded" cell outlines
+        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+        for cell_label in cell_labels_not_in_df:
+            cell_mask = (mask == cell_label)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        color=removed_color, linewidth=2, linestyle='dashed',
+                        label=f'Removed: Cell {cell_label}')
+
+        plt.legend()
+        plt.show()
 
     def display(self, GR_Channel: int = 0, Nuc_Channel: int = 1):
         """
