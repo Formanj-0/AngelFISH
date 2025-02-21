@@ -14,6 +14,8 @@ import copy
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from datetime import datetime
+import sys
+import traceback
 
 class AnalysisManager:
     """
@@ -76,34 +78,69 @@ class AnalysisManager:
         self.close()
         return self.analysis_names
 
-    def select_datasets(self, dataset_name, dtype = None) -> list:
-        self.open()
-        if hasattr(self, 'analysis_names'):
-            is_df = False
-            is_array = False
-            list_df = []
-            list_arrays = []
-            for i,l in enumerate(self.location):
-                with h5py.File(l, 'r') as f:
-                    if dtype is not None and dtype == 'dataframe':
-                        df = pd.read_hdf(f.filename, f"{self.analysis_names[i]}/{dataset_name}")
+    def select_datasets(self, dataset_name, dtype=None) -> list:
+        """ Safely loads datasets from HDF5 files with strict error handling. """
+
+        self.open()  # Ensure setup is complete before file operations
+
+        if not hasattr(self, 'analysis_names'):
+            print('ERROR: No analysis selected. Please check your setup.')
+            return []
+
+        is_df = False
+        is_array = False
+        list_df = []
+        list_arrays = []
+
+        for i, file_path in enumerate(self.location):
+            if not os.path.exists(file_path):
+                print(f"ERROR: File does not exist: {file_path}")
+                sys.exit(1)  # Immediately exit if a file is missing
+
+            print(f"Opening file: {file_path}")
+
+            try:
+                with h5py.File(file_path, 'r') as f:
+                    dataset_key = f"{self.analysis_names[i]}/{dataset_name}"
+                    
+                    if dataset_key not in f:
+                        print(f"WARNING: Dataset '{dataset_name}' not found in {file_path}. Skipping.")
+                        continue
+
+                    if dtype == 'dataframe':
+                        print(f"Reading DataFrame from: {file_path} -> {dataset_key}")
+                        df = pd.read_hdf(f.filename, dataset_key)
                         df['h5_idx'] = i
                         list_df.append(df)
                         is_df = True
-                    elif dtype is not None and dtype == 'array':
-                        array = da.from_array(f[f'{self.analysis_names[i]}/{dataset_name}'])
+
+                    elif dtype == 'array':
+                        print(f"Reading Array from: {file_path} -> {dataset_key}")
+                        array = da.from_array(f[dataset_key])
                         list_arrays.append(array)
                         is_array = True
-                    else:
-                        raise Exception(f'IDK what to do with {dataset_name} data type, accepted types are dataframe, array. please add code to incorporate this data')
 
-            if is_df:
-                return(pd.concat(list_df, axis=0))
-            
-            if is_array:
-                return list_arrays
-        else:
-            print('select an anlysis')
+                    else:
+                        raise ValueError(f"ERROR: Unknown data type '{dtype}' for {dataset_name}. Accepted types: 'dataframe', 'array'.")
+
+            except OSError as e:
+                print(f"\nCRITICAL ERROR: Unable to read {file_path}")
+                print(f"HDF5 Error: {e}")
+                print(f"Dataset: {dataset_name}")
+                print(f"File: {file_path}")
+                traceback.print_exc()  # Print full error traceback for debugging
+                sys.exit(1)  # Immediately exit to prevent proceeding with bad data
+
+        if is_df:
+            print(f"Successfully loaded {len(list_df)} DataFrames. Merging...")
+            return pd.concat(list_df, axis=0, ignore_index=True)
+
+        if is_array:
+            print(f"Successfully loaded {len(list_arrays)} arrays.")
+            return list_arrays
+
+        print(f"ERROR: No valid data found for dataset: {dataset_name}.")
+        sys.exit(1)  # If no data is loaded, do not proceed blindly
 
     def list_datasets(self):
         if hasattr(self, 'analysis_names'):
@@ -771,8 +808,19 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
         mask = np.max(mask, axis=1) # This should make czyx to cyz
         img = np.max(img, axis=1)
-        mask.compute()
-        img.compute()
+        
+        # Compute only if they are Dask arrays
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+        if isinstance(img, da.Array):
+            img = img.compute()
+
+        # Debugging: Explicitly check what `img` is
+        print("DEBUG: Type of img before percentile:", type(img))
+        if hasattr(img, "shape"):
+            print("DEBUG: Shape of img:", img.shape)
+        else:
+            print("DEBUG: img has no shape attribute")
 
         # Rescale the image exposure
         p1, p99 = np.percentile(img, (1, 99))
@@ -803,10 +851,15 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
         print(f"Clusters DataFrame: {clusters_frame.shape}")
 
+        # Compute mask if it's a Dask array
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+
         # Identify which cell_labels appear in cellprops => "kept"
         cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+
         # Identify which appear in the mask
-        cell_labels_in_mask = set(np.unique(mask.compute()))
+        cell_labels_in_mask = set(np.unique(mask))
         if 0 in cell_labels_in_mask:
             cell_labels_in_mask.remove(0)
 
@@ -816,6 +869,11 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # Show gating overlay
         fig, ax = plt.subplots(figsize=(10, 10))
+
+        # Ensure img is computed if necessary
+        if isinstance(img, da.Array):
+            img = img.compute()
+
         ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
 
         # A) Plot the "kept" cell outlines
@@ -823,9 +881,15 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             cell_label: kept_colors[i % len(kept_colors)]
             for i, cell_label in enumerate(cell_labels_in_df)
         }
+
         for cell_label in cell_labels_in_df:
             cell_mask = (mask == cell_label)
-            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
                 ax.plot(largest_contour[:, 1], largest_contour[:, 0],
@@ -834,9 +898,15 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # B) Plot "discarded" cell outlines
         cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+
         for cell_label in cell_labels_not_in_df:
             cell_mask = (mask == cell_label)
-            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
             if contours:
                 largest_contour = max(contours, key=lambda x: x.shape[0])
                 ax.plot(largest_contour[:, 1], largest_contour[:, 0],
@@ -846,7 +916,6 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         plt.legend()
         plt.show()
  
-
     def save_data(self, location):
         """
         Saves the DataFrames to CSV.
@@ -1994,14 +2063,22 @@ class GR_Confirmation(Analysis):
         """ Load data from the AnalysisManager. """
         h = self.am.h5_files
         self.cellprops = self.am.select_datasets('cell_properties', 'dataframe')
-        
+
         self.images, self.masks = self.am.get_images_and_masks()
 
-        # Illumination profiles (assume shape: (n_channels, y, x))
-        self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
+        # Check if illumination profiles exist before trying to load them
+        try:
+            self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
+        except KeyError:
+            print("Warning: 'illumination_profiles' dataset not found. Proceeding without illumination correction.")
+            self.illumination_profiles = None
 
-        # Corrected illumination profile
-        self.corrected_IL_profile = self.am.select_datasets('corrected_IL_profile', 'array')[0]
+        # Check if corrected illumination profile exists before trying to load it
+        try:
+            self.corrected_IL_profile = self.am.select_datasets('corrected_IL_profile', 'array')[0]
+        except KeyError:
+            print("Warning: 'corrected_IL_profile' dataset not found. Proceeding without corrected illumination.")
+            self.corrected_IL_profile = None
 
     def save_data(self, location):
         """
