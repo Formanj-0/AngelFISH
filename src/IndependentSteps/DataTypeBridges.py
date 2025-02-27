@@ -12,9 +12,12 @@ import dask_image.imread as dask_imread
 from dask import array as da
 from ndstorage import NDTiffDataset, NDTiffPyramidDataset
 from ndtiff import Dataset
-
+import ndstorage as nd
 import h5py
 import json
+import numpy as np
+import dask.array as da
+from pycromanager import Dataset
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -59,22 +62,19 @@ class DataTypeBridge(IndependentStepClass):
         if local_dataset_location is not None:
             if isinstance(local_dataset_location, str):
                 local_dataset_location = [local_dataset_location]
-
-            # if data is h5 format already
-            if local_dataset_location[0].endswith('h5'):
-                h5_names = [os.path.basename(f) for f in local_dataset_location]
-                folders = [os.path.dirname(f) for f in local_dataset_location]
-
-                # this case folder should be par_dir
-
-            # if data is hiding in a folder
+                
             elif os.path.isdir(local_dataset_location[0]):
-                h5_names = []
-                for ds in local_dataset_location:
-                    if os.path.isdir(ds):
-                        h5_name = os.path.basename(ds) + '.h5'
-                        h5_names.append(h5_name)
-                        self.convert_folder_to_H5(ds, h5_name, nucChannel, cytoChannel)
+
+                try: 
+                    Dataset(local_dataset_location[0])
+                    h5_names = [os.path.basename(ds) for ds in local_dataset_location]
+                except:
+                    h5_names = []
+                    for ds in local_dataset_location:
+                        if os.path.isdir(ds):
+                            h5_name = os.path.basename(ds)
+                            h5_names.append(h5_name)
+                            self.convert_folder_to_dataset(ds, h5_name, nucChannel, cytoChannel)
                 folders = os.path.dirname(local_dataset_location)
 
         # if data is on originates from the nas
@@ -92,19 +92,19 @@ class DataTypeBridge(IndependentStepClass):
                 name = os.path.basename(location)
 
                 if is_folder: # if it is a folder (aka pyromanager datasets)
-                    h5_name = name + '.h5'
+                    h5_name = name
                     destination = os.path.join(database_loc, name)
 
                     # check if the data set has already been converted to an h5 and is in par dir
-                    nas = NASConnection(pathlib.Path(connection_config_location))
-                    list_dir = nas.read_files(os.path.dirname(location))
-                    if h5_name in list_dir: 
-                        destination = database_loc
-                        location = os.path.join(os.path.dirname(location), h5_name)
-                        is_folder = False
+                    # nas = NASConnection(pathlib.Path(connection_config_location))
+                    # list_dir = nas.read_files(os.path.dirname(location))
+                    # if h5_name in list_dir: 
+                    #     destination = database_loc
+                    #     location = os.path.join(os.path.dirname(location), h5_name)
+                    #     is_folder = False
 
                 else: # if it is an h5 or single file
-                    h5_name = os.path.splitext(name)[0] + '.h5'
+                    h5_name = os.path.splitext(name)[0]
                     destination = database_loc
 
                 folders.append(database_loc)
@@ -113,20 +113,27 @@ class DataTypeBridge(IndependentStepClass):
 
                 # stops if h5 is already there
                 if os.path.exists(os.path.join(database_loc, h5_name)):
-                    continue
-
-                # download the data
-                if is_folder:
-                    self.download_folder_from_NAS(location, destination, connection_config_location)
+                    try: 
+                        Dataset(os.path.join(database_loc, h5_name))
+                        continue
+                    except:
+                        h5_name = h5_name+'_ds'
+                        h5_names[-1] = h5_name
+                        # names[-1] = names[-1] + '_ds'
                 else:
-                    self.download_file_from_NAS(location, destination, connection_config_location)
+                    # download the data
+                    if is_folder:
+                        self.download_folder_from_NAS(location, destination, connection_config_location)
+                    else:
+                        self.download_file_from_NAS(location, destination, connection_config_location)
 
-                # conver to an h5
-                if not os.path.exists(os.path.join(database_loc, h5_name)):
-                    self.convert_folder_to_H5(destination, h5_name, names[i], nucChannel, cytoChannel)
+                try: 
+                    Dataset(os.path.join(database_loc, h5_name))
+                except:
+                    self.convert_folder_to_dataset(database_loc, h5_name, names[i], nucChannel, cytoChannel)
 
         # Load in H5 and build independent params
-        H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_h5_dataset(folders, 
+        H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs = self.load_in_dataset(folders, 
                                                                                                          h5_names, 
                                                                                                          load_in_mask, 
                                                                                                          independent_params, 
@@ -155,56 +162,64 @@ class DataTypeBridge(IndependentStepClass):
                         local_folder_path=local_folder_path)
 
     @abstractmethod
-    def convert_folder_to_H5(self, folder, h5_name, name, nucChannel, cytoChannel):
+    def convert_folder_to_dataset(self, folder, h5_name, name, nucChannel, cytoChannel):
         # For any standardized data type this will convert it to a h5 file and save that file in the folder
         # that the data originally came from
         ...
 
-    def load_in_h5_dataset(self, locations, H5_names, load_in_mask, independent_params, nas_location, mask_structure) -> DataContainer:
-        # given an h5 file this will load in the dat in a uniform manner
+    def load_in_dataset(self, dirs, names, load_in_mask, independent_params, nas_location, mask_structure) -> DataContainer:
+        """
+        Given a pycromanager dataset, this will load the data in a uniform manner.
 
-        H5_locations = [os.path.join(location, H5_name) for location, H5_name in zip(locations, H5_names)]
-        position_indexs = []
-
-        h5_files = [h5py.File(H5_location, 'r') for H5_location in H5_locations]
-        # TODO: check if another file is already opening the h5 file
-
-
-        images = [da.from_array(h5['raw_images']) for h5 in h5_files]
+        dataset_objects: list of pycromanager.Dataset objects
+        load_in_mask: whether to load masks
+        independent_params: independent parameters (list of dicts, or single dict)
+        nas_location: location for NAS-specific paths
+        mask_structure: dictionary with mask structures
+        """
+        dataset_locations = [os.path.join(d, n) for d, n in zip(dirs, names)]
+        # Extract images from the dataset objects
+        dataset_objects = [Dataset(l) for l in dataset_locations]
+        images = [dataset.as_array(('position', 'time', 'channel', 'z')) for dataset in dataset_objects]
         position_indexs = [img.shape[0] for img in images]
+        
+        # Concatenate images across datasets
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))
+        
+        # Initialize masks
         masks = {}
         if load_in_mask:
             for key, ms in mask_structure.items():
                 if ms[2] is None:
-                    masks[key] = [da.from_array(h5[key]) for h5 in h5_files]
+                    masks[key] = [da.from_array(tifffile.imread(os.path.join(dataset_location, key + '.tif'))) for dataset_location in dataset_locations]
                     masks[key] = da.concatenate(masks[key], axis=0)
                     masks[key] = masks[key].rechunk((1, 1, -1, -1, -1, -1))
         else:
+            # Handle case where no mask is provided
             for key, ms in mask_structure.items():
                 if ms[2] is None:
-                    masks[key] = da.zeros([images.shape[0], images.shape[1], images.shape[2], images.shape[3], images.shape[4], images.shape[5]]) # TODO This may give problems in the future but will live with it
+                    masks[key] = da.zeros([images.shape[0], images.shape[1], images.shape[2], images.shape[3], images.shape[4], images.shape[5]])
 
         num_chuncks = images.shape[0] * images.shape[1]
-
+        
         position_indexs = np.cumsum(position_indexs)
 
-        # we have 3 inputs for independent params list[dict], dict, dict w/ proper keys
+        # Handle independent parameters
         if isinstance(independent_params, dict) and set(independent_params.keys()) == set(np.arange(position_indexs[-1]).tolist()):
-            # handles dict w/ proper keys
+            # Handles dict with proper keys
             ip = independent_params
         else:
             if not isinstance(independent_params, list):
-                # handles dict w/o proper keys
+                # Handles dict without proper keys
                 independent_params = [independent_params]
 
-            # converts all to proper keys
+            # Converts all to proper keys
             ip = {}
             for i, p in enumerate(position_indexs):
                 if independent_params is not None and len(independent_params) > 1:
                     if nas_location is not None:
-                        independent_params[i]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
+                        independent_params[i]['NAS_location'] = os.path.join(nas_location[i], dataset_objects[i].get_metadata('file_name'))
                     if i == 0:
                         temp = {p_idx: independent_params[i] for p_idx in range(p)}
                     else:
@@ -212,7 +227,7 @@ class DataTypeBridge(IndependentStepClass):
                     ip = {**ip, **temp}
                 elif independent_params is not None and len(independent_params) == 1:
                     if nas_location is not None:
-                        independent_params[0]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
+                        independent_params[0]['NAS_location'] = os.path.join(nas_location[i], dataset_objects[i].get_metadata('file_name'))
                     if i == 0:
                         temp = {p_idx: independent_params[0] for p_idx in range(p)}
                     else:
@@ -221,7 +236,8 @@ class DataTypeBridge(IndependentStepClass):
                 else:
                     print('Something is broken')
 
-        return H5_locations,h5_files, num_chuncks, images, masks, ip, position_indexs
+        return dataset_objects, num_chuncks, images, masks, ip, position_indexs
+
     
     def delete_folder(self, folder):
         shutil.rmtree(folder)
@@ -256,12 +272,12 @@ class FFF2NativeDataType(DataTypeBridge):
     def __init__(self):
         super().__init__()
 
-    def convert_folder_to_H5(self, folder, H5_name, name, nucChannel, cytoChannel): 
+    def convert_folder_to_dataset(self, folder, H5_name, name, nucChannel, cytoChannel): 
         # check if h5 file already exists
         if os.path.exists(os.path.join(os.path.dirname(folder), H5_name)):
             return 'already exists'
         
-        files = os.listdir(folder)
+        files = os.listdir(os.path.join(folder, name))
         tifs = [f for f in files if f.endswith('.tif')]
         logs = [f for f in files if f.endswith('.log')]
         mask_dirs = [f for f in files if f.startswith('masks')]
@@ -308,14 +324,14 @@ class FFF2NativeDataType(DataTypeBridge):
                     channel = list_channels[c]
                     search_params = [fov, channel, tp]
                     img_name = [f for f in list_images_names if all(v in f for v in search_params)][0]
-                    img = tifffile.imread(os.path.join(folder, img_name))
+                    img = tifffile.imread(os.path.join(folder,name, img_name))
                     img = da.from_array(img)
                     # make all the image data floats
                     img = img.astype(np.float32)
 
                     search_params = [fov]
                     log_name = [f for f in logs if all(v in f for v in search_params)][0]
-                    with open(os.path.join(folder, log_name), 'r') as f:
+                    with open(os.path.join(folder, name, log_name), 'r') as f:
                         log = f.readlines()
 
                     if fov not in img_metadata:
@@ -346,14 +362,27 @@ class FFF2NativeDataType(DataTypeBridge):
 
         imgs = imgs.rechunk((1, 1, -1, -1, -1, -1))
         masks = masks.rechunk((1, 1, -1, -1, -1, -1))
-        
-        da.to_hdf5(os.path.join(os.path.dirname(folder), H5_name), {'/raw_images': imgs, '/masks': masks}, compression='gzip')
+        summary_metadata = {'name': name, 'nucChannel': nucChannel, 'cytoChannel': cytoChannel}
+        dataset = NDTiffDataset(os.path.join(folder, H5_name), summary_metadata=summary_metadata, writable=True)
 
-        metadata_str = json.dumps(img_metadata)
-        with h5py.File(os.path.join(os.path.dirname(folder), H5_name), 'a') as h5f:
-            if '/metadata' in h5f:
-                del h5f['/metadata']
-            h5f.create_dataset('/metadata', data=metadata_str)
+        for fov in range(imgs.shape[0]):
+            for time in range(imgs.shape[1]):
+                for channel in range(imgs.shape[2]):
+                    for z in range(imgs.shape[3]):
+                        image_coordinates = {'position': fov, 'time': time, 'channel': channel, 'z': z}
+                        image_metadata = {'name': name, 'nucChannel': nucChannel, 'cytoChannel': cytoChannel}
+                        dataset.put_image(image_coordinates, imgs[fov, time, channel, z].compute(), image_metadata)
+
+        dataset.finish()
+        tifffile.imwrite(os.path.join(os.path.dirname(folder), 'masks.tif'), masks.compute())
+
+        # da.to_hdf5(os.path.join(os.path.dirname(folder), H5_name), {'/raw_images': imgs, '/masks': masks}, compression='gzip')
+
+        # metadata_str = json.dumps(img_metadata)
+        # with h5py.File(os.path.join(os.path.dirname(folder), H5_name), 'a') as h5f:
+        #     if '/metadata' in h5f:
+        #         del h5f['/metadata']
+        #     h5f.create_dataset('/metadata', data=metadata_str)
 
         del imgs
         del masks

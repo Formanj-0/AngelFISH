@@ -307,6 +307,9 @@ class DataContainer(Parameters):
             self.clear_after_error = clear_after_error
             self.init = True
 
+            self._images_modified = 0
+            self._masks_modified = 0
+
         self.state = 'global'
         if kwargs is not None:
             for key, value in kwargs.items():
@@ -336,11 +339,13 @@ class DataContainer(Parameters):
             for name, value in kwargs.items():
                 # check if it a mask
                 if 'mask' in name.lower():
-                    self.save_masks(name, value, p, t, parameters)
+                    if self._masks_modified > 0:
+                        self.save_masks(name, value, p, t, parameters)
 
                 # check if it a image
                 elif 'image' in name.lower():
-                    self.save_images(name, value, p, t)
+                    if self._images_modified > 0:
+                        self.save_images(name, value, p, t)
 
                 elif isinstance(value, pd.DataFrame):
                     # check the type:

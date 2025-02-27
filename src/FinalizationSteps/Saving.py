@@ -13,10 +13,12 @@ from datetime import datetime
 from abc import abstractmethod
 import gc
 from typing import List, Dict, Any, Union
+import json
 
 from src.GeneralStep import FinalizingStepClass
 from src.Parameters import Parameters, DataContainer, ScopeClass, Settings, Experiment
 from src.NASConnection import NASConnection
+from PIL import Image
 
 def close_h5_files():
     for obj in gc.get_objects():
@@ -91,24 +93,26 @@ class Save_Outputs(Saving):
     def save(self, attributes, locations, h5_file: str, group_name: str, position_indexs: list[int], independent_params: dict[str, Any] ):
         # get all the attributes of the class
 
-        def handle_df(df):
-            for col in df.columns:
-                if df[col].dtype == 'O':  # Object type
-                    if df[col].map(type).nunique() == 1 and isinstance(df[col].iloc[0], str):
-                        df[col] = df[col].astype(str)  # Convert to string
-                    else:
-                        df[col] = pd.to_numeric(df[col], errors='ignore')  # Convert to numeric, if possible
+        # def handle_df(df):
+        #     for col in df.columns:
+        #         if df[col].dtype == 'O':  # Object type
+        #             if df[col].map(type).nunique() == 1 and isinstance(df[col].iloc[0], str):
+        #                 df[col] = df[col].astype(str)  # Convert to string
+        #             else:
+        #                 df[col] = pd.to_numeric(df[col], errors='ignore')  # Convert to numeric, if possible
             
-            # add the independent params to the dataframe
-            if 'fov' in df.columns:
-                if independent_params is not None:
-                    for name in independent_params[0].keys():
-                        if name in df.columns:
-                            pass
-                        else:
-                            df[name] =[independent_params[fov][name] for fov in df['fov'].astype(int).tolist()]
-            return df
+        #     # add the independent params to the dataframe
+        #     if 'fov' in df.columns:
+        #         if independent_params is not None:
+        #             for name in independent_params[0].keys():
+        #                 if name in df.columns:
+        #                     pass
+        #                 else:
+        #                     df[name] =[independent_params[fov][name] for fov in df['fov'].astype(int).tolist()]
+        #     return df
         
+
+
         def split_df(df, lower, upper):
             if 'fov' not in df.columns:
                 return df
@@ -125,32 +129,39 @@ class Save_Outputs(Saving):
         close_h5_files()
         
         for i, location in enumerate(locations):
+            if not os.path.exists(os.path.join(location, group_name)):
+                os.makedirs(os.path.join(location, group_name))
+
             for key, data in attributes.items():
                 if key not in ['_initialized', 'independent_params'] and not any(substring in key for substring in ['mask', 'image']):
 
                     if data is not None:
                         if isinstance(data, pd.DataFrame):
-                            data = handle_df(data)
+                            # data = handle_df(data)
                             data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
                             print(f'saving {key}')
-                            data.to_hdf(location, f'{group_name}/{key}', mode='a', format='table', data_columns=True)
+                            data.to_csv(os.path.join(location, group_name, f'{key}.csv'))
+                            # data.to_hdf(location, f'{group_name}/{key}', mode='a', format='table', data_columns=True)
 
                         else:
-                            h5_file = h5py.File(location, 'a')
+                            # h5_file = h5py.File(location, 'a')
 
-                            if group_name in h5_file:
-                                group = h5_file[group_name]
-                            else:
-                                group = h5_file.create_group(group_name)
+                            # if group_name in h5_file:
+                            #     group = h5_file[group_name]
+                            # else:
+                            #     group = h5_file.create_group(group_name)
 
-                            if key in group:
-                                del group[key]
+                            # if key in group:
+                            #     del group[key]
                             
                             print(f'saving {key}')
-                            group.create_dataset(key, data=data)
+                            with open(os.path.join(location, group_name, f'{key}.json'), 'w') as json_file:
+                                json.dump(data, json_file)
 
-                            h5_file.flush()
-                            h5_file.close()
+                            # group.create_dataset(key, data=data)
+
+                            # h5_file.flush()
+                            # h5_file.close()
 
 
 class Save_Parameters(Saving):
@@ -186,39 +197,41 @@ class Save_Parameters(Saving):
         date = today.strftime("%Y-%m-%d")
 
         for i, locaction in enumerate(local_dataset_location):
+            with open(os.path.join(locaction, f'parameters_{Analysis_name}_{date}.json'), 'w') as json_file:
+                json.dump(params, json_file)
             # save the parameters to the h5 file
-            with h5py.File(locaction, 'r+') as h5_file:
-            # h5_file = h5py.File(locaction, 'r+')
-                group_name = f'Analysis_{Analysis_name}_{date}'
-                if group_name in h5_file:
-                    group = h5_file[group_name]
-                else:
-                    group = h5_file.create_group(group_name)
+            # with h5py.File(locaction, 'r+') as h5_file:
+            # # h5_file = h5py.File(locaction, 'r+')
+            #     group_name = f'Analysis_{Analysis_name}_{date}'
+            #     if group_name in h5_file:
+            #         group = h5_file[group_name]
+            #     else:
+            #         group = h5_file.create_group(group_name)
 
-                # save the parameters to the h5 file
-                # remove params_to_ignore
-                for key in params_to_ignore:
-                    if key in params:
-                        del params[key]
+            #     # save the parameters to the h5 file
+            #     # remove params_to_ignore
+            #     for key in params_to_ignore:
+            #         if key in params:
+            #             del params[key]
                 
-                params = handle_dict(params)
+            #     params = handle_dict(params)
 
-                # if dataset is already made, delete it
-                if 'parameters' in group:
-                    del group['parameters']
+            #     # if dataset is already made, delete it
+            #     if 'parameters' in group:
+            #         del group['parameters']
 
-                recursively_save_dict_contents_to_group(group, 'parameters', params)
+            #     recursively_save_dict_contents_to_group(group, 'parameters', params)
 
-                # save the nuc channel and cyto channel and fish channel at the top level
-                if 'nucChannel' in params:
-                    group.attrs['nucChannel'] = params['nucChannel']
-                if 'cytoChannel' in params:
-                    group.attrs['cytoChannel'] = params['cytoChannel']
-                if 'FISHChannel' in params:
-                    group.attrs['FISHChannel'] = params['FISHChannel']
+            #     # save the nuc channel and cyto channel and fish channel at the top level
+            #     if 'nucChannel' in params:
+            #         group.attrs['nucChannel'] = params['nucChannel']
+            #     if 'cytoChannel' in params:
+            #         group.attrs['cytoChannel'] = params['cytoChannel']
+            #     if 'FISHChannel' in params:
+            #         group.attrs['FISHChannel'] = params['FISHChannel']
             
-                h5_file.flush()
-                h5_file.close()
+            #     h5_file.flush()
+            #     h5_file.close()
 
 
 class Save_Images(Saving):
@@ -240,25 +253,11 @@ class Save_Images(Saving):
 
         # save the images to the h5 file
         for i, locaction in enumerate(local_dataset_location):
-            # if h5_file[i]:
-            #     h5_file[i].close()
-            with h5py.File(locaction, 'r+') as h5:
-                h5 = h5py.File(locaction, 'r+')
-                group_name = f'Analysis_{Analysis_name}_{date}'
-                if group_name in h5:
-                    group = h5[group_name]
-                else:
-                    group = h5.create_group(group_name)
-
-                # if dataset is already made, delete it
-                if 'images' in group:
-                    del group['images']
-
-                # save the images to the h5 file
-                group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]])
-
-                h5.flush()
-                h5.close()
+            group_name = f'Analysis_{Analysis_name}_{date}'
+            img_path = os.path.join(locaction, f'{group_name}', 'images.tiff')
+            imgs_to_save = images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]]
+            imgs_to_save = [Image.fromarray(img) for img in imgs_to_save]
+            imgs_to_save[0].save(img_path, save_all=True, append_images=imgs_to_save[1:])
 
 
 class Save_Masks(Saving):
@@ -281,13 +280,15 @@ class Save_Masks(Saving):
                     with h5py.File(locaction, 'r+') as h5:
                         masks = params[k].compute()
                         
-                        # check if the dataset is already made
-                        if f'/{k}' in h5:
-                            del h5[f'/{k}']
-
-                        chunk_size = (1,) + masks.shape[1:]  # Define chunk size
-                        h5.create_dataset(f'/{k}', data=masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
-                        h5.flush()
+                        # Create masks folder if it doesn't exist
+                        masks_folder = os.path.join(locaction, 'masks')
+                        if not os.path.exists(masks_folder):
+                            os.makedirs(masks_folder)
+                        
+                        # Save each mask as a separate file
+                        combined_mask = np.concatenate(masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], axis=0)
+                        mask_path = os.path.join(masks_folder, f'{k}.tiff')
+                        Image.fromarray(combined_mask).save(mask_path)
 
 
 
