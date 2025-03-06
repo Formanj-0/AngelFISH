@@ -1,6 +1,6 @@
 #Importing modules
 
-from .Parameters import Settings, Experiment, ScopeClass, DataContainer
+from .Parameters2 import Parameters
 from .GeneralStep import StepClass, SequentialStepsClass, FinalizingStepClass, IndependentStepClass
 from .Pipeline import Pipeline
 from .Send_To_Cluster import run_on_cluster
