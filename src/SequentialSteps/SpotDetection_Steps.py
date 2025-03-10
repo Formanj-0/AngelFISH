@@ -389,6 +389,9 @@ class BIGFISH_SpotDetection(SpotDetection):
              verbose:bool = False, display_plots: bool = False, bigfish_use_pca: bool = False,
              sub_pixel_fitting: bool = False, bigfish_minDistance:Union[float, list] = None, **kwargs):
         
+        if isinstance(FISHChannel, int):
+            FISHChannel = [FISHChannel]
+
         # cycle through FISH channels
         for c in range(len(FISHChannel)):
             rna = image[FISHChannel[c], :, :, :]
@@ -911,6 +914,10 @@ class Automatic_BIGFISH_Threshold(IndependentStepClass):
             quartiles_90_threshold = []
             quartiles_75_threshold = []
             quartiles_25_threshold = []
+
+            if isinstance(FISHChannel, int):
+                FISHChannel = [FISHChannel]
+
             for c in FISHChannel:
                 num_images_used = 0
                 list_thresholds = []

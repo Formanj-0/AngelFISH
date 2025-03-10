@@ -20,3 +20,5 @@ config_nas.yml
 /src/SequentialSteps/__pycache__
 *.pyc
 *.yml
+/.venv
+*.yml

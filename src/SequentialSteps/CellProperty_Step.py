@@ -45,15 +45,8 @@ class CellProperties(SequentialStepsClass):
             Returns:
             - True if the region touches any border, False otherwise.
             """
-
-            results = []
-            for i, row in df.iterrows():
-                minr, minc, maxr, maxc = row['cell_bbox-0'], row['cell_bbox-1'], row['cell_bbox-2'], row['cell_bbox-3']
-                if minr == 0 or minc == 0 or maxr == image.shape[-2]-1 or maxc == image.shape[-1]-1:
-                    results.append(True)
-                else:
-                    results.append(False)
-            return results
+            min_row, min_col, max_row, max_col = df['cell_bbox-0'], df['cell_bbox-1'], df['cell_bbox-2'], df['cell_bbox-3']
+            return (min_row == 0) | (min_col == 0) | (max_row == image.shape[0]) | (max_col == image.shape[1])
 
         nuc_props = sk.measure.regionprops_table(nuc_mask.astype(int), image, properties=props_to_measure)
         cell_props = sk.measure.regionprops_table(cell_mask.astype(int), image, properties=props_to_measure)

@@ -13,7 +13,9 @@ import matplotlib.patches as mpatches
 import copy
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-
+from datetime import datetime
+import sys
+import traceback
 
 class AnalysisManager:
     """
@@ -76,34 +78,69 @@ class AnalysisManager:
         self.close()
         return self.analysis_names
 
-    def select_datasets(self, dataset_name, dtype = None) -> list:
-        self.open()
-        if hasattr(self, 'analysis_names'):
-            is_df = False
-            is_array = False
-            list_df = []
-            list_arrays = []
-            for i,l in enumerate(self.location):
-                with h5py.File(l, 'r') as f:
-                    if dtype is not None and dtype == 'dataframe':
-                        df = pd.read_hdf(f.filename, f"{self.analysis_names[i]}/{dataset_name}")
+    def select_datasets(self, dataset_name, dtype=None) -> list:
+        """ Safely loads datasets from HDF5 files with strict error handling. """
+
+        self.open()  # Ensure setup is complete before file operations
+
+        if not hasattr(self, 'analysis_names'):
+            print('ERROR: No analysis selected. Please check your setup.')
+            return []
+
+        is_df = False
+        is_array = False
+        list_df = []
+        list_arrays = []
+
+        for i, file_path in enumerate(self.location):
+            if not os.path.exists(file_path):
+                print(f"ERROR: File does not exist: {file_path}")
+                sys.exit(1)  # Immediately exit if a file is missing
+
+            print(f"Opening file: {file_path}")
+
+            try:
+                with h5py.File(file_path, 'r') as f:
+                    dataset_key = f"{self.analysis_names[i]}/{dataset_name}"
+                    
+                    if dataset_key not in f:
+                        print(f"WARNING: Dataset '{dataset_name}' not found in {file_path}. Skipping.")
+                        continue
+
+                    if dtype == 'dataframe':
+                        print(f"Reading DataFrame from: {file_path} -> {dataset_key}")
+                        df = pd.read_hdf(f.filename, dataset_key)
                         df['h5_idx'] = i
                         list_df.append(df)
                         is_df = True
-                    elif dtype is not None and dtype == 'array':
-                        array = da.from_array(f[f'{self.analysis_names[i]}/{dataset_name}'])
+
+                    elif dtype == 'array':
+                        print(f"Reading Array from: {file_path} -> {dataset_key}")
+                        array = da.from_array(f[dataset_key])
                         list_arrays.append(array)
                         is_array = True
-                    else:
-                        raise Exception(f'IDK what to do with {dataset_name} data type, accepted types are dataframe, array. please add code to incorporate this data')
 
-            if is_df:
-                return(pd.concat(list_df, axis=0))
-            
-            if is_array:
-                return list_arrays
-        else:
-            print('select an anlysis')
+                    else:
+                        raise ValueError(f"ERROR: Unknown data type '{dtype}' for {dataset_name}. Accepted types: 'dataframe', 'array'.")
+
+            except OSError as e:
+                print(f"\nCRITICAL ERROR: Unable to read {file_path}")
+                print(f"HDF5 Error: {e}")
+                print(f"Dataset: {dataset_name}")
+                print(f"File: {file_path}")
+                traceback.print_exc()  # Print full error traceback for debugging
+                sys.exit(1)  # Immediately exit to prevent proceeding with bad data
+
+        if is_df:
+            print(f"Successfully loaded {len(list_df)} DataFrames. Merging...")
+            return pd.concat(list_df, axis=0, ignore_index=True)
+
+        if is_array:
+            print(f"Successfully loaded {len(list_arrays)} arrays.")
+            return list_arrays
+
+        print(f"ERROR: No valid data found for dataset: {dataset_name}.")
+        sys.exit(1)  # If no data is loaded, do not proceed blindly
 
     def list_datasets(self):
         if hasattr(self, 'analysis_names'):
@@ -120,14 +157,45 @@ class AnalysisManager:
         # self.analysis_names = [s.split('_')[1] for s in self.analysis_names]
         self.names = ['_'.join(s.split('_')[1:-1]) for s in self.analysis_names]
         if analysis_name is not None:
-            self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if s == analysis_name]
+            self.analysis_names = [self.analysis_names[i] for i,s in enumerate(self.names) if analysis_name in s]
 
-    def _filter_on_date(self, date_range):
-        self.dates = [s.split('_')[-1] for s in self.analysis_names]
+    def _filter_on_date(self, date_range: tuple):
+        """
+        Filters self.analysis_names and corresponding HDF5 file locations based on a given date range.
+        
+        Parameters:
+            date_range (tuple): A tuple (start_date, end_date) where dates are in the format 'YYYY-MM-DD'.
+        """
         if date_range is not None:
+            # Parse start and end dates
             start_date, end_date = date_range
-            gooddates = [start_date <= date <= end_date for date in self.dates]
-            self.analysis_names = [a for i, a in enumerate(self.analysis_names) if gooddates[i]]
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+            # Filter locations based on their dates in the file paths or analysis names
+            filtered_locations = []
+            filtered_analysis_names = []
+
+            for loc, analysis in zip(self.location, self.analysis_names):
+                # Extract the date from the file path or analysis name (e.g., "20220707")
+                try:
+                    date_str = analysis.split('_')[-1]  # Assuming the date is part of the analysis name
+                    file_date = datetime.strptime(date_str, '%Y-%m-%d')
+                except ValueError:
+                    # Handle cases where the date is not properly formatted
+                    continue
+                
+                # Check if the date is within the range
+                if start_date <= file_date <= end_date:
+                    filtered_locations.append(loc)
+                    filtered_analysis_names.append(analysis)
+            
+            # Update self.location and self.analysis_names with the filtered results
+            self.location = filtered_locations
+            self.analysis_names = filtered_analysis_names
+
+            print(f"Filtered locations: {self.location}")
+            print(f"Filtered analysis names: {self.analysis_names}")
 
     def _filter_locations(self):
         # select data sets with self.data, and self.dataset
@@ -231,30 +299,6 @@ class Analysis(ABC):
     def close(self):
         self.am.close()
 
-#%%
-# Analysis children
-########################################
-# Helper functions for drawing spots
-########################################
-def draw_spot_circle(ax, x, y, radius=4, color='gold'):
-    """
-    Draws an unfilled circle around (x,y).
-    """
-    circle = mpatches.Circle((x, y), radius=radius, fill=False,
-                             edgecolor=color, linewidth=2)
-    ax.add_patch(circle)
-
-def draw_spot_arrow(ax, x, y, color='gold'):
-    """
-    Draws a small arrow from (x, y) to (x+3, y).
-    """
-    ax.arrow(x-4, y, 3, 0, head_width=3,
-             color=color, length_includes_head=True)
-
-
-########################################
-# Main Class
-########################################
 class SpotDetection_SNRConfirmation(Analysis):
     """
     SpotDetection_Confirmation class with:
@@ -674,6 +718,9 @@ class SpotDetection_SNRConfirmation(Analysis):
 
 
 #%%
+########################################
+# Helper functions
+########################################
 def draw_spot_circle(ax, x, y, radius=4, color='gold'):
     """
     Draws an unfilled circle around (x,y).
@@ -690,7 +737,9 @@ def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
     ax.arrow(x + offset, y, -offset, 0, head_width=5,
              color=color, length_includes_head=True)
 
-
+########################################
+# Main Class
+########################################
 class Spot_Cluster_Analysis_WeightedSNR(Analysis):
     def __init__(self, am, seed=None):
         super().__init__(am, seed)
@@ -703,7 +752,8 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # We store the chosen_spot and chosen_ts for re-use
         self.chosen_spot = None
-        self.chosen_ts   = None  # NEW: store the "chosen" TS if you want only one
+        self.chosen_ts   = None 
+        self.chosen_foci = None
 
     ############################################################
     # Data loading and saving
@@ -713,13 +763,159 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         Loads spots, clusters, cellprops, cellspots from HDF5,
         plus images and masks.
         """
-        self.spots     = self.am.select_datasets('spotresults')
-        self.cellspots  = self.am.select_datasets('cellresults')
-        self.cellprops    = self.am.select_datasets('cell_properties')
-        self.clusters  = self.am.select_datasets('clusterresults')
+        self.spots     = self.am.select_datasets('spotresults', 'dataframe')
+        self.cellspots  = self.am.select_datasets('cellresults', 'dataframe')
+        self.cellprops    = self.am.select_datasets('cell_properties', 'dataframe')
+        self.clusters  = self.am.select_datasets('clusterresults', 'dataframe')
 
         self.images, self.masks = self.am.get_images_and_masks()
 
+
+    def display_gating(self):
+        Cyto_Channel = 1
+        required_columns = ['unique_cell_id']
+
+        # Ensure each DataFrame has a unique cell id (uci)
+        for df_name, df in [('spots', self.spots), ('cellprops', self.cellprops), ('clusters', self.clusters)]:
+            if not all(col in df.columns for col in required_columns):
+                raise ValueError(f"DataFrame '{df_name}' does not contain the required columns: {required_columns}")
+
+        # Check for unique 'uci' in each DataFrame
+        for df_name, df in [('cellprops', self.cellprops)]:
+            if df['unique_cell_id'].duplicated().any():
+                raise ValueError(f"DataFrame '{df_name}' contains duplicate 'unique_cell_id' values.")
+
+        # Remove UCIs that are not present in all dataframes
+        common_uci = set(self.cellprops['unique_cell_id']).intersection(
+            self.spots['unique_cell_id'],
+            # self.clusters['unique_cell_id'],
+        )
+
+        self.spots = self.spots[self.spots['unique_cell_id'].isin(common_uci)]
+        self.cellprops = self.cellprops[self.cellprops['unique_cell_id'].isin(common_uci)]
+        self.clusters = self.clusters[self.clusters['unique_cell_id'].isin(common_uci)]
+
+        # select a h5_index at random
+        id = np.random.choice(len(self.spots))
+        spot_row = self.spots.iloc[id]
+        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        self.h5_idx = h5_idx
+        self.fov = fov
+        print(f'Selected H5 Index: {h5_idx}')
+        print(f'Nas Location: {nas_location}')
+        print(f'FOV: {fov}' )
+
+        img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
+        mask = np.max(mask, axis=1) # This should make czyx to cyz
+        img = np.max(img, axis=1)
+        
+        # Compute only if they are Dask arrays
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+        if isinstance(img, da.Array):
+            img = img.compute()
+
+        # Debugging: Explicitly check what `img` is
+        print("DEBUG: Type of img before percentile:", type(img))
+        if hasattr(img, "shape"):
+            print("DEBUG: Shape of img:", img.shape)
+        else:
+            print("DEBUG: img has no shape attribute")
+
+        # Rescale the image exposure
+        p1, p99 = np.percentile(img, (1, 99))
+        img = exposure.rescale_intensity(
+            img, in_range=(p1, p99), out_range=(0, 1)
+        )
+
+        # Find data frames of UCIs that have h5_idx, fov, nas_location
+        spots_frame = self.spots[
+            (self.spots['h5_idx'] == h5_idx) &
+            (self.spots['fov'] == fov) &
+            (self.spots['NAS_location'] == nas_location)
+        ]
+
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov) &
+            (self.cellprops['NAS_location'] == nas_location)
+        ]
+
+        clusters_frame = self.clusters[
+            (self.clusters['h5_idx'] == h5_idx) &
+            (self.clusters['fov'] == fov) &
+            (self.clusters['NAS_location'] == nas_location)
+        ]
+
+        print(f"Spots DataFrame: {spots_frame.shape}")
+        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+        print(f"Clusters DataFrame: {clusters_frame.shape}")
+
+        # Compute mask if it's a Dask array
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+
+        # Identify which cell_labels appear in cellprops => "kept"
+        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+
+        # Identify which appear in the mask
+        cell_labels_in_mask = set(np.unique(mask))
+        if 0 in cell_labels_in_mask:
+            cell_labels_in_mask.remove(0)
+
+        # Colors
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # distinct non-red
+        removed_color = 'red'
+
+        # Show gating overlay
+        fig, ax = plt.subplots(figsize=(10, 10))
+
+        # Ensure img is computed if necessary
+        if isinstance(img, da.Array):
+            img = img.compute()
+
+        ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
+
+        # A) Plot the "kept" cell outlines
+        color_map = {
+            cell_label: kept_colors[i % len(kept_colors)]
+            for i, cell_label in enumerate(cell_labels_in_df)
+        }
+
+        for cell_label in cell_labels_in_df:
+            cell_mask = (mask == cell_label)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        linewidth=2, color=color_map[cell_label],
+                        label=f'Cell {cell_label}')
+
+        # B) Plot "discarded" cell outlines
+        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+
+        for cell_label in cell_labels_not_in_df:
+            cell_mask = (mask == cell_label)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        color=removed_color, linewidth=2, linestyle='dashed',
+                        label=f'Removed: Cell {cell_label}')
+
+        plt.legend()
+        plt.show()
+ 
     def save_data(self, location):
         """
         Saves the DataFrames to CSV.
@@ -767,14 +963,18 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
     def _pick_random_FOV_and_cell_with_TS(self):
         """
         1) Picks a random h5_idx, then a random FOV among it.
-        2) Tries to pick a cell that has at least one TS (is_nuc=1).
-           If none found, it picks any cell.
+        2) Tries to pick a cell with:
+        - TS (is_nuc=1), Foci (is_nuc=-1), and Spot (priority).
+        - If no such cell, tries TS and Spot.
+        - If no such cell, tries Spot only.
+        - If no such cell, picks any valid cell.
         """
+        # Step 1: Randomly pick h5_idx and FOV
         self.h5_idx = np.random.choice(self.spots['h5_idx'])
         possible_fovs = self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'].unique()
         self.fov = np.random.choice(possible_fovs)
 
-        # All cell labels in this FOV
+        # Step 2: Find all valid cells in this FOV
         valid_cells = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
             (self.cellprops['fov'] == self.fov) &
@@ -785,22 +985,45 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             print(f"No valid cells in FOV={self.fov}. Aborting.")
             return
 
-        # Among these cells, find which have a TS
+        # Step 3: Find cells with TS (is_nuc == 1)
         cells_with_TS = self.clusters[
             (self.clusters['h5_idx'] == self.h5_idx) &
             (self.clusters['fov'] == self.fov) &
             (self.clusters['is_nuc'] == 1)
         ]['cell_label'].unique()
 
-        # If none has TS, just pick any random cell
-        if len(cells_with_TS) == 0:
-            self.cell_label = np.random.choice(valid_cells)
-            print(f"No cell in FOV={self.fov} has TS => picked random cell_label={self.cell_label}")
+        # Step 4: Find cells with Foci (is_nuc == -1)
+        cells_with_Foci = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['is_nuc'] == 0)
+        ]['cell_label'].unique()
+
+        # Step 5: Find cells with Spot
+        cells_with_Spot = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov)
+        ]['cell_label'].unique()
+
+        # Step 6: Apply selection logic
+        # Priority: TS + Foci + Spot > TS + Spot > Spot > Any valid cell
+        cells_with_TS_Foci_Spot = np.intersect1d(np.intersect1d(cells_with_TS, cells_with_Foci), cells_with_Spot)
+        cells_with_TS_Spot = np.intersect1d(cells_with_TS, cells_with_Spot)
+        cells_with_Spot_only = cells_with_Spot
+
+        if len(cells_with_TS_Foci_Spot) > 0:
+            self.cell_label = np.random.choice(cells_with_TS_Foci_Spot)
+            print(f"Chose cell_label={self.cell_label} with TS, Foci, and Spot (FOV={self.fov}).")
+        elif len(cells_with_TS_Spot) > 0:
+            self.cell_label = np.random.choice(cells_with_TS_Spot)
+            print(f"Chose cell_label={self.cell_label} with TS and Spot (FOV={self.fov}).")
+        elif len(cells_with_Spot_only) > 0:
+            self.cell_label = np.random.choice(cells_with_Spot_only)
+            print(f"Chose cell_label={self.cell_label} with Spot only (FOV={self.fov}).")
         else:
-            # pick from among cells_with_TS
-            chosen = np.random.choice(cells_with_TS)
-            self.cell_label = chosen
-            print(f"Chose cell_label={chosen} which has TS (FOV={self.fov}).")
+            # Final fallback: pick any valid cell
+            self.cell_label = np.random.choice(valid_cells)
+            print(f"No cell with TS, Foci, or Spot => picked random cell_label={self.cell_label} (FOV={self.fov}).")
 
     ############################################################
     # 1) Full-FOV segmentation (nucleus & cytoplasm)
@@ -857,6 +1080,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             print("Cell not found. Aborting cell zoom.")
             self.chosen_spot = None
             self.chosen_ts   = None
+            self.chosen_foci = None
             return None
 
         row_min = int(cdf['cell_bbox-0'].iloc[0])
@@ -902,30 +1126,37 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             (self.clusters['cell_label'] == self.cell_label) &
             (self.clusters['is_nuc'] == 1)
         ]
+
         # Foci in this cell
         cell_foci = self.clusters[
             (self.clusters['h5_idx'] == self.h5_idx) &
             (self.clusters['fov'] == self.fov) &
             (self.clusters['cell_label'] == self.cell_label) &
-            (self.clusters['is_nuc'] == -1)
+            (self.clusters['is_nuc'] == 0)
         ]
 
         if cell_foci.empty:
             print('No Foci in this cell')
-            return
 
         if cell_spots.empty:
             print("No spots in this cell.")
             self.chosen_spot = None
             self.chosen_ts   = None
+            self.chosen_foci = None
         else:
             # Pick a TS if it exists, for reference in the next steps
             if not cell_TS.empty:
-                # For example, pick one TS (largest or random)
-                self.chosen_ts = cell_TS.sample(1).iloc[0]
+                # For example, pick one TS (largest)
+                self.chosen_ts = cell_TS.iloc[0]
             else:
                 self.chosen_ts = None
-
+            
+            # Pick a foci if it exists, for reference in the next steps
+            if not cell_foci.empty:
+                # For example, pick one foci
+                self.chosen_foci = cell_foci.sample(1).iloc[0]
+            else:
+                self.chosen_foci = None
             # We want a spot that is NOT in any TS cluster
             if not cell_TS.empty:
                 ts_cluster_ids = cell_TS['cluster_index'].unique()
@@ -972,7 +1203,7 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             # If your cluster DF has centroid x_px,y_px => we can arrow that
             sx = tsrow['x_px'] - dx
             sy = tsrow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=-5, color='magenta')
+            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='magenta')
             cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
             axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
 
@@ -980,16 +1211,16 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         for _, frow in cell_foci.iterrows():
             sx = frow['x_px'] - dx
             sy = frow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=5, color='cyan')
+            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='cyan')
             foci_size = getattr(frow, 'nb_spots', 1)
-            axs[1].text(sx - 12, yy, f'{foci_size}', color='cyan', fontsize=10)
+            axs[1].text(sx - 12, sy, f'{foci_size}', color='cyan', fontsize=10)
 
         for ax in axs:
             ax.axis("off")
         plt.tight_layout()
         plt.show()
 
-        return self.chosen_spot
+        return self.chosen_spot, self.chosen_ts, self.chosen_foci
 
     ###########################################################################
     # 3) Further zoom on the same single spot - now also highlight TS
@@ -1038,10 +1269,22 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             rx = tx - x1
             ry = ty - y1
             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_arrow(ax, rx, ry, offset=-5, color='magenta')
+                draw_spot_arrow(ax, rx, ry, offset=-10, color='magenta')
                 # Optionally annotate TS size:
                 csize = getattr(self.chosen_ts, 'nb_spots', 1)
                 ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
+
+        # If we have a chosen_foci, draw arrow for it if it's in our patch
+        if self.chosen_foci is not None:
+            tx = int(self.chosen_foci['x_px'])
+            ty = int(self.chosen_foci['y_px'])
+            rx = tx - x1
+            ry = ty - y1
+            if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
+                draw_spot_arrow(ax, rx, ry, offset=-10, color='cyan')
+                # Optionally annotate TS size:
+                csize = getattr(self.chosen_foci, 'nb_spots', 1)
+                ax.text(rx - 12, ry, f"{csize}", color='cyan', fontsize=10)
 
         # Mark other spots in gold if they are inside the patch
         cell_spots = self.spots[
@@ -1123,7 +1366,13 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             (self.clusters['cell_label'] == self.cell_label) &
             (self.clusters['is_nuc'] == 1)
         ]
-
+        # Foci in this cell
+        cell_foci = self.clusters[
+            (self.clusters['h5_idx'] == self.h5_idx) &
+            (self.clusters['fov'] == self.fov) &
+            (self.clusters['cell_label'] == self.cell_label) &
+            (self.clusters['is_nuc'] == 0)
+        ]
         # For coloring sub-threshold spots
         shades_of_red = [
             (1, 0.8, 0.8),
@@ -1485,24 +1734,32 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
         that have exactly 1, 2, 3, or >=4 TS.
         We consider all cells that appear in `cellprops`.
         """
-        # TS = is_nuc==1 in cluster df
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        
+        # TS = is_nuc==1 in clusters df
         ts_df = self.clusters[self.clusters['is_nuc'] == 1]
 
         # Count how many TS per (time, fov, cell_label)
         ts_count_df = (
-            ts_df.groupby(['h5_idx','time','fov','cell_label'])
+            ts_df.groupby(['h5_idx', 'time', 'fov', 'cell_label'])
                 .size()
                 .reset_index(name='ts_count')
         )
 
-        # Merge with all possible cells to ensure cells with 0 TS appear
-        all_cells = self.cellprops[['h5_idx','fov','cell_label']].drop_duplicates()
-        merged = pd.merge(all_cells, ts_count_df,
-                          on=['h5_idx','fov','cell_label'],
-                          how='left')
+        # Ensure we have each cell at each time in "all_cells"
+        all_cells = self.cellprops[['h5_idx', 'time', 'fov', 'cell_label']].drop_duplicates()
+
+        # Merge with ts_count_df so cells with no transcription sites get ts_count = 0
+        merged = pd.merge(
+            all_cells,
+            ts_count_df,
+            on=['h5_idx', 'time', 'fov', 'cell_label'],
+            how='left'
+        )
         merged['ts_count'] = merged['ts_count'].fillna(0)
 
-        # Categorize
+        # Categorize ts_count
         def cat_func(x):
             if x == 1:
                 return '1'
@@ -1513,28 +1770,33 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
             elif x >= 4:
                 return '>=4'
             else:
-                return None  # 0 or negative => not in 1,2,3,>=4
+                return '0'  # explicitly mark 0
 
         merged['ts_cat'] = merged['ts_count'].apply(cat_func)
 
-        # For fraction, we consider all cells at that time as denominator
-        grouped = merged.groupby(['time','ts_cat']).size().reset_index(name='count')
+        # Count how many cells per time & ts_cat
+        grouped = merged.groupby(['time', 'ts_cat']).size().reset_index(name='count')
 
+        # Calculate total cells per time point
         total_by_time = merged.groupby('time').size().reset_index(name='total')
         grouped = pd.merge(grouped, total_by_time, on='time')
         grouped['fraction'] = grouped['count'] / grouped['total']
 
-        # pivot so each row= time, columns= ts_cat, value= fraction
+        # Exclude TS == 0 from the final plot (but they remain in the denominator)
+        grouped = grouped[grouped['ts_cat'] != '0']
+
+        # Pivot so each row = time, columns = ts_cat, values = fraction
         pivoted = grouped.pivot(index='time', columns='ts_cat', values='fraction').fillna(0)
 
-        # Just keep columns = ['1','2','3','>=4'] if they exist
-        existing_cols = [c for c in ['1','2','3','>=4'] if c in pivoted.columns]
+        # Reorder columns if they exist
+        existing_cols = [c for c in ['1', '2', '3', '>=4'] if c in pivoted.columns]
         pivoted = pivoted[existing_cols]
 
-        ax = pivoted.plot(kind='bar', stacked=False, figsize=(8,5))
+        # Plot a stacked bar chart
+        ax = pivoted.plot(kind='bar', stacked=False, figsize=(8, 5))
         ax.set_xlabel("time")
         ax.set_ylabel("Fraction of cells")
-        ax.set_title("Fraction of cells with 1,2,3, >=4 TS by time")
+        ax.set_title("Fraction of cells with 1, 2, 3, >=4 TS by time")
         plt.legend(title="TS count")
         plt.tight_layout()
         plt.show()
@@ -1663,9 +1925,53 @@ class Spot_Cluster_Analysis_WeightedSNR(Analysis):
 
         # 12) Overview for entire dataset (including bar plot of TS distribution)
         self._display_overview_plots()
-
-    ############################################################
    
+    ###########################################################################
+    # display_gating_plus_display
+    ###########################################################################
+    def display_gating_plus_display(
+        self,
+        spotChannel=0,
+        cytoChannel=1,
+        nucChannel=2
+    ):
+        """
+        1) Calls display_gating() to pick a random FOV/h5_idx + show gating overlay.
+        2) We then pick one "kept" cell from cellprops in that FOV for further sub-plots.
+        3) Runs these sub-displays in order:
+            (1) _display_full_fov_segmentation
+            (2) _display_zoom_on_cell
+            (3) _display_weighted_threshold_figure
+            (4) _display_weighted_zoom_on_spot
+            (5) _display_overview_plots
+        NOTE: This assumes you have *already* pruned your spots DataFrame
+              to keep only those that pass the weighted SNR threshold
+              (e.g. spots = spots[spots['keep_wsnr']]).
+        """
+
+        # 1) Call display_gating => sets self.h5_idx, self.fov, prints gating overlay
+        self.display_gating()
+
+        # 2) Among the cellprops for (h5_idx, fov), pick a single cell_label
+        #    that presumably is "kept" (i.e. it appears in the gating overlay as non-red).
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov)
+        ]
+        if cellprops_frame.empty:
+            print("No 'kept' cells found in this FOV => cannot do further display.")
+            return
+
+        # pick one
+        self.cell_label = np.random.choice(cellprops_frame['cell_label'].unique())
+        print(f"Chosen cell_label = {self.cell_label} for further display steps.")
+
+        # 3) Now run your five sub-routines in sequence
+        # self._display_full_fov_segmentation(cytoChannel, nucChannel)
+        self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
+        self._display_weighted_zoom_on_spot(spotChannel)
+        self._display_overview_plots()
+
     def validate(self):
             # check cyto, cell, and nuc labels are the same
             if np.all(self.cellprops['cell_label'] == self.cellprops['nuc_label']):
@@ -1758,17 +2064,104 @@ class GR_Confirmation(Analysis):
         h = self.am.h5_files
         self.cellprops = self.am.select_datasets('cell_properties', 'dataframe')
 
-        # Illumination profiles (assume shape: (n_channels, y, x))
-        self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
+        self.images, self.masks = self.am.get_images_and_masks()
 
-        # Corrected illumination profile
-        self.corrected_IL_profile = self.am.select_datasets('corrected_IL_profile', 'array')[0]
+        # Check if illumination profiles exist before trying to load them
+        try:
+            self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
+        except KeyError:
+            print("Warning: 'illumination_profiles' dataset not found. Proceeding without illumination correction.")
+            self.illumination_profiles = None
+
+        # Check if corrected illumination profile exists before trying to load it
+        try:
+            self.corrected_IL_profile = self.am.select_datasets('corrected_IL_profile', 'array')[0]
+        except KeyError:
+            print("Warning: 'corrected_IL_profile' dataset not found. Proceeding without corrected illumination.")
+            self.corrected_IL_profile = None
 
     def save_data(self, location):
         """
         Saves the DataFrames to CSV.
         """
         self.cellprops.to_csv(os.path.join(location, 'cellprops.csv'), index=False)
+
+    def display_gating(self):
+        Cyto_Channel = 1
+        required_columns = ['unique_cell_id']
+
+        # Check if required columns are present
+        if not all(col in self.cellprops.columns for col in required_columns):
+            print("Required columns missing in cellprops DataFrame.")
+            return
+
+        # select a h5_index at random
+        id = np.random.choice(len(self.cellprops))
+        spot_row = self.cellprops.iloc[id]
+        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        self.h5_idx = h5_idx
+        self.fov = fov
+        print(f'Selected H5 Index: {h5_idx}')
+        print(f'Nas Location: {nas_location}')
+        print(f'FOV: {fov}' )
+
+        img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
+        mask = np.max(mask, axis=1) # This should make czyx to cyz
+        img = np.max(img, axis=1)
+        mask.compute()
+        img.compute()
+
+
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov) &
+            (self.cellprops['NAS_location'] == nas_location)
+        ]
+        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+
+
+        # Identify which cell_labels appear in cellprops => "kept"
+        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+        # Identify which appear in the mask
+        cell_labels_in_mask = set(np.unique(mask.compute()))
+        if 0 in cell_labels_in_mask:
+            cell_labels_in_mask.remove(0)
+
+        # Colors
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # distinct non-red
+        removed_color = 'red'
+
+        # Show gating overlay
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
+
+        # A) Plot the "kept" cell outlines
+        color_map = {
+            cell_label: kept_colors[i % len(kept_colors)]
+            for i, cell_label in enumerate(cell_labels_in_df)
+        }
+        for cell_label in cell_labels_in_df:
+            cell_mask = (mask == cell_label)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        linewidth=2, color=color_map[cell_label],
+                        label=f'Cell {cell_label}')
+
+        # B) Plot "discarded" cell outlines
+        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+        for cell_label in cell_labels_not_in_df:
+            cell_mask = (mask == cell_label)
+            contours = find_contours(cell_mask[Cyto_Channel, :, :].compute(), 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        color=removed_color, linewidth=2, linestyle='dashed',
+                        label=f'Removed: Cell {cell_label}')
+
+        plt.legend()
+        plt.show()
 
     def display(self, GR_Channel: int = 0, Nuc_Channel: int = 1):
         """

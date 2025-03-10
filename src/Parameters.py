@@ -28,7 +28,9 @@ class Parameters(ABC):
         for instance in cls._instances:
             if instance.__class__ == cls:
                 return instance
+            
         instance = super().__new__(cls)
+        instance.__init__(*args, **kwargs)
         cls._instances.append(instance)
         return instance
 
@@ -85,7 +87,7 @@ class Parameters(ABC):
         if kwargs is None:
             return None
         used_keys = []
-        instances = Parameters._instances if self.state == 'global' else self.instances
+        instances = Parameters()._instances if self.state == 'global' else self.instances
         for instance in instances:
             for key, value in kwargs.items():
                 # check if the key exists in the instance
@@ -132,6 +134,9 @@ class Parameters(ABC):
     def get_parameters(self) -> dict:
         # Get all the parameters of all instances of the class
         params = {}
+        acceptableDuplicateKeys = ['kwargs', 'state', 'instances', 'init', 'state']
+        keys2remove = ['_instances', 'instances']
+
 
         # Ensure all instances have the 'state' attribute
         for instance in Parameters._instances:
@@ -142,7 +147,8 @@ class Parameters(ABC):
             for instance in Parameters()._instances:
                 instance._update()
                 # check for duplicates and raise an error if found
-                duplicate_keys = list(set(params.keys()).intersection(set(instance.todict().keys())))
+                keys2add = set(instance.todict().keys())
+                duplicate_keys = list(set(params.keys()).intersection(keys2add))
                 duplicate_keys = [key for key in duplicate_keys if key not in {'kwargs', 'state', 'instances', 'init'}]
                 if duplicate_keys:
                     raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
@@ -151,11 +157,21 @@ class Parameters(ABC):
             for instance in self.instances:
                 instance._update()
                 # check for duplicates and raise an error if found
-                duplicate_keys = set(params.keys()).intersection(set(instance.todict().keys()))
+                keys2add = set(instance.todict().keys())
+                data2add = instance.todict()
+                duplicate_keys = list(set(params.keys()).intersection(keys2add))
                 if duplicate_keys:
-                    if duplicate_keys != {'kwargs'} and duplicate_keys != {'state'}:
+                    for key in acceptableDuplicateKeys:
+                        if key in duplicate_keys:
+                            duplicate_keys.remove(key)
+                            data2add.pop(key)
+                    if duplicate_keys:
                         raise ValueError(f"Duplicate parameter found: {duplicate_keys}")
-                params.update(instance.todict())
+                keys_to_remove = [key for key in data2add.keys() if key in keys2remove]
+                for key in keys_to_remove:
+                    data2add.pop(key)
+    
+                params.update(data2add)
         return params
 
     def isolate(self):
@@ -303,11 +319,8 @@ class DataContainer(Parameters):
                     l = [instance.num_chunks_to_run, value]
                     instance.num_chunks_to_run = min(i for i in l if i is not None)
 
-        if name == 'images':
-            self._images_modified = True
-
-        if name == 'masks':
-            self._masks_modified = True
+        if name == 'images' and value is not None:
+            (self.PP, self.TT, self.CC, self.ZZ, self.YY, self.XX) = value.shape
             
         super().__setattr__(name, value)
     
@@ -322,11 +335,11 @@ class DataContainer(Parameters):
         if kwargs is not None:
             for name, value in kwargs.items():
                 # check if it a mask
-                if 'mask' in name:
+                if 'mask' in name.lower():
                     self.save_masks(name, value, p, t, parameters)
 
                 # check if it a image
-                elif 'image' in name:
+                elif 'image' in name.lower():
                     self.save_images(name, value, p, t)
 
                 elif isinstance(value, pd.DataFrame):

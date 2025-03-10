@@ -171,7 +171,7 @@ class Save_Parameters(Saving):
                 else:
                     h5file[f"{path}/{key}"] = item
         
-        params = parameters.todict()
+        params = parameters.get_parameters()
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
 
         h5_file = kwargs['h5_file']
@@ -286,7 +286,7 @@ class Save_Masks(Saving):
                             del h5[f'/{k}']
 
                         chunk_size = (1,) + masks.shape[1:]  # Define chunk size
-                        h5.create_dataset('/masks', data=masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
+                        h5.create_dataset(f'/{k}', data=masks[position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
                         h5.flush()
 
 

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from itertools import cycle, islice
 import json
 import copy
+import numpy as np
 
 from . import StepClass
 from .Parameters import Parameters, Experiment, Settings, ScopeClass, DataContainer
@@ -35,6 +36,10 @@ class Pipeline:
             self.parameters = parameters
         else:
             raise Exception('Who knows what you did')
+        
+        print(Parameters().get_parameters())
+        print(self.parameters.get_parameters())
+
         
         self.get_independent_steps()
         self.get_sequential_steps()
@@ -82,10 +87,9 @@ class Pipeline:
         FinalizingStepClass.execute(self.data_container, self.parameters, self.finalization_steps)
 
     def __post_init__(self):
+        self.parameters.pipeline_init()
         self.check_requirements()
         self.save_location = self.DataContainer.save_location()
-        
-        self.parameters.pipeline_init()
 
     def modify_kwargs(self, modify_kwargs: dict):
         self.parameters.update_parameters(modify_kwargs)
@@ -123,7 +127,7 @@ class Pipeline:
                           *[i.__class__.__name__ for i in self.get_sequential_steps()],
                           *[i.__class__.__name__ for i in self.get_finalization_steps()]]
         
-
+        print(params)
         # self.modify_kwargs(params)
         self._run(self.experiment_location , self.steps)
 
@@ -178,7 +182,7 @@ class Pipeline:
         if not os.path.exists(pipeline_dir):
             os.makedirs(pipeline_dir)
         
-        self.pipeline_dictionary_location = os.path.join(pipeline_dir, f'{name}.txt')
+        self.pipeline_dictionary_location = os.path.join(pipeline_dir, f'{name}_{np.random.randint(0, 1000000)}.txt') # TODO: make this not shit
         with open(self.pipeline_dictionary_location, 'w') as f:
             json.dump(pipeline, f)
 

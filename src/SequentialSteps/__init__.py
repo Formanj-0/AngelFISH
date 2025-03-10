@@ -2,7 +2,7 @@ from .SpotDetection_Steps import (BIGFISH_SpotDetection, UFISH_SpotDetection_Ste
 
 from .Filters import (rescale_images, remove_background)
 
-from .Segmentation_Steps import (SimpleCellposeSegmentaion, BIGFISH_Tensorflow_Segmentation, DilationedCytoMask)
+from .Segmentation_Steps import (SimpleCellposeSegmentaion, BIGFISH_Tensorflow_Segmentation, DilationedCytoMask, GeneralCellposeSegmentation)
 
 from .CellProperty_Step import CellProperties
 
