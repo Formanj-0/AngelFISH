@@ -12,7 +12,7 @@ from src.Parameters import Parameters, ScopeClass, Experiment, DataContainer, Se
 from src.GeneralStep import SequentialStepsClass, IndependentStepClass, FinalizingStepClass, StepClass
 from src.FinalizationSteps import Save_Images, Save_Masks, Save_Outputs, return_to_NAS, remove_local_data, remove_local_data_but_keep_h5
 from src.SequentialSteps import SimpleCellposeSegmentaion, BIGFISH_SpotDetection
-from src.IndependentSteps import NativeDataType
+from src.IndependentSteps import H5
 
 def test_sanity():
     # Setup

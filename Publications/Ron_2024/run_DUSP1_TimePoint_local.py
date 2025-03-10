@@ -51,7 +51,7 @@ src_path = os.path.abspath(os.path.join(os.getcwd(), '..', '..'))
 print(src_path)
 sys.path.append(src_path)
 
-from src.IndependentSteps import Pycromanager2NativeDataType, FFF2NativeDataType
+from src.IndependentSteps import Pycromanager2H5, FFF2H5
 
 from src.SequentialSteps import BIGFISH_SpotDetection, SimpleCellposeSegmentaion, IlluminationCorrection, \
                                 Calculate_BIGFISH_Threshold, CellProperties, Automatic_BIGFISH_Threshold
@@ -94,7 +94,7 @@ def runner(idl, ip, name: str = None):
     settings.verbose = False
     settings.MAX_NUM_IMAGES_TO_AUTOMATICALLY_CALCULATE_THRESHOLD = 1_000_000
 
-    FFF2NativeDataType()
+    FFF2H5()
     Automatic_BIGFISH_Threshold()
     BIGFISH_SpotDetection()
     CellProperties() 
