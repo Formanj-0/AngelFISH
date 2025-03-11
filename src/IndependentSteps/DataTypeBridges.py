@@ -107,14 +107,14 @@ class DataTypeBridge_Dataset(IndependentStepClass):
             local_dataset_location[i] = self.convert_data(location)
 
         # Load in H5 and build independent param
-        images, masks, ip, position_indexs = self.load_in_dataset(local_dataset_location,
+        images, masks, ip, position_indexs, mask_locations = self.load_in_dataset(local_dataset_location,
                                                                   initial_data_location,
                                                                     load_in_mask, 
                                                                     independent_params, 
                                                                     mask_structure, )
         return {'images': images,
                 'independent_params': ip, 'position_indexs': position_indexs,\
-                'masks': masks}
+                'masks': masks, 'mask_locations': mask_locations, 'image_locations': local_dataset_location}
 
     @abstractmethod
     def convert_data(self, location):
@@ -126,7 +126,7 @@ class DataTypeBridge_Dataset(IndependentStepClass):
         # given an h5 file this will load in the dat in a uniform manner
         position_indexs = []
 
-        dss = [h5py.File(location, 'r') for location in locations]
+        dss = [Dataset(location) for location in locations]
         # TODO: check if another file is already opening the h5 file
 
         images = [ds.as_array(['position', 'time', 'channel','z']) for ds in dss]
@@ -134,14 +134,23 @@ class DataTypeBridge_Dataset(IndependentStepClass):
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))
         masks = {}
+        mask_locations = {}
 
         # Find tifs in the directory and add them to the dask dictionary
         for location in locations:
             tifs = [f for f in os.listdir(location) if f.endswith('.tif')]
             for tif in tifs:
                 tif_path = os.path.join(location, tif)
+                if os.path.splitext(tif)[0] not in mask_locations.keys():
+                    mask_locations[os.path.splitext(tif)[0]] = []
+                mask_locations[os.path.splitext(tif)[0]].append(tif_path)
                 tif_data = dask_imread.imread(tif_path)
+                if os.path.splitext(tif)[0] not in masks.keys():
+                    masks[os.path.splitext(tif)[0]] = None
                 masks[os.path.splitext(tif)[0]] = tif_data
+
+        for key in masks.keys():
+            masks[key] = da.concatenate(masks[key], axis=0)
 
         num_chuncks = images.shape[0] * images.shape[1]
 
@@ -161,7 +170,7 @@ class DataTypeBridge_Dataset(IndependentStepClass):
             for i, p in enumerate(position_indexs):
                 if independent_params is not None and len(independent_params) > 1:
                     if nas_location is not None:
-                        independent_params[i]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
+                        independent_params[i]['NAS_location'] = nas_location[i]
                     if i == 0:
                         temp = {p_idx: independent_params[i] for p_idx in range(p)}
                     else:
@@ -169,7 +178,7 @@ class DataTypeBridge_Dataset(IndependentStepClass):
                     ip = {**ip, **temp}
                 elif independent_params is not None and len(independent_params) == 1:
                     if nas_location is not None:
-                        independent_params[0]['NAS_location'] = os.path.join(nas_location[i], H5_names[i])
+                        independent_params[0]['NAS_location'] = nas_location[i]
                     if i == 0:
                         temp = {p_idx: independent_params[0] for p_idx in range(p)}
                     else:
@@ -178,7 +187,7 @@ class DataTypeBridge_Dataset(IndependentStepClass):
                 else:
                     print('Something is broken')
 
-        return images, masks, ip, position_indexs
+        return images, masks, ip, position_indexs, mask_locations
     
     def delete_folder(self, folder):
         shutil.rmtree(folder)
@@ -192,13 +201,13 @@ class DataTypeBridge_H5(IndependentStepClass):
             local_dataset_location[i] = self.convert_data(location)
 
         # Load in H5 and build independent param
-        images, masks, ip, position_indexs = self.load_in_dataset(local_dataset_location,
+        images, masks, ip, position_indexs, mask_locations = self.load_in_dataset(local_dataset_location,
                                                                   initial_data_location,
                                                                     load_in_mask, 
                                                                     independent_params)
         return {'images': images,
                 'independent_params': ip, 'position_indexs': position_indexs,\
-                'masks': masks}
+                'masks': masks, 'mask_locations': mask_locations, 'image_locations': local_dataset_location}
 
 
     @abstractmethod
@@ -220,12 +229,14 @@ class DataTypeBridge_H5(IndependentStepClass):
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))
         masks = {}
+        mask_locations = {}
         if load_in_mask:
             for key in h5_files[0].keys():
-                if 'analysis' not in key and 'image' not in key:
+                if 'analysis' not in key and 'image' not in key and 'meta' not in key:
                     masks[key] = [da.from_array(h5[key]) for h5 in h5_files]
                     masks[key] = da.concatenate(masks[key], axis=0)
                     masks[key] = masks[key].rechunk((1, 1, -1, -1, -1, -1))
+                    mask_locations[key] = [locations]
 
 
         num_chuncks = images.shape[0] * images.shape[1]
@@ -263,7 +274,9 @@ class DataTypeBridge_H5(IndependentStepClass):
                 else:
                     print('Something is broken')
 
-        return H5_names ,h5_files, num_chuncks, images, masks, ip, position_indexs
+        for h5 in h5_files:
+            h5.close()
+        return images, masks, ip, position_indexs, mask_locations
     
     def delete_folder(self, folder):
         shutil.rmtree(folder)
@@ -286,7 +299,7 @@ class Pycromanager2H5(DataTypeBridge_H5):
             h5_name = location + '.h5'
         # check if h5 file already exists
         if os.path.exists(h5_name):
-            return 'already exists'
+            return h5_name
         
         ds = Dataset(location)
         
@@ -303,9 +316,11 @@ class FFF2H5(DataTypeBridge_H5):
     def convert_data(self, location): 
         if not location.endswith('.h5'):
             h5_name = location + '.h5'
+        else:
+            h5_name = location
         # check if h5 file already exists
         if os.path.exists(h5_name):
-            return 'already exists'
+            return h5_name
         
         files = os.listdir(location)
         tifs = [f for f in files if f.endswith('.tif')]

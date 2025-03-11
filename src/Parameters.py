@@ -16,6 +16,8 @@ import pandas as pd
 from skimage.io import imsave
 import tempfile
 import json
+import dask_image.imread as dask_imread
+
 
 class Parameters(ABC):
     """
@@ -306,6 +308,8 @@ class DataContainer(Parameters):
             self.temp = temp
             self.clear_after_error = clear_after_error
             self.init = True
+            self.mask_locations = None
+            self.image_locations = None
 
         self.state = 'global'
         if kwargs is not None:
@@ -336,23 +340,69 @@ class DataContainer(Parameters):
             for name, value in kwargs.items():
                 # check if it a mask
                 if 'mask' in name.lower():
-                    self.save_masks(name, value, p, t, parameters)
-
+                    if 'location' not in name.lower():
+                        # if I know where that masks exists and it doesnt need to be changed
+                        if self.mask_locations is None:
+                            pass
+                        else:
+                            if isinstance(value, dict):
+                                for key in value.keys():
+                                    key = name.split('_')[0]
+                                    if key in self.masks:
+                                        if p is not None and t is not None:
+                                            if self.masks[key][p, t] != value[key]:
+                                                self.save_masks(key, value[key], p, t, parameters)
+                                                if not isinstance(self.mask_locations, list):
+                                                    self.mask_locations = []
+                                                self.mask_locations.append(key)
+                                        else:
+                                            if self.masks[key] != value[key]:
+                                                self.save_masks(key, value[key], p, t, parameters)
+                                                if not isinstance(self.mask_locations, list):
+                                                    self.mask_locations = []
+                                                self.mask_locations.append(key)
+                                    else:
+                                        self.save_masks(key, value[key], p, t, parameters)
+                                        if not isinstance(self.mask_locations, list):
+                                            self.mask_locations = []
+                                        self.mask_locations.append(key)
+                            else:
+                                if self.masks is not None:
+                                    for key in self.masks.keys():
+                                        if key in name:
+                                            break
+                                        else:
+                                            key = name
+                                key = name.split('_')[0]
+                                self.save_masks(key, value, p, t, parameters)
+                                if not isinstance(self.mask_locations, list):
+                                    self.mask_locations = []
+                                self.mask_locations.append(key)
+                            
+                    elif 'location' in name.lower():
+                        self.mask_locations = value
                 # check if it a image
                 elif 'image' in name.lower():
-                    self.save_images(name, value, p, t)
+                        if 'location' not in name.lower():
+                            if p is None and t is None:
+                                if self.images and self.images[key] != value:
+                                    self.save_images(name, value, p, t)
+                                    self.image_locations = 'temp'
+                            else:
+                                if self.images and self.images[p, t] != value:
+                                    self.save_images(name, value, p, t)
+                                    self.image_locations = 'temp'
 
+                        elif 'location' in name.lower():
+                            self.image_locations = value
                 elif isinstance(value, pd.DataFrame):
                     # check the type:
                     # if pd.df save as csv
                     self.save_df(name, value)
-
                 elif isinstance(value, np.ndarray):
                     self.save_np(name, value)
-
                 elif name in parameters.get_parameters().keys():
                     parameters.update_parameters({name: value})
-
                 else:
                     # else save as json
                     self.save_extra(name, value)
@@ -360,40 +410,25 @@ class DataContainer(Parameters):
     def save_masks(self, name, mask, p:int = None, t:int = None, parameters = None):
         parameters = Parameters() if parameters is None else parameters
         params = parameters.get_parameters()
-        mask_structure = params['mask_structure']
-        ms = mask_structure[name]
+        if not isinstance(self.mask_locations, list):
+            self.mask_locations[name] = os.path.join(self.temp.name, name)
+        nump, numt, numc, numz, numy,numx = params['images'].shape
         if mask is not None: 
             if p is None and t is None:
-                chuncks = [1 if s=='p' else -1 for s in ms[0]]
-                masks = da.rechunk(da.asarray(mask, dtype=np.int8), list(chuncks))
-                da.to_npy_stack(os.path.join(self.temp.name, name), masks, axis=chuncks.index(1))
+                masks = da.rechunk(da.asarray(mask, dtype=np.int8),[1, 1, -1, -1, -1])
+                save_path = os.path.join(self.temp.name, name)
+                if not os.path.exists(save_path):
+                    # Create a big array of zeros if the directory does not exist
+                    zero_array = da.zeros([nump, numt, numz, numy, numx], dtype=np.int8)
+                    da.to_npy_stack(save_path, zero_array, axis=0)
+                da.to_npy_stack(save_path, masks, axis=0)
             else:
-                if 'p' in ms[0] or 't' in ms[0]:
-                    raise 'idk where to put p and t'
-                else:
-                    parent = ms[2]
-                    ms_parent = mask_structure[parent]
-                    channel = ms[1]
-                    child_structure = ms[0]
-                    parent_structure = ms_parent[0]
-                    # construct indexing for saving
-                    index = []
-                    for dim in parent_structure:
-                        if dim in child_structure:
-                            index.append(slice(None))
-                            # index.append(np.newaxis) # TODO FiX this, idk why its not working 
-                        elif dim == 'p':
-                            index.append(0)
-                        elif dim == 't':
-                            index.append(t)
-                        elif dim == 'c':
-                            index.append(params[channel] if type(channel) == str else channel)
-                        else:
-                            raise ValueError(f"Unexpected dimension {dim} in parent structure")
-                    parent_data = np.load(os.path.join(self.temp.name, parent, f'{p}.npy'))
-                    index = tuple(i if i is not None else slice(None) for i in index)
-                    parent_data[index] = mask
-                    np.save(os.path.join(self.temp.name, parent, f'{p}.npy'), parent_data)
+                save_path = os.path.join(self.temp.name, name)
+                if not os.path.exists(save_path):
+                    # Create a big array of zeros if the directory does not exist
+                    zero_array = da.zeros([nump, numt, numz, numy, numx], dtype=np.int8)
+                    da.to_npy_stack(save_path, zero_array, axis=0)
+                np.save(os.path.join(save_path, f'{p}.npy'), mask)
         else:
             print('returned empty mask')
 
@@ -432,16 +467,54 @@ class DataContainer(Parameters):
             # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
             # Load masks and images
-            if self.images is not None:
-                del self.images
-            if self.masks is not None:
-                del self.masks
-            gc.collect()
+            # if self.images is not None:
+            #     del self.images
+            # if self.masks is not None:
+            #     del self.masks
+            # gc.collect()
 
             # Load everything else:
             # go through all remaining folders in temp
             data = {}
+
+            if self.image_locations is not None and self.image_locations[0] != 'temp':
+                if self.image_locations[0].endswith('.h5'):
+                    h5_files = [h5py.File(H5_location, 'r') for H5_location in self.image_locations]
+                    images = [da.from_array(h5['raw_images']) for h5 in h5_files]
+                    images = da.concatenate(images, axis=0)
+                    images = images.rechunk((1, 1, -1, -1, -1, -1))
+                    data['images'] = images
+
+                else:
+                    dss = [Dataset(l) for l in self.image_locations]
+                    images = [ds.as_array(['position', 'time', 'channel','z']) for ds in dss]
+                    images = da.concatenate(images, axis=0)
+                    data['images'] = images
+
+            if self.mask_locations is not None and not isinstance(self.mask_locations, list):
+                masks = {}
+                # Find tifs in the directory and add them to the dask dictionary
+                if self.mask_locations is not None and self.mask_locations:
+                    if list(self.mask_locations.values())[0][0].endswith('.h5'):
+                        for key in self.mask_locations.keys():
+                            h5_files = [h5py.File(H5_location, 'r') for H5_location in self.mask_locations[key]]
+                            masks[key] = [da.from_array(h5[key]) for h5 in h5_files]
+                            masks[key] = da.concatenate(masks[key], axis=0)
+                            data['masks'][key] = masks[key].rechunk((1, 1, -1, -1, -1))
+                            for h5 in h5_files:
+                                h5.close()
+                    else:
+                        for key in self.mask_locations.keys():
+                            tif_data = [dask_imread.imread(l) for l in self.mask_locations[key]]
+                            masks[key] = da.concatenate(tif_data, axis=0)
+                            data['masks'][key] = masks[key].rechunk((1, 1, -1, -1, -1))
+
+            masks = {}
             for folder in os.listdir(self.temp.name):
+                if isinstance(self.mask_locations, list) and folder in self.mask_locations:
+                    is_mask = True
+                else:
+                    is_mask = False
                 folder_path = os.path.join(self.temp.name, folder)
                 files = os.listdir(folder_path)
                 csv_files = [f for f in files if f.endswith('.csv')]
@@ -482,12 +555,17 @@ class DataContainer(Parameters):
                             for n in npy_files:
                                 npy_data.append(np.load(os.path.join(folder_path, n)))
                             npy_data = np.concatenate(npy_data, axis=0)
-                    setattr(self, folder, npy_data)
-                    data[folder] = npy_data
+                    if is_mask:
+                        masks[folder] = npy_data
+                    else:
+                        setattr(self, folder, npy_data)
+                        data[folder] = npy_data
 
                 else:
                     raise ValueError('All temp files must either be csv, json, or npy and not a mix')
-
+            data['masks'] = masks
+            setattr(self, 'masks', masks)
+            self.update_parameters(data)
             return data
 
     def delete_temp(self):
