@@ -419,16 +419,27 @@ class DataContainer(Parameters):
                 save_path = os.path.join(self.temp.name, name)
                 if not os.path.exists(save_path):
                     # Create a big array of zeros if the directory does not exist
-                    zero_array = da.zeros([nump, numt, numz, numy, numx], dtype=np.int8)
+                    zero_array = da.zeros(shape=[nump, numt, numz, numy, numx], dtype=np.int8)
                     da.to_npy_stack(save_path, zero_array, axis=0)
                 da.to_npy_stack(save_path, masks, axis=0)
             else:
                 save_path = os.path.join(self.temp.name, name)
                 if not os.path.exists(save_path):
                     # Create a big array of zeros if the directory does not exist
-                    zero_array = da.zeros([nump, numt, numz, numy, numx], dtype=np.int8)
+                    zero_array = da.rechunk(da.zeros(shape=[nump, numt, numz, numy, numx], dtype=np.int8), [1,1,-1,-1,-1])
                     da.to_npy_stack(save_path, zero_array, axis=0)
-                np.save(os.path.join(save_path, f'{p}.npy'), mask)
+                # Load the existing npy stack
+                existing_stack = da.rechunk(da.from_npy_stack(save_path), [1,1,-1,-1,-1])
+                # Replace the specific slice with the new mask
+                # previous_data = np.load(os.path.join(save_path, f'{p}.npy'))
+                if numz != mask.shape[0]:
+                    mask = np.tile(mask, (numz, 1, 1))
+                mask = mask[np.newaxis, np.newaxis, :]
+                print(mask.shape)
+                # mask = mask[np.newaxis, np.newaxis,:]
+                existing_stack[p, t] = mask
+                da.to_npy_stack(save_path, existing_stack, axis=0)
+                # np.save(os.path.join(save_path, f'{p}.npy'), mask)
         else:
             print('returned empty mask')
 
@@ -467,11 +478,11 @@ class DataContainer(Parameters):
             # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
             # Load masks and images
-            # if self.images is not None:
-            #     del self.images
-            # if self.masks is not None:
-            #     del self.masks
-            # gc.collect()
+            if hasattr(self, 'images') and self.images is not None:
+                del self.images
+            if hasattr(self, 'masks') and self.masks is not None:
+                del self.masks
+            gc.collect()
 
             # Load everything else:
             # go through all remaining folders in temp
@@ -484,12 +495,14 @@ class DataContainer(Parameters):
                     images = da.concatenate(images, axis=0)
                     images = images.rechunk((1, 1, -1, -1, -1, -1))
                     data['images'] = images
+                    setattr(self, 'images', images)
 
                 else:
                     dss = [Dataset(l) for l in self.image_locations]
                     images = [ds.as_array(['position', 'time', 'channel','z']) for ds in dss]
                     images = da.concatenate(images, axis=0)
                     data['images'] = images
+                    setattr(self, 'images', images)
 
             if self.mask_locations is not None and not isinstance(self.mask_locations, list):
                 masks = {}
@@ -503,11 +516,15 @@ class DataContainer(Parameters):
                             data['masks'][key] = masks[key].rechunk((1, 1, -1, -1, -1))
                             for h5 in h5_files:
                                 h5.close()
+                        setattr(self, 'masks', masks)
+                            
                     else:
                         for key in self.mask_locations.keys():
                             tif_data = [dask_imread.imread(l) for l in self.mask_locations[key]]
                             masks[key] = da.concatenate(tif_data, axis=0)
                             data['masks'][key] = masks[key].rechunk((1, 1, -1, -1, -1))
+                        setattr(self, 'masks', masks)
+
 
             masks = {}
             for folder in os.listdir(self.temp.name):
@@ -556,7 +573,7 @@ class DataContainer(Parameters):
                                 npy_data.append(np.load(os.path.join(folder_path, n)))
                             npy_data = np.concatenate(npy_data, axis=0)
                     if is_mask:
-                        masks[folder] = npy_data
+                        masks[folder] = npy_data.rechunk((1,1,-1,-1,-1))
                     else:
                         setattr(self, folder, npy_data)
                         data[folder] = npy_data
@@ -565,7 +582,7 @@ class DataContainer(Parameters):
                     raise ValueError('All temp files must either be csv, json, or npy and not a mix')
             data['masks'] = masks
             setattr(self, 'masks', masks)
-            self.update_parameters(data)
+            # self.update_parameters(data)
             return data
 
     def delete_temp(self):
