@@ -82,7 +82,7 @@ class StepClass(ABC):
 
             if params['masks']:
                 for key in params['masks'].keys():
-                    params[key+'_mask'] = params['masks'][key][p, t, :, :, :].rechunk((1, 1, -1, -1, -1))
+                    params[key+'_mask'] = params['masks'][key][p, t].compute()
 
             if 'cell_mask' in params and 'nuc_mask' in params and params['cell_mask'] is not None and params['nuc_mask'] is not None:
                 params['cyto_mask'] = copy(params['cell_mask'])
