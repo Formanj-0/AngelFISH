@@ -78,14 +78,15 @@ class StepClass(ABC):
         if t is not None and p is not None: # TODO This will need to be changed for Dask arrays
             params['fov'] = p
             params['timepoint'] = t
-            params['image'] = params['images'][p, t, :, :, :, :]
+            params['image'] = params['images'][p, t, :, :, :, :].compute()
 
             if params['masks']:
                 for key in params['masks'].keys():
-                    params[key+'_mask'] = params['masks'][key][p, t].compute()
-
+                    params[key+'_mask'] = params['masks'][key][p, t]
+                    params[key+'_mask'] = params[key+'_mask'].persist()
+                
             if 'cell_mask' in params and 'nuc_mask' in params and params['cell_mask'] is not None and params['nuc_mask'] is not None:
-                params['cyto_mask'] = copy(params['cell_mask'])
+                params['cyto_mask'] = params['cell_mask']
                 params['cyto_mask'][params['nuc_mask'] >= 1] = 0
             else:
                 params['cyto_mask'] = None

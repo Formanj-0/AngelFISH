@@ -308,7 +308,7 @@ class SimpleCellposeSegmentaion(CellSegmentation):
             # if cp is not None:
             #     nucmodel.cp = cp
             channels = [0, 0]
-            nuc_image = image[nucChannel, :, :].compute()
+            nuc_image = image[nucChannel, :, :]
             nuc_mask, flows, styles, diams = model.eval(nuc_image,
                                                 channels=channels, 
                                                 diameter=nuc_diameter, 
@@ -351,7 +351,7 @@ class SimpleCellposeSegmentaion(CellSegmentation):
             model.sz = sz
 
             channels = [0, 0]
-            cyto_image = image[cytoChannel, :, :].compute()
+            cyto_image = image[cytoChannel, :, :]
             cell_mask, flows, styles, diams = model.eval(cyto_image,
                                                     channels=channels, 
                                                     diameter=cyto_diameter, 

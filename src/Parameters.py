@@ -367,12 +367,6 @@ class DataContainer(Parameters):
                                             self.mask_locations = []
                                         self.mask_locations.append(key)
                             else:
-                                if self.masks is not None:
-                                    for key in self.masks.keys():
-                                        if key in name:
-                                            break
-                                        else:
-                                            key = name
                                 key = name.split('_')[0]
                                 self.save_masks(key, value, p, t, parameters)
                                 if not isinstance(self.mask_locations, list):
@@ -409,18 +403,19 @@ class DataContainer(Parameters):
 
     def save_masks(self, name, mask, p:int = None, t:int = None, parameters = None):
         parameters = Parameters() if parameters is None else parameters
-        params = parameters.get_parameters()
+        # params = parameters.get_parameters()
         if not isinstance(self.mask_locations, list):
             self.mask_locations[name] = os.path.join(self.temp.name, name)
-        nump, numt, numc, numz, numy,numx = params['images'].shape
+        nump, numt, numc, numz, numy,numx = self.images.shape
         if mask is not None: 
+            if hasattr(self, "masks"):
+                if isinstance(self.masks, dict):
+                    for key in list(self.masks.keys()):
+                        del self.masks[key]
+                del self.masks
             if p is None and t is None:
                 masks = da.rechunk(da.asarray(mask, dtype=np.int8),[1, 1, -1, -1, -1])
                 save_path = os.path.join(self.temp.name, name)
-                if not os.path.exists(save_path):
-                    # Create a big array of zeros if the directory does not exist
-                    zero_array = da.zeros(shape=[nump, numt, numz, numy, numx], dtype=np.int8)
-                    da.to_npy_stack(save_path, zero_array, axis=0)
                 da.to_npy_stack(save_path, masks, axis=0)
             else:
                 save_path = os.path.join(self.temp.name, name)
@@ -428,8 +423,9 @@ class DataContainer(Parameters):
                     # Create a big array of zeros if the directory does not exist
                     zero_array = da.rechunk(da.zeros(shape=[nump, numt, numz, numy, numx], dtype=np.int8), [1,1,-1,-1,-1])
                     da.to_npy_stack(save_path, zero_array, axis=0)
+                    del zero_array
                 # Load the existing npy stack
-                existing_stack = da.rechunk(da.from_npy_stack(save_path), [1,1,-1,-1,-1])
+                # existing_stack = da.from_npy_stack(save_path)
                 # Replace the specific slice with the new mask
                 # previous_data = np.load(os.path.join(save_path, f'{p}.npy'))
                 if numz != mask.shape[0]:
@@ -437,9 +433,9 @@ class DataContainer(Parameters):
                 mask = mask[np.newaxis, np.newaxis, :]
                 print(mask.shape)
                 # mask = mask[np.newaxis, np.newaxis,:]
-                existing_stack[p, t] = mask
-                da.to_npy_stack(save_path, existing_stack, axis=0)
-                # np.save(os.path.join(save_path, f'{p}.npy'), mask)
+                # existing_stack[p, t] = mask
+                # da.to_npy_stack(save_path, existing_stack, axis=0)
+                np.save(os.path.join(save_path, f'{p}.npy'), mask)
         else:
             print('returned empty mask')
 
@@ -564,6 +560,7 @@ class DataContainer(Parameters):
                 elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
                     try:
                         npy_data = da.from_npy_stack(folder_path)
+                        npy_data = npy_data.persist()
                     except:
                         if len(npy_files) == 1:
                             npy_data = np.load(os.path.join(folder_path, npy_files[0]))
