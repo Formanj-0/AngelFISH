@@ -291,7 +291,6 @@ class Experiment(Parameters):
 class DataContainer(Parameters):
     def __init__(self, 
                 local_dataset_location: Union[list[pathlib.Path], pathlib.Path] = None,
-                h5_file: h5py.File = None,
                 total_num_chunks: int = None,
                 images: da = None,
                 masks: da = None,
@@ -301,7 +300,6 @@ class DataContainer(Parameters):
         super().__init__()
         if not hasattr(self, 'init'):
             self.local_dataset_location = local_dataset_location
-            self.h5_file = h5_file
             self.total_num_chunks = total_num_chunks
             self.images = images
             self.masks = masks
@@ -424,18 +422,23 @@ class DataContainer(Parameters):
                     zero_array = da.rechunk(da.zeros(shape=[nump, numt, numz, numy, numx], dtype=np.int8), [1,1,-1,-1,-1])
                     da.to_npy_stack(save_path, zero_array, axis=0)
                     del zero_array
+                    gc.collect()
                 # Load the existing npy stack
                 # existing_stack = da.from_npy_stack(save_path)
                 # Replace the specific slice with the new mask
-                # previous_data = np.load(os.path.join(save_path, f'{p}.npy'))
+                previous_data = np.load(os.path.join(save_path, f'{p}.npy'), mmap_mode='r+')
                 if numz != mask.shape[0]:
                     mask = np.tile(mask, (numz, 1, 1))
-                mask = mask[np.newaxis, np.newaxis, :]
-                print(mask.shape)
+                previous_data[0, t] = mask
+                del previous_data
                 # mask = mask[np.newaxis, np.newaxis,:]
                 # existing_stack[p, t] = mask
                 # da.to_npy_stack(save_path, existing_stack, axis=0)
-                np.save(os.path.join(save_path, f'{p}.npy'), mask)
+                # refs = gc.get_referrers(previous_data)
+                # gc.collect()
+                # previous_data = np.memmap(os.path.join(save_path, f'{p}.npy'), mode='r+')
+                # with open(os.path.join(save_path, f'{p}.npy'), 'wb') as f:
+                #     np.save(f, previous_data)
         else:
             print('returned empty mask')
 
@@ -559,15 +562,14 @@ class DataContainer(Parameters):
 
                 elif len(csv_files) == 0 and len(json_files) == 0 and len(npy_files) > 0:
                     try:
-                        npy_data = da.from_npy_stack(folder_path)
-                        npy_data = npy_data.persist()
+                        npy_data = da.from_npy_stack(folder_path, mmap_mode='r')
                     except:
                         if len(npy_files) == 1:
-                            npy_data = np.load(os.path.join(folder_path, npy_files[0]))
+                            npy_data = np.load(os.path.join(folder_path, npy_files[0]), mmap_mode='r')
                         else:
                             npy_data = []
                             for n in npy_files:
-                                npy_data.append(np.load(os.path.join(folder_path, n)))
+                                npy_data.append(np.load(os.path.join(folder_path, n)), mmap_mode='r')
                             npy_data = np.concatenate(npy_data, axis=0)
                     if is_mask:
                         masks[folder] = npy_data.rechunk((1,1,-1,-1,-1))

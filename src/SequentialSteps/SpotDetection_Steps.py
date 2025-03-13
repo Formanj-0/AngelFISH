@@ -59,9 +59,8 @@ class SpotDetection(SequentialStepsClass):
                                     verbose, display_plots) -> pd.DataFrame:
         if ((nuc_mask is not None and nuc_mask.max() != 0) and (cell_mask is not None and cell_mask.max() != 0)):
             #### Extract cell level results
-            nuc = image[nucChannel, :, :, :].squeeze().compute()
-            rna = image[FISHChannel, :, :, :].squeeze().compute()
-
+            nuc = image[nucChannel, :, :, :].squeeze()
+            rna = image[FISHChannel, :, :, :].squeeze()
             # convert masks to max projection
             if nuc_mask is not None and len(nuc_mask.shape) != 2:
                 nuc_mask = np.max(nuc_mask, axis=0)
@@ -396,7 +395,7 @@ class BIGFISH_SpotDetection(SpotDetection):
         for c in range(len(FISHChannel)):
             rna = image[FISHChannel[c], :, :, :]
             rna = rna.squeeze()
-            rna = rna.compute()
+            # rna = rna
 
             # detect spots
             spots_px, dense_regions, reference_spot, clusters, spots_subpx, threshold = self.get_detected_spots( FISHChannel=c,
