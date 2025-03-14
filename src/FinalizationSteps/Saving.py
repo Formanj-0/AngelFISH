@@ -22,14 +22,13 @@ import json
 
 def close_h5_files():
     for obj in gc.get_objects():
-        if isinstance(obj, h5py.File):
-            # check if the file is open
+        if isinstance(obj, h5py.File) and obj.id.valid:
             try:
                 if 'temp' not in obj.filename:
                     print(f"Closing {obj.filename}")
                     obj.close()
-            except:
-                pass
+            except OSError as e:
+                print(f"Could not close {obj.filename}: {e}")
 
 class Saving(FinalizingStepClass):
     @abstractmethod
@@ -80,6 +79,9 @@ class Save_Outputs(Saving):
         local_dataset_location = params['local_dataset_location']
         independent_params = params['independent_params']
         position_indexs = params['position_indexs']
+        if 'h5_files' in params.keys():
+            for h5 in params['h5_files']:
+                h5.close()
 
         # get todays date
         today = datetime.today()
@@ -134,6 +136,7 @@ class Save_Outputs(Saving):
 
         if is_h5:
             close_h5_files()
+
             
             for i, location in enumerate(locations):
                 for key, data in attributes.items():
@@ -144,7 +147,9 @@ class Save_Outputs(Saving):
                                 data = handle_df(data)
                                 data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
                                 print(f'saving {key}')
-                                data.to_hdf(location, f'{group_name}/{key}', mode='a', format='table', data_columns=True)
+                                os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+                                with pd.HDFStore(location, mode='a') as store:
+                                    store.put(f"{group_name}/{key}", data, format='table', data_columns=True)
 
                             else:
                                 h5_file = h5py.File(location, 'a')
@@ -205,7 +210,7 @@ class Save_Parameters(Saving):
         local_dataset_location = kwargs['local_dataset_location']
 
 
-        # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
         # get todays date
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
@@ -220,12 +225,14 @@ class Save_Parameters(Saving):
 
         
         if is_h5:
+            for h5 in kwargs['h5_files']:
+                h5.close()
             close_h5_files()
 
             for i, locaction in enumerate(local_dataset_location):
                 print(f'Saving Parameters to {locaction}')
                 # save the parameters to the h5 file
-                with h5py.File(locaction, 'r+') as h5_file:
+                with h5py.File(locaction, 'a') as h5_file:
                 # h5_file = h5py.File(locaction, 'r+')
                     if group_name in h5_file:
                         group = h5_file[group_name]
@@ -285,16 +292,26 @@ class Save_Images(Saving):
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
         group_name = f'Analysis_{Analysis_name}_{date}'
+        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
         if is_h5:
             close_h5_files()
 
-            # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+            os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
             # save the images to the h5 file
             for i, locaction in enumerate(local_dataset_location):
-                with h5py.File(locaction, 'r+') as h5:
-                    h5 = h5py.File(locaction, 'r+')
+                close_h5_files()
+                with h5py.File(locaction, 'a') as h5:
+                    if group_name in h5:
+                        group = h5[group_name]
+                    else:
+                        group = h5.create_group(group_name)
+
+                    if 'images' in group:
+                        del group['images']
+
+                    group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]]) 
                     if group_name in h5:
                         group = h5[group_name]
                     else:
@@ -337,18 +354,21 @@ class Save_Masks(Saving):
 
         position_indexs = params['position_indexs']
         mask_structure = params['mask_structure']
+        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
         if is_h5:
+            for h5 in params['h5_files']:
+                h5.close()
             close_h5_files()
 
             for i, location in enumerate(local_dataset_location):
-                with h5py.File(location, 'r+') as h5:
+                with h5py.File(location, 'a') as h5:
                     for k in masks.keys():
                         print(f'Saving masks {k} to {location}')
                         # check if the dataset is already made
                         if f'/{k}' in h5:
                             del h5[f'/{k}']
-                        chunk_size = (1,) + masks.shape[1:]  # Define chunk size
+                        chunk_size = (1,) + masks[k].shape[1:]  # Define chunk size
                         h5.create_dataset(f'/{k}', data=masks[k][position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
                         h5.flush()
 

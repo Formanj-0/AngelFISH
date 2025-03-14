@@ -236,7 +236,7 @@ class DataTypeBridge_H5(IndependentStepClass):
                     masks[key] = [da.from_array(h5[key]) for h5 in h5_files]
                     masks[key] = da.concatenate(masks[key], axis=0)
                     masks[key] = masks[key].rechunk((1, 1, -1, -1, -1, -1))
-                    mask_locations[key] = [locations]
+                    mask_locations[key] = locations
 
 
         num_chuncks = images.shape[0] * images.shape[1]

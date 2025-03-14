@@ -486,15 +486,19 @@ class DataContainer(Parameters):
             # Load everything else:
             # go through all remaining folders in temp
             data = {}
+            data['masks'] = {}
 
             if self.image_locations is not None and self.image_locations != 'temp':
                 if self.image_locations[0].endswith('.h5'):
-                    h5_files = [h5py.File(H5_location, 'r') for H5_location in self.image_locations]
-                    images = [da.from_array(h5['raw_images']) for h5 in h5_files]
+                    self.h5_files = [h5py.File(H5_location, 'r+') for H5_location in self.image_locations]
+                    images = [da.from_array(h5['raw_images']) for h5 in self.h5_files]
                     images = da.concatenate(images, axis=0)
                     images = images.rechunk((1, 1, -1, -1, -1, -1))
                     data['images'] = images
                     setattr(self, 'images', images)
+                    # for h5 in h5_files:
+                    #     h5.flush()
+                        # h5.close()
 
                 else:
                     dss = [Dataset(l) for l in self.image_locations]
@@ -514,6 +518,7 @@ class DataContainer(Parameters):
                             masks[key] = da.concatenate(masks[key], axis=0)
                             data['masks'][key] = masks[key].rechunk((1, 1, -1, -1, -1))
                             for h5 in h5_files:
+                                h5.flush()
                                 h5.close()
                         setattr(self, 'masks', masks)
                             

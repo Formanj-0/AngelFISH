@@ -20,12 +20,12 @@ class CellProperties(SequentialStepsClass):
 
     def main(self, image, nuc_mask, cell_mask, fov, timepoint, 
              props_to_measure= ['label', 'bbox', 'area', 'centroid', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std'], **kwargs):
-        image = np.max(image.compute(), axis=1)
+        image = np.max(image, axis=1)
         image = image.squeeze()
         image = np.moveaxis(image, 0, -1)
     
-        nuc_mask = nuc_mask[0, :, :].compute()
-        cell_mask = cell_mask[0, :, :].compute()
+        nuc_mask = nuc_mask[0, :, :]
+        cell_mask = cell_mask[0, :, :]
 
         nuc_mask = nuc_mask.squeeze()
         cell_mask = cell_mask.squeeze()
