@@ -377,11 +377,11 @@ class DataContainer(Parameters):
                 elif 'image' in name.lower():
                         if 'location' not in name.lower():
                             if p is None and t is None:
-                                if self.images and self.images[key] != value:
+                                if self.images is not None and not da.all(self.images == value).compute():
                                     self.save_images(name, value, p, t)
                                     self.image_locations = 'temp'
                             else:
-                                if self.images and self.images[p, t] != value:
+                                if self.images is not None and not da.all(self.images[p, t] == value).compute():
                                     self.save_images(name, value, p, t)
                                     self.image_locations = 'temp'
 
@@ -487,7 +487,7 @@ class DataContainer(Parameters):
             # go through all remaining folders in temp
             data = {}
 
-            if self.image_locations is not None and self.image_locations[0] != 'temp':
+            if self.image_locations is not None and self.image_locations != 'temp':
                 if self.image_locations[0].endswith('.h5'):
                     h5_files = [h5py.File(H5_location, 'r') for H5_location in self.image_locations]
                     images = [da.from_array(h5['raw_images']) for h5 in h5_files]

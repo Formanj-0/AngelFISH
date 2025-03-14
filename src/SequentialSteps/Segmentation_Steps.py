@@ -104,16 +104,16 @@ class DilationedCytoMask(SequentialStepsClass):
     def __init__(self):
         super().__init__()
 
-    def main(self, timepoint, fov, nucChannel, psuedoCyto, masks,  nuc_mask, dilation_size: int = 20, display_plots: bool = False, **kwargs):
-        cell_mask = masks[fov, timepoint, psuedoCyto, 0, :, :].squeeze().compute()
+    def main(self, timepoint, fov,  nuc_mask, dilation_size: int = 20, display_plots: bool = False, **kwargs):
 
+        print('Dilating Nuclear Mask')
         mask = nuc_mask[0, :, :].squeeze() > 0
         nuc_mask =  nuc_mask[0, :, :].squeeze()
-        nuc_mask = nuc_mask.compute()
         for i in range(dilation_size):
             mask = sk.morphology.binary_dilation(mask)
         
         # watershed 
+        print('Watersheding Dilalation and assigning to cell mask')
         markers = np.zeros_like(nuc_mask, dtype=int)
         distance = ndi.distance_transform_edt(mask)
         for label in np.unique(nuc_mask):
@@ -126,6 +126,7 @@ class DilationedCytoMask(SequentialStepsClass):
         cell_mask = sk.segmentation.watershed(-distance, markers, mask=mask)
 
         # match nuc and cell mask
+        print('Watersheding Dilalation')
         nuc_mask, cell_mask = multistack.match_nuc_cell(nuc_mask.astype(np.uint8), cell_mask.astype(np.uint8), single_nuc=False, cell_alone=False)
 
         if display_plots:
@@ -135,7 +136,8 @@ class DilationedCytoMask(SequentialStepsClass):
             # axs[2].imshow(cyto_mask)
             plt.show()
 
-        return {'cytoChannel': psuedoCyto, 'cell_mask': cell_mask}
+        print('Complete Dilation')
+        return {'cell_mask': cell_mask}
 
 
 class SimpleCellposeSegmentaion(CellSegmentation):
@@ -286,6 +288,7 @@ class SimpleCellposeSegmentaion(CellSegmentation):
                        cellpose_channel_axis, cellpose_invert, cellpose_normalize, cellpose_do_3D,
                        cellpose_pretrained_model):
         if nucChannel is not None:
+            print('Segmenting Nuclei')
             (nuc_min_size, cyto_min_size, nuc_flow_threshold, cyto_flow_threshold, 
             nuc_cellprob_threshold, cyto_cellprob_threshold, nuc_model_type, 
             cyto_model_type, nuc_diameter, cyto_diameter, 
@@ -329,6 +332,7 @@ class SimpleCellposeSegmentaion(CellSegmentation):
                       cellpose_channel_axis, cellpose_invert, cellpose_normalize, cellpose_do_3D,
                       cellpose_pretrained_model):
         if cytoChannel is not None:
+            print('Segmenting Cyto/Cell')
             (nuc_min_size, cyto_min_size, nuc_flow_threshold, cyto_flow_threshold, 
             nuc_cellprob_threshold, cyto_cellprob_threshold, nuc_model_type,
             cyto_model_type, nuc_diameter, cyto_diameter, 

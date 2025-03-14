@@ -83,10 +83,10 @@ class StepClass(ABC):
             if params['masks']:
                 for key in params['masks'].keys():
                     params[key+'_mask'] = params['masks'][key][p, t]
-                    params[key+'_mask'] = params[key+'_mask'].persist()
+                    params[key+'_mask'] = params[key+'_mask'].compute()
                 
             if 'cell_mask' in params and 'nuc_mask' in params and params['cell_mask'] is not None and params['nuc_mask'] is not None:
-                params['cyto_mask'] = params['cell_mask']
+                params['cyto_mask'] = copy(params['cell_mask'])
                 params['cyto_mask'][params['nuc_mask'] >= 1] = 0
             else:
                 params['cyto_mask'] = None
@@ -224,7 +224,6 @@ class SequentialStepsClass(StepClass):
         parameter = Parameters() if parameter is None else parameter
         # sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
         data_container.load_temp_data()
-
 
         if p is None and t is None:
             params = parameter.get_parameters()

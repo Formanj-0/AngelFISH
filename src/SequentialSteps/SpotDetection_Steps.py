@@ -73,8 +73,8 @@ class SpotDetection(SequentialStepsClass):
                 rna = np.max(rna, axis=0)
 
             # convert types
-            nuc_mask = nuc_mask.squeeze().astype("uint16").compute() if nuc_mask is not None else None
-            cell_mask = cell_mask.squeeze().astype("uint16").compute() if cell_mask is not None else None
+            nuc_mask = nuc_mask.squeeze().astype("uint16") if nuc_mask is not None else None
+            cell_mask = cell_mask.squeeze().astype("uint16") if cell_mask is not None else None
 
             # remove transcription sites
             spots_no_ts, foci, ts = multistack.remove_transcription_site(spots, clusters, nuc_mask, ndim=3)
@@ -398,21 +398,26 @@ class BIGFISH_SpotDetection(SpotDetection):
             # rna = rna
 
             # detect spots
+            print('Detecting Spots')
             spots_px, dense_regions, reference_spot, clusters, spots_subpx, threshold = self.get_detected_spots( FISHChannel=c,
                 rna=rna, voxel_size_yx=voxel_size_yx, voxel_size_z=voxel_size_z, spot_yx=spot_yx, spot_z=spot_z, alpha=bigfish_alpha,
                 beta=bigfish_beta, gamma=bigfish_gamma, CLUSTER_RADIUS=CLUSTER_RADIUS, MIN_NUM_SPOT_FOR_CLUSTER=MIN_NUM_SPOT_FOR_CLUSTER, 
                 bigfish_threshold=bigfish_threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
                 minimum_distance=bigfish_minDistance, use_pca=bigfish_use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio, **kwargs)
             
+            print('Extracting Cell Results from masks')
             cell_results, spots_px, clusters = self.extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
                                                             nuc_mask, cell_mask, timepoint, fov,
                                                             verbose, display_plots)
 
+            print('Computing Spot Properties')
             spots_px = self.get_spot_properties(rna, spots_px, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots, **kwargs)
 
+            print('Standardizing Data')
             spots, clusters = self.standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, independent_params)
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
+            print('Complete Spot Detection')
         return {'cellresults': cell_results, 'spotresults': spots, 'clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
         
     def _establish_threshold(self, c, bigfish_threshold, kwargs):
