@@ -81,6 +81,7 @@ class Save_Outputs(Saving):
         position_indexs = params['position_indexs']
         if 'h5_files' in params.keys():
             for h5 in params['h5_files']:
+                h5.flush()
                 h5.close()
 
         # get todays date
@@ -140,31 +141,30 @@ class Save_Outputs(Saving):
             for i, location in enumerate(locations):
                 for key, data in attributes.items():
                     if key not in ['_initialized', 'independent_params'] and not any(substring in key for substring in ['mask', 'image']):
-
                         if data is not None:
                             if isinstance(data, pd.DataFrame):
                                 data = handle_df(data)
                                 data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
-                                print(f'saving {key}')
-                                # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-                                with pd.HDFStore(location, mode='a', driver='H5FD_CORE') as store: # Idk why this isnt working 
-                                    store.put(f"{group_name}/{key}", data, format='table', data_columns=True)
+                                # print(f'saving {key}')
+                                # data.to_hdf(location, key=f"{group_name}/{key}", mode='a',errors='ignore')
+                                data = data.to_dict(orient='records')
+                                data = json.dumps(data)
+                            # else:
+                            h5_file = h5py.File(location, 'a')
+
+                            if group_name in h5_file:
+                                group = h5_file[group_name]
                             else:
-                                h5_file = h5py.File(location, 'a')
+                                group = h5_file.create_group(group_name)
 
-                                if group_name in h5_file:
-                                    group = h5_file[group_name]
-                                else:
-                                    group = h5_file.create_group(group_name)
+                            if key in group:
+                                del group[key]
+                            
+                            print(f'saving {key}')
+                            group[key] = data
 
-                                if key in group:
-                                    del group[key]
-                                
-                                print(f'saving {key}')
-                                group[key] = data
-
-                                h5_file.flush()
-                                h5_file.close()
+                            h5_file.flush()
+                            h5_file.close()
         else:
             for i, location in enumerate(locations):
                 save_loc = os.path.join(location, group)
@@ -369,16 +369,23 @@ class Save_Masks(Saving):
             close_h5_files()
 
             for i, location in enumerate(local_dataset_location):
-                with h5py.File(location, 'a') as h5:
-                    for k in masks.keys():
-                        print(f'Saving masks {k} to {location}')
-                        # check if the dataset is already made
-                        if f'/{k}' in h5:
-                            del h5[f'/{k}']
-                        chunk_size = (1,) + masks[k].shape[1:]  # Define chunk size
-                        h5.create_dataset(f'/{k}', data=masks[k][position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
-                        h5.flush()
-                        h5.close()
+                # with h5py.File(location, 'a') as h5:
+                for k in masks.keys():
+                    print(f'Saving masks {k} to {location}')
+                    # check if the dataset is already made
+                    # if f'/{k}' in h5:
+                    #     del h5[f'/{k}']
+                    chunk_size = (1,) + masks[k].shape[1:]  # Define chunk size
+                    start_idx = position_indexs[i - 1] if i > 0 else 0
+                    end_idx = position_indexs[i]
+                    if isinstance(masks[k], da.Array):
+                        mdata = masks[k][start_idx:end_idx].rechunk(chunk_size)
+                    else:
+                        mdata = da.from_array(masks[k][start_idx:end_idx], chunks=chunk_size)
+                    da.to_hdf5(location, f'/{k}', mdata)
+
+                        # h5.flush()
+                        # h5.close()
 
         else:
             for i, location in enumerate(local_dataset_location):

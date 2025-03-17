@@ -320,6 +320,7 @@ class FFF2H5(DataTypeBridge_H5):
             h5_name = location
         # check if h5 file already exists
         if os.path.exists(h5_name):
+            print(f'h5_name already exist {h5_name}')
             return h5_name
         
         files = os.listdir(location)
