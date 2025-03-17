@@ -136,7 +136,6 @@ class Save_Outputs(Saving):
 
         if is_h5:
             close_h5_files()
-
             
             for i, location in enumerate(locations):
                 for key, data in attributes.items():
@@ -147,10 +146,9 @@ class Save_Outputs(Saving):
                                 data = handle_df(data)
                                 data = split_df(data, position_indexs[i-1] if i > 0 else 0, position_indexs[i]-1)
                                 print(f'saving {key}')
-                                os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-                                with pd.HDFStore(location, mode='a') as store:
+                                # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+                                with pd.HDFStore(location, mode='a', driver='H5FD_CORE') as store: # Idk why this isnt working 
                                     store.put(f"{group_name}/{key}", data, format='table', data_columns=True)
-
                             else:
                                 h5_file = h5py.File(location, 'a')
 
@@ -163,7 +161,7 @@ class Save_Outputs(Saving):
                                     del group[key]
                                 
                                 print(f'saving {key}')
-                                group.create_dataset(key, data=data)
+                                group[key] = data
 
                                 h5_file.flush()
                                 h5_file.close()
@@ -210,7 +208,7 @@ class Save_Parameters(Saving):
         local_dataset_location = kwargs['local_dataset_location']
 
 
-        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+        # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
         # get todays date
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
@@ -292,12 +290,12 @@ class Save_Images(Saving):
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
         group_name = f'Analysis_{Analysis_name}_{date}'
-        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+        # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
         if is_h5:
             close_h5_files()
 
-            os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+            # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
             # save the images to the h5 file
             for i, locaction in enumerate(local_dataset_location):
@@ -321,8 +319,18 @@ class Save_Images(Saving):
                     if 'images' in group:
                         del group['images']
 
-                    # save the images to the h5 file
-                    group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]])
+                    start_idx = position_indexs[i - 1] if i > 0 else 0
+                    end_idx = position_indexs[i]
+                    data_slice = images[start_idx:end_idx]
+
+                    dset = group.create_dataset(
+                        'images',
+                        shape=data_slice.shape,
+                        dtype=data_slice.dtype,
+                        chunks=(1,) + data_slice.shape[1:], 
+                        compression='gzip'
+                    )
+                    dset[:] = data_slice
 
                     h5.flush()
                     h5.close()
@@ -353,8 +361,7 @@ class Save_Masks(Saving):
             is_ds = True
 
         position_indexs = params['position_indexs']
-        mask_structure = params['mask_structure']
-        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+        # os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
         if is_h5:
             for h5 in params['h5_files']:
@@ -371,6 +378,7 @@ class Save_Masks(Saving):
                         chunk_size = (1,) + masks[k].shape[1:]  # Define chunk size
                         h5.create_dataset(f'/{k}', data=masks[k][position_indexs[i-1] if i > 0 else 0:position_indexs[i]], chunks=chunk_size, compression="gzip")
                         h5.flush()
+                        h5.close()
 
         else:
             for i, location in enumerate(local_dataset_location):
