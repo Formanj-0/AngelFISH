@@ -48,7 +48,7 @@ class NASConnection():
         self.server_name, _, _ = socket.gethostbyaddr(remote_address)
         # Defining the connection to NAS
         self.conn = SMBConnection(username=usr, password=pwd, domain=domain, my_name=local_name, remote_name=str(self.server_name), is_direct_tcp=True)
-    def connect_to_server(self,timeout=60):
+    def connect_to_server(self,timeout=600):
         '''
         This method establishes the connection to the NAS.
         
@@ -64,7 +64,7 @@ class NASConnection():
             print('Connection failed')
         return self.conn
     
-    def read_files(self, remote_folder_path, timeout=60):
+    def read_files(self, remote_folder_path, timeout=600):
         '''
         This method reads all files from a NAS directory
         
