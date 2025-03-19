@@ -167,9 +167,10 @@ class Save_Outputs(Saving):
                             h5_file.close()
         else:
             for i, location in enumerate(locations):
-                save_loc = os.path.join(location, group)
+                save_loc = os.path.join(location, group_name)
                 os.makedirs(save_loc, exist_ok=True)
                 for key, data in attributes.items():
+                    if key not in ['_initialized', 'independent_params'] and not any(substring in key for substring in ['mask', 'image']):
                         if data is not None:
                             if isinstance(data, pd.DataFrame):
                                 # data = handle_df(data)
@@ -180,6 +181,8 @@ class Save_Outputs(Saving):
                             else:
                                 json_path = os.path.join(save_loc, f"{key}.json")
                                 with open(json_path, "w") as f:
+                                    if isinstance(data, np.memmap):
+                                        data = data.tolist()
                                     json.dump(data, f, indent=4)
 
 
@@ -202,7 +205,7 @@ class Save_Parameters(Saving):
                     h5file[f"{path}/{key}"] = item
         
         params = parameters.get_parameters()
-        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state']
+        params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state', 'temp']
 
         Analysis_name = kwargs['name']
         local_dataset_location = kwargs['local_dataset_location']
@@ -263,12 +266,24 @@ class Save_Parameters(Saving):
                     h5_file.close()
         else:
             for i, location in enumerate(local_dataset_location):
-                print(f'Saving Parameters to {locaction}')
-                save_loc = os.path.join(location, group)
+                print(f'Saving Parameters to {location}')
+                save_loc = os.path.join(location, group_name)
                 os.makedirs(save_loc, exist_ok=True)
                 filtered_params = {k: v for k, v in params.items() if k not in params_to_ignore}
                 file_path = os.path.join(save_loc, "parameters.json")
                 with open(file_path, "w") as f:
+                    def convert_memmap_to_list(obj):
+                        if isinstance(obj, np.memmap):
+                            return obj.tolist()
+                        elif isinstance(obj, dict):
+                            return {k: convert_memmap_to_list(v) for k, v in obj.items()}
+                        elif isinstance(obj, list):
+                            return [convert_memmap_to_list(item) for item in obj]
+                        elif isinstance(obj, tuple):
+                            return tuple(convert_memmap_to_list(item) for item in obj)
+                        return obj
+
+                    filtered_params = convert_memmap_to_list(filtered_params)
                     json.dump(filtered_params, f, indent=4)
 
 
@@ -337,12 +352,12 @@ class Save_Images(Saving):
             
         else:
             for i, location in enumerate(local_dataset_location):
-                save_loc = os.path.join(location, group)
+                save_loc = os.path.join(location, group_name)
                 os.makedirs(save_loc, exist_ok=True)
                 start_idx = position_indexs[i - 1] if i > 0 else 0
                 end_idx = position_indexs[i]
                 print(f'Saving Images {start_idx}-{end_idx} to {location}')
-                filename = os.path.join(location, f"images.tif")
+                filename = os.path.join(save_loc, f"images.tif")
                 img = images[start_idx:end_idx]
                 tiffile.imwrite(filename, img)
 
@@ -372,9 +387,6 @@ class Save_Masks(Saving):
                 # with h5py.File(location, 'a') as h5:
                 for k in masks.keys():
                     print(f'Saving masks {k} to {location}')
-                    # check if the dataset is already made
-                    # if f'/{k}' in h5:
-                    #     del h5[f'/{k}']
                     chunk_size = (1,) + masks[k].shape[1:]  # Define chunk size
                     start_idx = position_indexs[i - 1] if i > 0 else 0
                     end_idx = position_indexs[i]
@@ -384,16 +396,15 @@ class Save_Masks(Saving):
                         mdata = da.from_array(masks[k][start_idx:end_idx], chunks=chunk_size)
                     da.to_hdf5(location, f'/{k}', mdata)
 
-                        # h5.flush()
-                        # h5.close()
-
         else:
             for i, location in enumerate(local_dataset_location):
                 for k, data in masks.items():
                     start_idx = position_indexs[i - 1] if i > 0 else 0
                     end_idx = position_indexs[i]
                     print(f'Saving masks {k} {start_idx}-{end_idx} to {location}')
-                    filename = os.path.join(location, f"{k}.tif")
+                    save_loc = os.path.join(location, 'masks')
+                    os.makedirs(save_loc, exist_ok=True)
+                    filename = os.path.join(save_loc, f"{k}.tif")
                     mask = data[start_idx:end_idx]
                     tiffile.imwrite(filename, mask)
 

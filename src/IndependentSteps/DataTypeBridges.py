@@ -100,7 +100,7 @@ class DownloadData(IndependentStepClass):
 
 #%% Abstract Class
 class DataTypeBridge_Dataset(IndependentStepClass):
-    def main(self, load_in_mask, initial_data_location, mask_structure,
+    def main(self, load_in_mask, initial_data_location,
             independent_params, local_dataset_location: list[str] = None,
             **kwargs):
         for i, location in enumerate(local_dataset_location):
@@ -108,10 +108,9 @@ class DataTypeBridge_Dataset(IndependentStepClass):
 
         # Load in H5 and build independent param
         images, masks, ip, position_indexs, mask_locations = self.load_in_dataset(local_dataset_location,
-                                                                  initial_data_location,
-                                                                    load_in_mask, 
-                                                                    independent_params, 
-                                                                    mask_structure, )
+                                                                                    initial_data_location,
+                                                                                        load_in_mask, 
+                                                                                        independent_params)
         return {'images': images,
                 'independent_params': ip, 'position_indexs': position_indexs,\
                 'masks': masks, 'mask_locations': mask_locations, 'image_locations': local_dataset_location}
@@ -282,12 +281,12 @@ class DataTypeBridge_H5(IndependentStepClass):
         shutil.rmtree(folder)
 
 #%% Data Bridges
-class H5(DataTypeBridge_Dataset):
+class Pycro(DataTypeBridge_Dataset):
     def __init__(self):
         super().__init__()
 
     def convert_data(self, location):
-        pass
+        return location
 
 
 class Pycromanager2H5(DataTypeBridge_H5):

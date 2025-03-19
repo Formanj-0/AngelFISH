@@ -423,22 +423,11 @@ class DataContainer(Parameters):
                     da.to_npy_stack(save_path, zero_array, axis=0)
                     del zero_array
                     gc.collect()
-                # Load the existing npy stack
-                # existing_stack = da.from_npy_stack(save_path)
-                # Replace the specific slice with the new mask
                 previous_data = np.load(os.path.join(save_path, f'{p}.npy'), mmap_mode='r+')
                 if numz != mask.shape[0]:
                     mask = np.tile(mask, (numz, 1, 1))
                 previous_data[0, t] = mask
                 del previous_data
-                # mask = mask[np.newaxis, np.newaxis,:]
-                # existing_stack[p, t] = mask
-                # da.to_npy_stack(save_path, existing_stack, axis=0)
-                # refs = gc.get_referrers(previous_data)
-                # gc.collect()
-                # previous_data = np.memmap(os.path.join(save_path, f'{p}.npy'), mode='r+')
-                # with open(os.path.join(save_path, f'{p}.npy'), 'wb') as f:
-                #     np.save(f, previous_data)
         else:
             print('returned empty mask')
 
@@ -577,6 +566,7 @@ class DataContainer(Parameters):
                                 npy_data.append(np.load(os.path.join(folder_path, n)), mmap_mode='r')
                             npy_data = np.concatenate(npy_data, axis=0)
                     if is_mask:
+                        npy_data = da.asarray(npy_data)
                         masks[folder] = npy_data.rechunk((1,1,-1,-1,-1))
                     else:
                         setattr(self, folder, npy_data)

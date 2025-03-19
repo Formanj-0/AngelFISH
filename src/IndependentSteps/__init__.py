@@ -1,1 +1,1 @@
-from .DataTypeBridges import Pycromanager2H5, FFF2H5, DownloadData, H5, SingleTIFF2H5
+from .DataTypeBridges import Pycromanager2H5, FFF2H5, DownloadData, SingleTIFF2H5, Pycro
