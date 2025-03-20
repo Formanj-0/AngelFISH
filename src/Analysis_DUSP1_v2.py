@@ -308,32 +308,52 @@ class SNRAnalysis:
         
         # Compare the original 'snr' to the computed MG SNR.
         self._compare_snr_to_mg()
+
+        # Optionally, you can return the results here.
+        self.get_results()
         
     def _merge_data(self):
         # Add a unique cell id to cellprops.
         self.cellprops['unique_cell_id'] = np.arange(len(self.cellprops))
+        # Add a unique spot id to spots.
+        self.spots['unique_spot_id'] = np.arange(len(self.spots))
+        # Add a unique spot id to clusters.
+        self.clusters['unique_cluster_id'] = np.arange(len(self.clusters))
         
         # Merge the spots DataFrame with the relevant cell properties.
         self.spots = self.spots.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 
-                             'cell_intensity_mean-0', 'cell_intensity_std-0']], 
+            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 'time', 'Dex_Conc', 'replica',
+                            'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0', 'nuc_intensity_std-0',
+                            'cyto_intensity_mean-0', 'cyto_intensity_std-0']], 
             on=['NAS_location', 'cell_label', 'fov'], 
             how='left'
         )
         
-        # Optionally, you can merge clusters as well if needed.
+        # Optionally, merge clusters if needed.
         self.clusters = self.clusters.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 
-                             'cell_intensity_mean-0', 'cell_intensity_std-0']], 
+            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 'time', 'Dex_Conc', 'replica',
+                            'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0', 'nuc_intensity_std-0',
+                            'cyto_intensity_mean-0', 'cyto_intensity_std-0']], 
             on=['NAS_location', 'cell_label', 'fov'], 
             how='left'
         )
     
     def _calculate_mg_snr(self):
-        # Compute MG SNR and add as a new column in spots.
-        self.spots['MG_SNR'] = (
-            self.spots['signal'] - self.spots['cell_intensity_mean-0']
-        ) / self.spots['cell_intensity_std-0'].replace(0, np.nan)
+        epsilon = 1e-6
+        # Initialize new columns with NaN
+        self.spots['MG_SNR'] = np.nan
+
+        # Compute nuclear MG_SNR for nuclear spots.
+        nuc_mask = self.spots['is_nuc'] == 1
+        self.spots.loc[nuc_mask, 'MG_SNR'] = (
+            self.spots.loc[nuc_mask, 'signal'] - self.spots.loc[nuc_mask, 'nuc_intensity_mean-0']
+        ) / (self.spots.loc[nuc_mask, 'nuc_intensity_std-0'] + epsilon)
+
+        # Compute cytoplasmic MG_SNR for cytoplasmic spots.
+        cyto_mask = self.spots['is_nuc'] == 0
+        self.spots.loc[cyto_mask, 'MG_SNR'] = (
+            self.spots.loc[cyto_mask, 'signal'] - self.spots.loc[cyto_mask, 'cyto_intensity_mean-0']
+        ) / (self.spots.loc[cyto_mask, 'cyto_intensity_std-0'] + epsilon)
     
     def _apply_weighted_threshold(self):
         if 'snr' not in self.spots.columns:
@@ -364,12 +384,12 @@ class SNRAnalysis:
     def _compare_snr_to_mg(self):
         # Compute the difference between the original snr and the MG_SNR.
         self.spots['snr_vs_mg'] = self.spots['snr'] - self.spots['MG_SNR']
-        # Determine if MG_SNR is greater than the original snr.
-        self.spots['mg_gt_snr'] = (self.spots['snr'] < self.spots['MG_SNR']).astype(int)
+        # Determine if MG_SNR is less than the original snr.
+        self.spots['mg_lt_snr'] = (self.spots['snr'] > self.spots['MG_SNR']).astype(int)
 
     def get_results(self):
         """Return the spots DataFrame with all computed columns."""
-        return self.spots
+        return self.spots, self.clusters, self.cellprops
 
     def plot_mg_snr_distribution(self, threshold=None, bins=50):
         if 'MG_SNR' not in self.spots.columns:
@@ -406,29 +426,6 @@ class DUSP1Measurement:
         self.spots = spots.copy()
         self.clusters = clusters.copy()
         self.cellprops = cellprops.copy()
-        # Assign a unique cell ID to each row in cellprops.
-        self.cellprops['unique_cell_id'] = np.arange(len(self.cellprops))
-    
-    def merge_data(self):
-        # Ensure consistent data types for the merge keys.
-        for df in [self.spots, self.clusters, self.cellprops]:
-            df['NAS_location'] = df['NAS_location'].astype(str)
-            df['cell_label'] = df['cell_label'].astype(int)
-            df['fov'] = df['fov'].astype(int)
-        
-        # Merge spots and clusters with cellprops to add the unique_cell_id.
-        self.spots = self.spots.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id']], 
-            on=['NAS_location', 'cell_label', 'fov'], 
-            how='left'
-        )
-        self.clusters = self.clusters.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id']], 
-            on=['NAS_location', 'cell_label', 'fov'], 
-            how='left'
-        )
-        
-        return self.cellprops, self.spots, self.clusters
     
     @staticmethod
     def second_largest(series):
@@ -454,37 +451,6 @@ class DUSP1Measurement:
           
         Other cell-level metrics (from clusters and cellprops) are also included.
         """
-        # Merge data so that every spot gets a unique_cell_id.
-        props, spots, clusters = self.merge_data()
-        
-        # Merge cell intensity columns into spots so that MG SNR can be computed directly.
-        spots = spots.merge(
-            props[['unique_cell_id', 'cell_intensity_mean-0', 'cell_intensity_std-0']],
-            on='unique_cell_id', how='left'
-        )
-        
-        # --- Compute Weighted SNR Flag ---
-        mask_2_5 = (spots['snr'] >= 2) & (spots['snr'] < 5)
-        weighted_cutoff = (np.percentile(spots.loc[mask_2_5, 'snr'], 20)
-                           if mask_2_5.sum() > 0 else 2.0)
-        
-        def weighted_keep_func(x):
-            if x < 2:
-                return False
-            elif 2 <= x < 5:
-                return x >= weighted_cutoff
-            else:
-                return True
-        
-        spots['weighted_pass'] = spots['snr'].apply(weighted_keep_func)
-        
-        # --- Compute Absolute SNR Flag ---
-        spots['absolute_pass'] = spots['snr'] >= snr_threshold
-        
-        # --- Compute MG SNR ---
-        epsilon = 1e-6
-        spots['MG_SNR'] = (spots['signal'] - spots['cell_intensity_mean-0']) / \
-                        (spots['cell_intensity_std-0'] + epsilon)
         
         # --- Aggregate to Cell-Level Metrics ---
         # Sort dataframes by unique_cell_id for consistent aggregation.
@@ -555,33 +521,77 @@ class DUSP1Measurement:
 # DisplayManager Class
 #############################
 
-class DisplayManager:
-    """
-    DisplayManager encapsulates visualization routines for DUSP1 analysis.
-    
-    It is designed to:
-      - Safely open HDF5 files to retrieve image and mask data.
-      - Visualize gating overlays and display cell crops.
-      - Assign expression groups based on total mRNA (num_nuc_spots + num_cyto_spots) using the same bounds as for nuclear.
-      - Display random cell crops for cells with transcription sites (TS) or with foci (separately).
-    
-    Parameters:
-        h5_file_paths (list of str): List of HDF5 file paths.
-        measurement_data (dict): Dictionary with cell metadata under the key 'cells'. Each cell record should include:
-             'unique_cell_id', 'h5_index', 'fov', 'bbox', 'num_nuc_spots', 'num_cyto_spots'.
-        clusters_df (pd.DataFrame): DataFrame containing cluster data (with 'unique_cell_id' and 'is_nuc').
-    """
-    def __init__(self, h5_file_paths, measurement_data, clusters_df):
-        self.h5_file_paths = h5_file_paths
-        self.measurement_data = measurement_data  # expects a dict with key 'cells'
-        self.clusters_df = clusters_df
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import h5py
+import random
+import traceback
+from skimage import exposure
 
+# Global matplotlib settings for publication quality
+plt.rcParams['figure.dpi'] = 300
+plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['axes.titlesize'] = 14
+plt.rcParams['axes.labelsize'] = 12
+
+# Utility functions
+def adjust_contrast(image, lower=1, upper=99):
+    """Adjust image contrast using percentile stretching."""
+    if image.size > 0:
+        p_low, p_high = np.percentile(image, (lower, upper))
+        return exposure.rescale_intensity(image, in_range=(p_low, p_high), out_range=(0, 1))
+    return image
+
+def overlay_mask(ax, image, mask, mask_cmap='viridis', alpha=0.3):
+    """Overlay a mask on an image."""
+    ax.imshow(image, cmap='gray')
+    ax.imshow(mask, cmap=mask_cmap, alpha=alpha)
+
+def draw_spot_circle(ax, x, y, radius=4, color='gold', linewidth=2):
+    """Draw a circle around a spot."""
+    circle = plt.Circle((x, y), radius, edgecolor=color, facecolor='none', linewidth=linewidth)
+    ax.add_patch(circle)
+
+class DUSP1DisplayManager:
+    def __init__(self, analysis_manager, cell_level_results):
+        self.analysis_manager = analysis_manager
+        # Get the necessary objects from the analysis manager.
+        self.h5_file_paths = analysis_manager.location
+        # Assume that cell properties and spots were loaded by the analysis manager
+        self.cellprops = analysis_manager.select_datasets("cell_properties", dtype="dataframe")
+        self.spots = analysis_manager.select_datasets("spotresults", dtype="dataframe")
+        # And any clusters if needed:
+        self.clusters_df = analysis_manager.select_datasets("clusterresults", dtype="dataframe")
+        self.cell_level_results = cell_level_results
+
+        # Load images and masks using select_datasets:
+        self.images = analysis_manager.select_datasets("raw_images", dtype="array")
+        self.masks  = analysis_manager.select_datasets("masks", dtype="array")
+        
+        # Initialize current selection indices.
+        self.h5_idx = None
+        self.fov = None
+        self.cell_label = None
+
+        # Define method names and colors.
+        self.method_names = ['num_spots', 'weighted_count', 'absolute_count', 'MG_count']
+        self.method_colors = {
+            'num_spots': 'gold',
+            'weighted_count': 'tomato',
+            'absolute_count': 'red',
+            'MG_count': 'maroon'
+        }
+    
     def get_images_and_masks(self, h5_index):
+        """Safely open the HDF5 file, read the raw images and masks, then close the file."""
         file_path = self.h5_file_paths[h5_index]
         try:
+            # Use a context manager to ensure the file is closed immediately after use.
             with h5py.File(file_path, 'r') as h5_file:
                 images = np.array(h5_file['raw_images'])
                 masks = np.array(h5_file['masks'])
+            # At this point, the file has been closed.
             return images, masks
         except Exception as e:
             print(f"Error reading file {file_path}: {e}")
@@ -589,6 +599,12 @@ class DisplayManager:
             return None, None
 
     def display_gating_overlay(self, h5_index=None, cell_id=None):
+        """Display a full-FOV image with segmentation mask overlay. Optionally highlight a cell.
+        
+        If cell_id is provided, the cell is looked up in the cellprops DataFrame (using 'unique_cell_id')
+        and its bounding box (assumed stored as 'cell_bbox-0', 'cell_bbox-1', 'cell_bbox-2', 'cell_bbox-3')
+        is drawn.
+        """
         if h5_index is None:
             h5_index = random.choice(range(len(self.h5_file_paths)))
         images, masks = self.get_images_and_masks(h5_index)
@@ -600,136 +616,324 @@ class DisplayManager:
         plt.figure(figsize=(10, 10))
         plt.imshow(img, cmap='gray')
         plt.imshow(mask, cmap='jet', alpha=0.3)
+        
         if cell_id is not None:
-            cell = next((c for c in self.measurement_data.get('cells', []) 
-                         if c.get('unique_cell_id') == cell_id), None)
-            if cell and 'bbox' in cell:
-                row_min, col_min, row_max, col_max = cell['bbox']
+            # Look up the cell in cellprops using unique_cell_id
+            cell = self.cellprops[self.cellprops['unique_cell_id'] == cell_id]
+            if not cell.empty:
+                # Assume bounding box info is stored as separate columns:
+                row_min = int(cell['cell_bbox-0'].iloc[0])
+                col_min = int(cell['cell_bbox-1'].iloc[0])
+                row_max = int(cell['cell_bbox-2'].iloc[0])
+                col_max = int(cell['cell_bbox-3'].iloc[0])
                 plt.gca().add_patch(plt.Rectangle((col_min, row_min),
-                                                  col_max - col_min,
-                                                  row_max - row_min,
-                                                  edgecolor='yellow',
-                                                  facecolor='none',
-                                                  linewidth=2))
+                                                col_max - col_min,
+                                                row_max - row_min,
+                                                edgecolor='yellow',
+                                                facecolor='none',
+                                                linewidth=2))
                 plt.title(f"Gating Overlay (h5_index={h5_index}, cell_id={cell_id})")
             else:
                 plt.title(f"Gating Overlay (h5_index={h5_index}) - cell_id not found")
         else:
             plt.title(f"Gating Overlay (h5_index={h5_index})")
+        
         plt.axis('off')
         plt.show()
 
-    def display_cell_crops_by_group(self, group, n_cells=5, random_selection=True):
-        cells = [cell for cell in self.measurement_data.get('cells', []) if cell.get('group_total') == group]
-        if not cells:
-            print(f"No cells found for total expression group '{group}'.")
+    def _display_full_fov_segmentation(self, cytoChannel, nucChannel):
+        """
+        Show full-FOV segmentation:
+          - Left: Nucleus image with mask overlay.
+          - Right: Cytoplasm image with mask overlay.
+        """
+        img_nuc = np.max(self.images[self.h5_idx][self.fov, 0, nucChannel, :, :, :], axis=0)
+        img_cyto = np.max(self.images[self.h5_idx][self.fov, 0, cytoChannel, :, :, :], axis=0)
+        mask_nuc = np.max(self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :], axis=0)
+        mask_cyto = np.max(self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :], axis=0)
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        for ax in axs:
+            ax.axis("off")
+        overlay_mask(axs[0], img_nuc, mask_nuc, mask_cmap='rocket', alpha=0.3)
+        axs[0].set_title(f"FOV={self.fov} - Nucleus segmentation")
+        overlay_mask(axs[1], img_cyto, mask_cyto, mask_cmap='rocket', alpha=0.3)
+        axs[1].set_title(f"FOV={self.fov} - Cytoplasm segmentation")
+        plt.tight_layout()
+        plt.show()
+
+    def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
+        """
+        Zoom in on a single cell crop.
+         - Crop the image using the cell's bounding box.
+         - Apply percentile-based contrast stretching.
+         - Overlay nuclear and cytoplasmic masks.
+         - Mark all spots in the cell (highlighting a randomly chosen spot).
+        Returns the chosen spot for further zoom.
+        """
+        # Retrieve cell bounding box from cellprops
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Aborting cell zoom.")
+            return None
+
+        # Optionally, retrieve the unique cell ID for later lookup of aggregated counts.
+        unique_cell_id = cdf['unique_cell_id'].iloc[0] if 'unique_cell_id' in cdf.columns else None
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+        # Get 2D projection and crop the spot channel.
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+        crop_spot = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot_stretched = adjust_contrast(crop_spot)
+
+        # Crop corresponding masks.
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+        crop_nucmask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+        crop_cytomask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+
+        # Select spots corresponding to this cell.
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        if cell_spots.empty:
+            print("No spots found in the cell.")
+            return None
+
+        chosen_spot = cell_spots.sample(1).iloc[0]  # Randomly choose one spot.
+
+        # Create two panels: one showing overlay of masks and spots, and one with enhanced contrast.
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        axs[0].imshow(crop_spot_stretched, cmap='gray')
+        axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
+        axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
+        axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
+        axs[1].imshow(crop_spot_stretched, cmap='gray')
+        axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+        axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+        axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
+
+        # Adjust spot coordinates relative to the crop.
+        dx, dy = col_min, row_min
+        for _, spot in cell_spots.iterrows():
+            sx = spot['x_px'] - dx
+            sy = spot['y_px'] - dy
+            color = 'blue' if (spot['x_px'] == chosen_spot['x_px'] and spot['y_px'] == chosen_spot['y_px']) else 'gold'
+            draw_spot_circle(axs[1], sx, sy, radius=4, color=color)
+        for ax in axs:
+            ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+        return chosen_spot
+
+    def _display_zoom_on_one_spot(self, spotChannel, chosen_spot):
+        """
+        Further zoom in on a single spot:
+          - Extract a small patch around the spot.
+          - Apply contrast stretching.
+          - Highlight the chosen spot in blue and other spots (if present) in gold.
+        """
+        sx = int(chosen_spot['x_px'])
+        sy = int(chosen_spot['y_px'])
+        pad = 15
+        x1 = max(sx - pad, 0)
+        x2 = sx + pad
+        y1 = max(sy - pad, 0)
+        y2 = sy + pad
+
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+        sub_img = img_spot_2d[y1:y2, x1:x2]
+        sub_img_stretched = adjust_contrast(sub_img)
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(sub_img_stretched, cmap='gray')
+        ax.set_title(f"Spot zoom (cell {self.cell_label})")
+        draw_spot_circle(ax, pad, pad, radius=4, color='blue')
+        # Mark any additional spots in the zoomed area (except the chosen spot)
+        cell_spots = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        for _, srow in cell_spots.iterrows():
+            rx = srow['x_px'] - x1
+            ry = srow['y_px'] - y1
+            if rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1):
+                continue
+            if (srow['x_px'] == chosen_spot['x_px'] and srow['y_px'] == chosen_spot['y_px']):
+                continue
+            draw_spot_circle(ax, rx, ry, radius=3, color='gold')
+        ax.axis("off")
+        plt.tight_layout()
+        plt.show()
+
+    def display_snr_threshold_comparison(self, spotChannel, cytoChannel, nucChannel):
+        """
+        Create a multi-panel figure comparing the four thresholding methods.
+        For each method, two panels are shown:
+          - Left panel: The cell crop with both passing spots (drawn in gold) and spots that fail the method (drawn in a distinct color).
+          - Right panel: Only the passing spots are displayed.
+        The aggregated cell-level counts (computed by DUSP1Measurement) are used to annotate the panels.
+        """
+        # Retrieve the cell bounding box and unique cell ID.
+        cdf = self.cellprops[
+            (self.cellprops['h5_idx'] == self.h5_idx) &
+            (self.cellprops['fov'] == self.fov) &
+            (self.cellprops['cell_label'] == self.cell_label)
+        ]
+        if cdf.empty:
+            print("Cell not found. Aborting SNR threshold comparison.")
             return
-        if random_selection:
-            selected_cells = random.sample(cells, min(n_cells, len(cells)))
+
+        row_min = int(cdf['cell_bbox-0'].iloc[0])
+        col_min = int(cdf['cell_bbox-1'].iloc[0])
+        row_max = int(cdf['cell_bbox-2'].iloc[0])
+        col_max = int(cdf['cell_bbox-3'].iloc[0])
+        unique_cell_id = cdf['unique_cell_id'].iloc[0] if 'unique_cell_id' in cdf.columns else None
+
+        # Crop the spot channel and adjust contrast.
+        img_spot_3d = self.images[self.h5_idx][self.fov, 0, spotChannel, :, :, :]
+        img_spot_2d = np.max(img_spot_3d, axis=0)
+        crop_spot = img_spot_2d[row_min:row_max, col_min:col_max]
+        crop_spot_stretched = adjust_contrast(crop_spot)
+        
+        # Optionally, get masks for added context.
+        mask_nuc_3d = self.masks[self.h5_idx][self.fov, 0, nucChannel, :, :, :]
+        mask_cyto_3d = self.masks[self.h5_idx][self.fov, 0, cytoChannel, :, :, :]
+        mask_nuc = np.max(mask_nuc_3d, axis=0)[row_min:row_max, col_min:col_max]
+        mask_cyto = np.max(mask_cyto_3d, axis=0)[row_min:row_max, col_min:col_max]
+        
+        # Get all spots in this cell.
+        cell_spots_all = self.spots[
+            (self.spots['h5_idx'] == self.h5_idx) &
+            (self.spots['fov'] == self.fov) &
+            (self.spots['cell_label'] == self.cell_label)
+        ]
+        dx, dy = col_min, row_min
+
+        # If needed, compute the weighted cutoff from spots in the 2–5 range.
+        mask_2_5 = (cell_spots_all['snr'] >= 2) & (cell_spots_all['snr'] < 5)
+        if mask_2_5.sum() > 0:
+            weighted_cutoff = np.percentile(cell_spots_all.loc[mask_2_5, 'snr'], 20)
         else:
-            selected_cells = cells[:n_cells]
-        for cell in selected_cells:
-            h5_index = cell.get('h5_index')
-            fov = cell.get('fov', 0)
-            bbox = cell.get('bbox')
-            if not bbox:
-                continue
-            images, _ = self.get_images_and_masks(h5_index)
-            if images is None:
-                continue
-            img = images[fov, 0, :, :]
-            row_min, col_min, row_max, col_max = bbox
-            cell_crop = img[row_min:row_max, col_min:col_max]
-            plt.figure(figsize=(6, 6))
-            plt.imshow(cell_crop, cmap='gray')
-            plt.title(f"Cell {cell.get('unique_cell_id')} (total = {group})")
-            plt.axis('off')
-            plt.show()
+            weighted_cutoff = 2.0
 
-    def display_random_cells_with_TS(self, n_cells=5):
-        ts_counts = self.clusters_df[self.clusters_df['is_nuc'] == 1].groupby('unique_cell_id').size()
-        valid_ts_ids = set(ts_counts.index)
-        cells = [cell for cell in self.measurement_data.get('cells', []) if cell.get('unique_cell_id') in valid_ts_ids]
-        if not cells:
-            print("No cells with TS found.")
-            return
-        selected_cells = random.sample(cells, min(n_cells, len(cells)))
-        for cell in selected_cells:
-            h5_index = cell.get('h5_index')
-            fov = cell.get('fov', 0)
-            bbox = cell.get('bbox')
-            if not bbox:
-                continue
-            images, _ = self.get_images_and_masks(h5_index)
-            if images is None:
-                continue
-            img = images[fov, 0, :, :]
-            row_min, col_min, row_max, col_max = bbox
-            cell_crop = img[row_min:row_max, col_min:col_max]
-            plt.figure(figsize=(6, 6))
-            plt.imshow(cell_crop, cmap='gray')
-            plt.title(f"Cell {cell.get('unique_cell_id')} with TS")
-            plt.axis('off')
-            plt.show()
-
-    def display_random_cells_with_foci(self, n_cells=5):
-        foci_counts = self.clusters_df[self.clusters_df['is_nuc'] == 0].groupby('unique_cell_id').size()
-        valid_foci_ids = set(foci_counts.index)
-        cells = [cell for cell in self.measurement_data.get('cells', []) if cell.get('unique_cell_id') in valid_foci_ids]
-        if not cells:
-            print("No cells with foci found.")
-            return
-        selected_cells = random.sample(cells, min(n_cells, len(cells)))
-        for cell in selected_cells:
-            h5_index = cell.get('h5_index')
-            fov = cell.get('fov', 0)
-            bbox = cell.get('bbox')
-            if not bbox:
-                continue
-            images, _ = self.get_images_and_masks(h5_index)
-            if images is None:
-                continue
-            img = images[fov, 0, :, :]
-            row_min, col_min, row_max, col_max = bbox
-            cell_crop = img[row_min:row_max, col_min:col_max]
-            plt.figure(figsize=(6, 6))
-            plt.imshow(cell_crop, cmap='gray')
-            plt.title(f"Cell {cell.get('unique_cell_id')} with foci")
-            plt.axis('off')
-            plt.show()
-
-    def assign_expression_groups(self):
-        cells = self.measurement_data.get('cells', [])
-        if not cells:
-            print("No cell data available to assign expression groups.")
-            return
-        total_values = []
-        for cell in cells:
-            if cell.get('num_nuc_spots') is not None and cell.get('num_cyto_spots') is not None:
-                total = cell['num_nuc_spots'] + cell['num_cyto_spots']
-                cell['total_mRNA'] = total
-                total_values.append(total)
+        # For the MG method, we define passing as MG_SNR > weighted_cutoff.
+        # For the other methods, we use the boolean columns computed earlier.
+        methods = self.method_names
+        # Retrieve aggregated counts from cell_level_results for this cell.
+        if unique_cell_id is not None:
+            agg = self.cell_level_results[self.cell_level_results['cell_id'] == unique_cell_id]
+            if not agg.empty:
+                agg = agg.iloc[0]
             else:
-                cell['total_mRNA'] = None
-        if not total_values:
-            print("No valid total mRNA counts available.")
-            return
-        total_cutoff = np.percentile(total_values, 0.1)
-        def total_group(x):
-            if x is None:
-                return "unknown"
-            if x < 25 or x <= total_cutoff:
-                return "low"
-            elif 50 <= x <= 100:
-                return "mid"
-            elif x > 100 and x < 300:
-                return "high"
-            else:
-                return "other"
-        for cell in cells:
-            cell['group_total'] = total_group(cell.get('total_mRNA'))
-        print("Expression groups assigned based on total mRNA.")
+                agg = None
+        else:
+            agg = None
 
-#############################
-# End of Module
-#############################
+        n_methods = len(methods)
+        fig, axs = plt.subplots(n_methods, 2, figsize=(12, n_methods * 5))
+
+        for i, method in enumerate(methods):
+            if method == 'num_spots':
+                # All spots pass.
+                spots_pass = cell_spots_all.copy()
+                spots_removed = cell_spots_all.iloc[0:0]  # empty DataFrame
+            elif method == 'weighted_count':
+                spots_pass = cell_spots_all[cell_spots_all.get('weighted_pass', False)]
+                spots_removed = cell_spots_all[~cell_spots_all.get('weighted_pass', False)]
+            elif method == 'absolute_count':
+                spots_pass = cell_spots_all[cell_spots_all.get('absolute_pass', False)]
+                spots_removed = cell_spots_all[~cell_spots_all.get('absolute_pass', False)]
+            elif method == 'MG_count':
+                # Compute MG pass using the weighted cutoff.
+                spots_pass = cell_spots_all[cell_spots_all['MG_SNR'] > weighted_cutoff]
+                spots_removed = cell_spots_all[cell_spots_all['MG_SNR'] <= weighted_cutoff]
+            else:
+                spots_pass = cell_spots_all.copy()
+                spots_removed = cell_spots_all.iloc[0:0]
+
+            # Prepare a title annotation using aggregated counts if available.
+            if agg is not None:
+                count_pass = agg[method]
+                total = agg['num_spots']
+                title_left = f"{method}: {count_pass} / {total} spots pass"
+            else:
+                title_left = f"{method}: Passing {len(spots_pass)} / Total {len(cell_spots_all)}"
+
+            # Left panel: Overlay both passing (gold) and removed (in method-specific color) spots.
+            ax_left = axs[i, 0] if n_methods > 1 else axs[0]
+            ax_left.imshow(crop_spot_stretched, cmap='gray')
+            ax_left.imshow(mask_nuc, cmap='Blues', alpha=0.2)
+            ax_left.imshow(mask_cyto, cmap='Reds', alpha=0.2)
+            ax_left.set_title(title_left)
+            for _, spot in spots_removed.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax_left, sx, sy, radius=4, color=self.method_colors[method])
+            for _, spot in spots_pass.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax_left, sx, sy, radius=4, color='gold')
+            ax_left.axis("off")
+            
+            # Right panel: Only display passing spots.
+            ax_right = axs[i, 1] if n_methods > 1 else axs[1]
+            ax_right.imshow(crop_spot_stretched, cmap='gray')
+            ax_right.set_title(f"{method}: Detected Spots Only")
+            for _, spot in spots_pass.iterrows():
+                sx = spot['x_px'] - dx
+                sy = spot['y_px'] - dy
+                draw_spot_circle(ax_right, sx, sy, radius=4, color='gold')
+            ax_right.axis("off")
+        
+        plt.tight_layout()
+        plt.show()
+
+    def display(self, newFOV=True, newCell=True, spotChannel=0, cytoChannel=1, nucChannel=2):
+        """
+        Main display routine that sequentially performs:
+          1) Full-FOV segmentation,
+          2) Zoom on a chosen cell with mask overlays and spot annotations,
+          3) Further zoom on a single chosen spot,
+          4) Visual comparison of SNR thresholding methods.
+        """
+        # Optionally select a new random FOV and cell.
+        if self.h5_idx is None or newFOV:
+            self.h5_idx = random.choice(range(len(self.h5_file_paths)))
+            fovs = self.spots[self.spots['h5_idx'] == self.h5_idx]['fov'].unique()
+            self.fov = random.choice(fovs)
+        if self.cell_label is None or newCell:
+            valid_labels = self.cellprops[
+                (self.cellprops['h5_idx'] == self.h5_idx) &
+                (self.cellprops['fov'] == self.fov) &
+                (self.cellprops['cell_label'] != 0)
+            ]['cell_label'].unique()
+            if len(valid_labels) == 0:
+                print("No valid cell_label in this FOV. Aborting.")
+                return
+            self.cell_label = random.choice(valid_labels)
+        
+        # Step 1: Full-FOV segmentation display.
+        self._display_full_fov_segmentation(cytoChannel, nucChannel)
+        # Step 2: Zoom on a chosen cell.
+        chosen_spot = self._display_zoom_on_cell(spotChannel, cytoChannel, nucChannel)
+        # Step 3: Further zoom on the chosen spot.
+        if chosen_spot is not None:
+            self._display_zoom_on_one_spot(spotChannel, chosen_spot)
+        # Step 4: Visual comparison of SNR thresholding methods.
+        self.display_snr_threshold_comparison(spotChannel, cytoChannel, nucChannel)
