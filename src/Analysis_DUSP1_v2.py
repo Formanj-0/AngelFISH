@@ -322,7 +322,7 @@ class SNRAnalysis:
         
         # Merge the spots DataFrame with the relevant cell properties.
         self.spots = self.spots.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 'time', 'Dex_Conc', 'replica',
+            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id',
                             'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0', 'nuc_intensity_std-0',
                             'cyto_intensity_mean-0', 'cyto_intensity_std-0']], 
             on=['NAS_location', 'cell_label', 'fov'], 
@@ -331,7 +331,7 @@ class SNRAnalysis:
         
         # Optionally, merge clusters if needed.
         self.clusters = self.clusters.merge(
-            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id', 'time', 'Dex_Conc', 'replica',
+            self.cellprops[['NAS_location', 'cell_label', 'fov', 'unique_cell_id',
                             'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0', 'nuc_intensity_std-0',
                             'cyto_intensity_mean-0', 'cyto_intensity_std-0']], 
             on=['NAS_location', 'cell_label', 'fov'], 
@@ -418,7 +418,7 @@ class DUSP1Measurement:
       1) Weighted: Uses a weighted cutoff for spots with snr between 2 and 5.
       2) Absolute: Boolean flag indicating if snr >= snr_threshold.
       3) MG: Computed as (signal - cell_intensity_mean-0) / cell_intensity_std-0,
-         and MG_count is the number of spots for which MG_SNR is greater than the weighted snr threshold.
+         and MG_count is the number of spots for which MG_SNR is greater 80% of the snr threshold.
       
     Each spot (and thus each cell after aggregation) gets a unique_cell_id from cellprops.
     """
@@ -447,55 +447,88 @@ class DUSP1Measurement:
         At the cell level, the following are aggregated:
           - weighted_count: Count of spots passing the weighted filter.
           - absolute_count: Count of spots passing the absolute threshold.
-          - MG_count: Count of spots where MG_SNR > weighted snr threshold.
+          - MG_count: Count of spots where MG_SNR > 0.8 .
           
         Other cell-level metrics (from clusters and cellprops) are also included.
         """
         
         # --- Aggregate to Cell-Level Metrics ---
         # Sort dataframes by unique_cell_id for consistent aggregation.
-        spots = spots.sort_values(by='unique_cell_id')
-        clusters = clusters.sort_values(by='unique_cell_id')
-        props = props.sort_values(by='unique_cell_id')
-        cell_ids = props['unique_cell_id']
+        self.spots = self.spots.sort_values(by='unique_cell_id')
+        self.clusters = self.clusters.sort_values(by='unique_cell_id')
+        self.cellprops = self.cellprops.sort_values(by='unique_cell_id')
+        cell_ids = self.cellprops['unique_cell_id']
         
         # Calculate counts from spots:
-        weighted_count = spots.groupby('unique_cell_id')['weighted_pass'].sum().reindex(cell_ids, fill_value=0)
-        absolute_count = spots.groupby('unique_cell_id')['absolute_pass'].sum().reindex(cell_ids, fill_value=0)
-        mg_count = spots.groupby('unique_cell_id')['MG_SNR'].apply(lambda x: (x > weighted_cutoff).sum())\
-                        .reindex(cell_ids, fill_value=0)
-        
-        # (Optional) You may keep additional aggregation from clusters or other metrics here.
-        # For example, the following are left from your original design:
-        num_spots = spots.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
-        num_nuc_spots = spots[spots['is_nuc'] == 1].groupby('unique_cell_id').size()\
+        weighted_count = self.spots.groupby('unique_cell_id')['weighted'].sum().reindex(cell_ids, fill_value=0)
+        nuc_weighted_count = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id')['weighted'].sum()\
                             .reindex(cell_ids, fill_value=0)
-        num_cyto_spots = spots[spots['is_nuc'] == 0].groupby('unique_cell_id').size()\
+        cyto_weighted_count = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id')['weighted'].sum()\
+                            .reindex(cell_ids, fill_value=0)
+        absolute_count = self.spots.groupby('unique_cell_id')['absolute'].sum().reindex(cell_ids, fill_value=0)
+        nuc_absolute_count = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id')['absolute'].sum()\
+                            .reindex(cell_ids, fill_value=0)
+        cyto_absolute_count = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id')['absolute'].sum()\
+                            .reindex(cell_ids, fill_value=0)
+        mg_count = self.spots.groupby('unique_cell_id')['MG_SNR'].apply(lambda x: (x > 0.8*snr_threshold).sum())\
+                        .reindex(cell_ids, fill_value=0)
+        nuc_mg_count = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id')['MG_SNR']\
+                            .apply(lambda x: (x > 0.8*snr_threshold).sum()).reindex(cell_ids, fill_value=0)
+        cyto_mg_count = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id')['MG_SNR']\
+                            .apply(lambda x: (x > 0.8*snr_threshold).sum()).reindex(cell_ids, fill_value=0)
+        
+        # Metrics from clusters:
+        num_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_spots_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
+        largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].max().reindex(cell_ids, fill_value=0)
+        second_largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots']\
+                              .apply(DUSP1Measurement.second_largest).reindex(cell_ids, fill_value=0)
+        num_spots_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
+
+        # For example, the following are left from your original design:
+        num_spots = self.spots.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_nuc_spots = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id').size()\
+                            .reindex(cell_ids, fill_value=0)
+        num_cyto_spots = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id').size()\
                              .reindex(cell_ids, fill_value=0)
         
         # Other cell properties from props:
-        nuc_area = props['nuc_area']
-        cyto_area = props['cyto_area']
-        avg_nuc_int = props['nuc_intensity_mean-0']
-        avg_cyto_int = props['cyto_intensity_mean-0']
-        avg_cell_int = props['cell_intensity_mean-0']
-        std_cell_int = props['cell_intensity_std-0']
-        time = props['time']
-        dex_conc = props['Dex_Conc']
-        replica = spots.groupby('unique_cell_id')['replica'].first().reindex(cell_ids, fill_value=np.nan)
-        fov = props['fov']
-        nas_location = props['NAS_location']
-        h5_idx = props['h5_idx']
+        nuc_area = self.cellprops['nuc_area']
+        cyto_area = self.cellprops['cyto_area']
+        avg_nuc_int = self.cellprops['nuc_intensity_mean-0']
+        avg_cyto_int = self.cellprops['cyto_intensity_mean-0']
+        avg_cell_int = self.cellprops['cell_intensity_mean-0']
+        std_cell_int = self.cellprops['cell_intensity_std-0']
+        time = self.cellprops['time']
+        dex_conc = self.cellprops['Dex_Conc']
+        replica = self.spots.groupby('unique_cell_id')['replica'].first().reindex(cell_ids, fill_value=np.nan)
+        fov = self.cellprops['fov']
+        nas_location = self.cellprops['NAS_location']
+        h5_idx = self.cellprops['h5_idx']
+        touching_border = self.cellprops['touching_border']
         
         # Assemble the cell-level results data frame.
         results = pd.DataFrame({
             'cell_id': cell_ids,
             'weighted_count': weighted_count.values,
+            'nuc_weighted_count': nuc_weighted_count.values,
+            'cyto_weighted_count': cyto_weighted_count.values,
             'absolute_count': absolute_count.values,
+            'nuc_absolute_count': nuc_absolute_count.values,
+            'cyto_absolute_count': cyto_absolute_count.values,
             'MG_count': mg_count.values,
+            'nuc_MG_count': nuc_mg_count.values,
+            'cyto_MG_count': cyto_mg_count.values,
             'num_spots': num_spots.values,
             'num_nuc_spots': num_nuc_spots.values,
             'num_cyto_spots': num_cyto_spots.values,
+            'num_ts': num_ts.values,
+            'num_foci': num_foci.values,
+            'num_spots_foci': num_spots_foci.values,
+            'num_spots_ts': num_spots_ts.values,
+            'largest_ts': largest_ts.values,
+            'second_largest_ts': second_largest_ts.values,
             'nuc_area_px': nuc_area.values,
             'cyto_area_px': cyto_area.values,
             'avg_nuc_int': avg_nuc_int.values,
@@ -507,7 +540,8 @@ class DUSP1Measurement:
             'replica': replica.values,
             'fov': fov.values,
             'nas_location': nas_location.values,
-            'h5_idx': h5_idx.values
+            'h5_idx': h5_idx.values,
+            'touching_border': touching_border.values
         })
         
         return results
