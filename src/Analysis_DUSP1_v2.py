@@ -284,13 +284,12 @@ class SNRAnalysis:
         - 'snr_vs_mg': The difference between the original 'snr' and the computed MG SNR.
         - 'mg_gt_snr': Whether the MG SNR is greater than the original 'snr'.
     """
-    def __init__(self, spots, cellprops, clusters, abs_threshold=None, mg_snr_threshold=None):
+    def __init__(self, spots, cellprops, clusters, abs_threshold=None, mg_threshold=None):
         self.spots = spots.copy()
         self.clusters = clusters.copy()
         self.cellprops = cellprops.copy()
         self.abs_threshold = abs_threshold
-        self.mg_snr_threshold = mg_snr_threshold
-        
+        self.mg_threshold = mg_threshold
         # Merge the data into spots (and clusters if needed)
         self._merge_data()
         
@@ -308,6 +307,9 @@ class SNRAnalysis:
         
         # Compare the original 'snr' to the computed MG SNR.
         self._compare_snr_to_mg()
+
+        # Apply MG SNR threshold.
+        self._apply_mg_threshold(self.mg_threshold)
 
         # Optionally, you can return the results here.
         self.get_results()
@@ -387,6 +389,10 @@ class SNRAnalysis:
         # Determine if MG_SNR is less than the original snr.
         self.spots['mg_lt_snr'] = (self.spots['snr'] > self.spots['MG_SNR']).astype(int)
 
+    def _apply_mg_threshold(self, mg_threshold):
+        # Create a boolean column based on the provided MG SNR threshold.
+        self.spots['MG_pass'] = self.spots['MG_SNR'] >= mg_threshold
+
     def get_results(self):
         """Return the spots DataFrame with all computed columns."""
         return self.spots, self.clusters, self.cellprops
@@ -435,7 +441,7 @@ class DUSP1Measurement:
             return 0
         return unique_vals[-2]
     
-    def measure(self, snr_threshold: float) -> pd.DataFrame:
+    def measure(self, snr_threshold: float, mg_threshold: float) -> pd.DataFrame:
         """
         Processes the data to produce cell-level measurements.
         
@@ -446,8 +452,8 @@ class DUSP1Measurement:
           
         At the cell level, the following are aggregated:
           - weighted_count: Count of spots passing the weighted filter.
-          - absolute_count: Count of spots passing the absolute threshold.
-          - MG_count: Count of spots where MG_SNR > 0.8 .
+          - absolute_count: Count of spots passing the snr_threshold.
+          - MG_count: Count of spots where MG_SNR >= mg_threshold .
           
         Other cell-level metrics (from clusters and cellprops) are also included.
         """
@@ -470,12 +476,12 @@ class DUSP1Measurement:
                             .reindex(cell_ids, fill_value=0)
         cyto_absolute_count = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id')['absolute'].sum()\
                             .reindex(cell_ids, fill_value=0)
-        mg_count = self.spots.groupby('unique_cell_id')['MG_SNR'].apply(lambda x: (x > 0.8*snr_threshold).sum())\
+        mg_count = self.spots.groupby('unique_cell_id')['MG_SNR'].apply(lambda x: (x >= mg_threshold).sum())\
                         .reindex(cell_ids, fill_value=0)
         nuc_mg_count = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id')['MG_SNR']\
-                            .apply(lambda x: (x > 0.8*snr_threshold).sum()).reindex(cell_ids, fill_value=0)
+                            .apply(lambda x: (x >= mg_threshold).sum()).reindex(cell_ids, fill_value=0)
         cyto_mg_count = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id')['MG_SNR']\
-                            .apply(lambda x: (x > 0.8*snr_threshold).sum()).reindex(cell_ids, fill_value=0)
+                            .apply(lambda x: (x >= mg_threshold).sum()).reindex(cell_ids, fill_value=0)
         
         # Metrics from clusters:
         num_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
@@ -577,7 +583,7 @@ def adjust_contrast(image, lower=1, upper=99):
         return exposure.rescale_intensity(image, in_range=(p_low, p_high), out_range=(0, 1))
     return image
 
-def overlay_mask(ax, image, mask, mask_cmap='viridis', alpha=0.3):
+def overlay_mask(ax, image, mask, mask_cmap='rocket', alpha=0.3):
     """Overlay a mask on an image."""
     ax.imshow(image, cmap='gray')
     ax.imshow(mask, cmap=mask_cmap, alpha=alpha)
