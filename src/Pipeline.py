@@ -155,7 +155,7 @@ class Pipeline:
         self.execute_finalization_steps()
         self.clear_pipeline()
 
-    def save_pipeline(self, name: str):
+    def save_pipeline(self, name: str, save_dir: str = None):
         # save params as a dictionary
         params = self.get_parameters()
 
@@ -173,11 +173,14 @@ class Pipeline:
         pipeline = {'params': params, 'steps': steps}
 
         # save the pipeline as txt file
-        file_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+        if save_dir is None:
+            file_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
-        parent_dir = os.path.dirname(file_path)
+            parent_dir = os.path.dirname(file_path)
 
-        pipeline_dir = os.path.join(parent_dir, 'Pipelines')
+            pipeline_dir = os.path.join(parent_dir, 'Pipelines')
+        else:
+            pipeline_dir = save_dir
         
         if not os.path.exists(pipeline_dir):
             os.makedirs(pipeline_dir)
