@@ -219,9 +219,9 @@ class SequentialStepsClass(StepClass):
             raise ValueError('Order must be either "pt" or "tp"')
 
     @handle_errors
-    def run(self, p:int = None, t:int = None, data_container = None, parameter = None):
+    def run(self, p:int = None, t:int = None, data_container = None, parameters = None):
         data_container = DataContainer() if data_container is None else data_container
-        parameter = Parameters() if parameter is None else parameter
+        parameter = Parameters() if parameters is None else parameters
         # sequentialsteps = SequentialStepsClass._instances if sequentialsteps is None else sequentialsteps
         data_container.load_temp_data()
 
