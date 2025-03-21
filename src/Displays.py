@@ -3,7 +3,7 @@ import numpy as np
 import h5py
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-from src.Parameters import Parameters, DataContainer
+from .Parameters import Parameters, DataContainer
 
 
 

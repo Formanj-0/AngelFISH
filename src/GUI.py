@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.Parameters import Parameters
-from src.SequentialSteps import BIGFISH_SpotDetection
+from .Parameters import Parameters
+from .SequentialSteps import BIGFISH_SpotDetection
 
 
 

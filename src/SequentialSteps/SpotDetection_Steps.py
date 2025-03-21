@@ -1,4 +1,4 @@
-from ufish.api import UFish
+# from ufish.api import UFish
 import matplotlib.pyplot as plt
 from pycromanager import Dataset
 import numpy as np

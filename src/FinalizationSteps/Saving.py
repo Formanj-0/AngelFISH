@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Union
 from src.GeneralStep import FinalizingStepClass
 from src.Parameters import Parameters, DataContainer, ScopeClass, Settings, Experiment
 from src.NASConnection import NASConnection
-import tiffile
+import tifffile
 import json
 
 def close_h5_files():
@@ -359,7 +359,7 @@ class Save_Images(Saving):
                 print(f'Saving Images {start_idx}-{end_idx} to {location}')
                 filename = os.path.join(save_loc, f"images.tif")
                 img = images[start_idx:end_idx]
-                tiffile.imwrite(filename, img)
+                tifffile.imwrite(filename, img)
 
 
 class Save_Masks(Saving):
@@ -406,7 +406,7 @@ class Save_Masks(Saving):
                     os.makedirs(save_loc, exist_ok=True)
                     filename = os.path.join(save_loc, f"{k}.tif")
                     mask = data[start_idx:end_idx]
-                    tiffile.imwrite(filename, mask)
+                    tifffile.imwrite(filename, mask)
 
 
 

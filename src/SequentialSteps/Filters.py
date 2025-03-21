@@ -74,7 +74,6 @@ import os
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from skimage import exposure
-from tifffile import imsave
 import copy
 from scipy.optimize import curve_fit
 from abc import abstractmethod
