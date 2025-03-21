@@ -158,9 +158,12 @@ class Pipeline:
     def save_pipeline(self, name: str, save_dir: str = None):
         # save params as a dictionary
         params = self.get_parameters()
+        params_to_remove = self.data_container.todict().keys()
+
 
         # Remove specified keys from params
-        keys_to_remove = ['temp']  # specify the keys to remove
+        keys_to_remove = ['temp', 'images', 'masks']  # specify the keys to remove
+        keys_to_remove.extend(params_to_remove)
         for key in keys_to_remove:
             params.pop(key, None)
 
@@ -168,6 +171,8 @@ class Pipeline:
         if self.steps is None:
             steps = [*[i.__class__.__name__ for i in self.get_independent_steps()], *[i.__class__.__name__ for i in self.get_sequential_steps()],
                     *[i.__class__.__name__ for i in self.get_finalization_steps()]]
+        else:
+            steps = self.steps
         
         # save these as a dictionary
         pipeline = {'params': params, 'steps': steps}
