@@ -26,21 +26,37 @@ class Moving_Data(FinalizingStepClass):
 
 #%% class for moving data to NAS
 class return_to_NAS(Moving_Data):
-    def main(self, local_dataset_location, initial_data_location, connection_config_location, share_name, **kwargs):
+    def main(self, local_dataset_location, initial_data_location, connection_config_location, share_name, log_location, **kwargs):
 
-        if isinstance(local_dataset_location, list):
-            for i, h5_file in enumerate(local_dataset_location):
-                log_file = os.path.splitext(os.path.basename(h5_file))[0]+'.log'
-                with open(log_file, 'a') as log:
-                    log.write(f'{datetime.now()}: {h5_file} -> {initial_data_location[i]}\n')
-                NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, '/Users/Eric/GR_DUSP1_reruns')
-                NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location[i])
-        else:
-            log_file = os.path.splitext(os.path.basename(local_dataset_location))[0]+'.log'
-            with open(log_file, 'a') as log:
-                log.write(f'{datetime.now()}: {local_dataset_location} -> {initial_data_location}\n')
-            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, '/Users/Eric/GR_DUSP1_reruns')
-            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location)
+            if local_dataset_location[0].endswith('.h5'):
+                is_h5 = True
+                is_ds = False
+            else:
+                is_h5 = False
+                is_ds = True
+            
+            if is_h5:
+                for i, h5_file in enumerate(local_dataset_location):
+                    log_file = os.path.splitext(os.path.basename(h5_file))[0]+'.log'
+                    with open(log_file, 'a') as log:
+                        log.write(f'{datetime.now()}: {h5_file} -> {initial_data_location[i]}\n')
+                    NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, log_location)
+                    NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location[i])
+            else:
+                Analysis_name = kwargs['name']
+                today = datetime.today()
+                date = today.strftime("%Y-%m-%d")
+                group_name = f'Analysis_{Analysis_name}_{date}'
+
+                for i, location in enumerate(local_dataset_location):
+                    lf = os.path.splitext(os.path.basename(location))[0] + '.log'
+                    with open(lf, 'a') as log:
+                        log.write(f'{datetime.now()}: {item} -> {initial_data_location[i]}\n')
+                    NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(lf, log_location)
+
+                    for item in os.listdir(location):
+                        if group_name in item or 'masks' in item:
+                            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(item, initial_data_location[i])
 
 class remove_local_data(Moving_Data):
     def main(self, local_dataset_location, temp, **kwargs):
@@ -66,6 +82,19 @@ class remove_all_temp(Moving_Data):
         temp.cleanup()
 
 
+class save_copy(Moving_Data):
+    def main(self, data_names:list[str], copy_locations:list[str], temp:str, connection_config_location, share_name, **kwargs):
+        if len(data_names) != len(copy_locations):
+            raise BaseException('data and locations need to align')
+        
+        for i, dn in enumerate(data_names):
+            data = kwargs[dn]
+            if isinstance(data, pd.DataFrame):
+                csv_path = os.path.join(temp, dn+'.csv')
+                data.to_csv(csv_path)
+                NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(csv_path, copy_locations[i])
+            else:
+                raise NotImplemented()
 
 
 

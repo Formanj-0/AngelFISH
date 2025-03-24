@@ -600,6 +600,7 @@ class Settings(Parameters):
                     mask_structure: dict = None,
                     order: str = 'pt',
                     share_name: str = 'share',
+                    log_location:str = 'Users\Jack\All_Analysis',
                     **kwargs):
         super().__init__()
         if not hasattr(self, 'init'):
@@ -615,6 +616,7 @@ class Settings(Parameters):
             self.order = order
             self.state = 'global'
             self.share_name = share_name
+            self.log_location = log_location
             self.init = True
 
         if kwargs is not None:
