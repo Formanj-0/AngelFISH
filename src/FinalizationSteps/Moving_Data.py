@@ -51,15 +51,37 @@ class return_to_NAS(Moving_Data):
                 for i, location in enumerate(local_dataset_location):
                     lf = os.path.splitext(os.path.basename(location))[0] + '.log'
                     with open(lf, 'a') as log:
-                        log.write(f'{datetime.now()}: {item} -> {initial_data_location[i]}\n')
+                        log.write(f'{datetime.now()}: {os.path.basename(location)} -> {initial_data_location[i]}\n')
                     NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(lf, log_location)
 
                     for item in os.listdir(location):
                         if group_name in item or 'masks' in item:
-                            NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(item, initial_data_location[i])
+                            NASConnection(connection_config_location, share_name=share_name).write_folder_to_NAS(os.path.join(location, item), initial_data_location[i])
 
 class remove_local_data(Moving_Data):
+
+    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
+        data_container = DataContainer() if data_container is None else data_container
+        parameters = Parameters() if parameters is None else parameters
+        kwargs = self.load_in_parameters(p, t, parameters)
+        local_dataset_location = kwargs['local_dataset_location']
+        temp = kwargs['temp']
+        del kwargs
+        results = self.main(local_dataset_location, temp) 
+        data_container.save_results(results, p, t, parameters)
+        data_container.load_temp_data()
+        return results
+
     def main(self, local_dataset_location, temp, **kwargs):
+        images = kwargs.get('images')
+        del images
+        
+        for key in list(kwargs.keys()):
+            del kwargs[key]
+
+        import gc
+        gc.collect()
+
         for folder in local_dataset_location: # TODO: fix this so that it does not remove the entire directory
             if folder.endswith(".h5"):
                 os.remove(folder)
@@ -84,15 +106,18 @@ class remove_all_temp(Moving_Data):
 
 class save_copy(Moving_Data):
     def main(self, data_names:list[str], copy_locations:list[str], temp:str, connection_config_location, share_name, **kwargs):
+        import random
         if len(data_names) != len(copy_locations):
             raise BaseException('data and locations need to align')
         
         for i, dn in enumerate(data_names):
             data = kwargs[dn]
             if isinstance(data, pd.DataFrame):
-                csv_path = os.path.join(temp, dn+'.csv')
+                rn = random.choice(range(0,10000))
+                csv_path = os.path.join(os.getcwd(), dn +f'{rn}'+ '.csv')
                 data.to_csv(csv_path)
                 NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(csv_path, copy_locations[i])
+                os.remove(csv_path)
             else:
                 raise NotImplemented()
 
@@ -145,3 +170,5 @@ class save_copy(Moving_Data):
 
 
 
+
+# %%

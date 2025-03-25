@@ -190,7 +190,12 @@ class Save_Parameters(Saving):
     def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
         data_container = DataContainer() if data_container is None else data_container
         parameters = Parameters() if parameters is None else parameters
+        
         kwargs = self.load_in_parameters(p, t, parameters)
+        unwanted_keys = data_container.todict().keys()
+        for key in unwanted_keys:
+            if key not in ['local_dataset_location']:
+                kwargs.pop(key, None)
         results = self.main(parameters, **kwargs) 
         data_container.save_results(results, p, t, parameters)
         data_container.load_temp_data()
@@ -204,7 +209,7 @@ class Save_Parameters(Saving):
                 else:
                     h5file[f"{path}/{key}"] = item
         
-        params = parameters.get_parameters()
+        params = kwargs
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state', 'temp']
 
         Analysis_name = kwargs['name']

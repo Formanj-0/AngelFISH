@@ -204,6 +204,24 @@ class NASConnection():
         print('The file was uploaded to NAS in location:', str(pathlib.Path(remote_folder_path).joinpath(local_file_to_send_to_NAS.name)))
         return None
     
+    def write_folder_to_NAS(self, local_dir, remote_dir, timeout=600):
+        if not self.conn.connect(str(self.server_name), timeout=timeout):
+            print("Connection failed")
+            return
+        remote_subdir = str(pathlib.Path(remote_dir) / pathlib.Path(local_dir).name)
+        try:
+            self.conn.listPath(self.share_name, remote_subdir)
+        except:
+            self.conn.createDirectory(self.share_name, remote_subdir)
+
+        for item in os.listdir(local_dir):
+            local_file = pathlib.Path(local_dir) / item
+            if local_file.is_file():
+                with open(str(local_file), 'rb') as f:
+                    remote_file_path = str(pathlib.Path(remote_subdir) / item)
+                    self.conn.storeFile(self.share_name, remote_file_path, f)
+                    print("Uploaded:", item)
+    
     def copy_folder(self, remote_folder_path, local_folder_path, timeout=600):
         '''
         This method downloads all files from a NAS directory. 
