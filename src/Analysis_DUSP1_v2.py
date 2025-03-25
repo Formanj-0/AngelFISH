@@ -33,11 +33,14 @@ from typing import Union
 from datetime import datetime
 import dask.array as da
 import matplotlib.pyplot as plt
+import seaborn as sns
+from skimage import exposure
+import matplotlib.colors as mcolors
+from skimage.measure import find_contours
 
 #############################
 # DUSP1AnalysisManager Class
 #############################
-
 class DUSP1AnalysisManager:
     """
     Analysis manager for DUSP1 experiments.
@@ -271,7 +274,6 @@ class DUSP1AnalysisManager:
         else:
             print('select an analysis')
 
-
 #############################
 # SNRAnalysis Class
 #############################
@@ -421,11 +423,9 @@ class SNRAnalysis:
             plt.legend()
         plt.show()
 
-import numpy as np
-import pandas as pd
-
-import numpy as np
-import pandas as pd
+#############################
+# DUSP1Measurement Class
+#############################
 
 class DUSP1Measurement:
     """
@@ -527,7 +527,7 @@ class DUSP1Measurement:
         
         # Assemble the cell-level results data frame.
         results = pd.DataFrame({
-            'cell_id': cell_ids,
+            'unique_cell_id': cell_ids,
             'weighted_count': weighted_count.values,
             'nuc_weighted_count': nuc_weighted_count.values,
             'cyto_weighted_count': cyto_weighted_count.values,
@@ -569,16 +569,157 @@ class DUSP1Measurement:
         print(f"Saved cell-level results to {csv_path}")
 
 #############################
-# DisplayManager Class
+# DUSP1_filtering Class
 #############################
 
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import h5py
-import random
-import traceback
-from skimage import exposure
+class DUSP1_filtering:
+    """
+    A class to filter results and spots DataFrames.
+    
+    For the results DataFrame:
+      - Removes partial cells (where touching_border == True).
+      - Selects quantification columns based on the chosen method.
+    
+    For the spots DataFrame:
+      - Optionally removes spots that belong to partial cells (if a results DataFrame is provided).
+      - Selects the method-specific spot columns.
+    """
+    
+    def __init__(self, method: str = 'MG'):
+        # Normalize method to lowercase for consistency.
+        self.method = method.lower()
+
+    def apply(self, results: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter a results DataFrame:
+         - Remove partial cells using the 'touching_border' column.
+         - Select method-specific quantification columns plus common columns.
+        """
+        # Filter out partial cells.
+        filtered = results[results['touching_border'] == False].copy()
+        
+        # Define method-specific columns for results.
+        method_columns = {
+            'weighted': ['weighted_count', 'nuc_weighted_count', 'cyto_weighted_count'],
+            'absolute': ['absolute_count', 'nuc_absolute_count', 'cyto_absolute_count'],
+            'mg': ['MG_count', 'nuc_MG_count', 'cyto_MG_count'],
+            'none': ['num_spots', 'num_nuc_spots', 'num_cyto_spots']
+        }
+        
+        if self.method not in method_columns:
+            raise ValueError("Invalid method. Choose from 'weighted', 'absolute', 'mg', 'none'.")
+        
+        # Define common columns to keep (note: include 'touching_border').
+        common_columns = [
+            'unique_cell_id', 'touching_border', 'num_ts', 'num_foci', 'num_spots_foci', 'num_spots_ts',
+            'largest_ts', 'second_largest_ts', 'nuc_area_px', 'cyto_area_px',
+            'avg_nuc_int', 'avg_cyto_int', 'avg_cell_int', 'std_cell_int',
+            'time', 'dex_conc', 'replica', 'fov', 'nas_location', 'h5_idx'
+        ]
+        
+        # Combine columns: start with 'unique_cell_id' and 'touching_border', then add method-specific,
+        # and finally add the rest of the common columns (avoiding duplicates).
+        columns_to_keep = ['unique_cell_id', 'touching_border'] + \
+                          method_columns[self.method] + \
+                          [col for col in common_columns if col not in ['unique_cell_id', 'touching_border']]
+        filtered = filtered[columns_to_keep]
+        return filtered
+
+    def apply_spots(self, spots: pd.DataFrame = None, results: pd.DataFrame = None) -> tuple:
+        """
+        Filter a spots DataFrame based on the defined method and return two DataFrames:
+        1. The filtered spots DataFrame containing only the columns relevant for the selected method.
+        2. A DataFrame with the removed spots (those that did not pass the filter) with the fixed columns:
+            'z_px', 'y_px', 'x_px', 'is_nuc', 'cell_label', 'snr', 'signal', 'fov',
+            'FISH_Channel', 'condition', 'replica', 'time', 'Dex_Conc', 'NAS_location',
+            'h5_idx', 'unique_spot_id', 'unique_cell_id', 'cell_intensity_mean-0',
+            'cell_intensity_std-0', 'nuc_intensity_mean-0', 'nuc_intensity_std-0',
+            'cyto_intensity_mean-0', 'cyto_intensity_std-0', 'MG_SNR'
+        
+        Parameters:
+          spots (pd.DataFrame): The spots DataFrame to filter. It is expected to contain the columns
+                                'unique_cell_id', 'weighted', 'absolute', and 'MG_pass', plus additional columns.
+          results (pd.DataFrame, optional): If provided, must include 'touching_border' and 'unique_cell_id'
+                                            columns. Spots from cells with touching_border==True will be removed.
+        
+        Returns:
+          tuple: (filtered_spots, removed_spots)
+        """
+        # Optionally filter out spots belonging to partial cells.
+        if results is not None:
+            if 'touching_border' not in results.columns or 'unique_cell_id' not in results.columns:
+                raise ValueError("The provided results DataFrame must contain 'touching_border' and 'unique_cell_id' columns.")
+            valid_ids = results.loc[results['touching_border'] == False, 'unique_cell_id'].unique()
+            spots = spots[spots['unique_cell_id'].isin(valid_ids)]
+        
+        # For method 'none', return spots unfiltered and an empty removed-spots DataFrame.
+        if self.method == 'none':
+            filtered = spots.copy()
+            desired_columns = [
+                'z_px', 'y_px', 'x_px', 'is_nuc',
+                'cell_label', 'snr', 'signal', 'fov',
+                'FISH_Channel', 'condition', 'replica', 'time', 'Dex_Conc',
+                'NAS_location', 'h5_idx', 'unique_spot_id', 'unique_cell_id',
+                'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0',
+                'nuc_intensity_std-0', 'cyto_intensity_mean-0', 'cyto_intensity_std-0',
+                'MG_SNR'
+            ]
+            removed = spots.iloc[0:0].copy()  # empty dataframe
+            # Keep only columns that exist in spots.
+            removed = removed[[col for col in desired_columns if col in removed.columns]]
+            return filtered, removed
+
+        # Create a boolean mask for the method-specific filtering.
+        if self.method == 'weighted':
+            mask = spots['weighted'] == True
+            method_key = 'weighted'
+        elif self.method == 'absolute':
+            mask = spots['absolute'] == True
+            method_key = 'absolute'
+        elif self.method == 'mg':
+            mask = spots['MG_pass'] == True
+            method_key = 'mg'
+        else:
+            raise ValueError("Invalid method. Choose from 'weighted', 'absolute', 'mg', or 'none'.")
+        
+        # Filter spots: those that pass the method-specific condition.
+        filtered = spots[mask].copy()
+        # Removed spots are those that do not pass.
+        removed = spots[~mask].copy()
+
+        # For the filtered spots, keep only the unique identifier plus the method-specific column.
+        method_columns = {
+            'weighted': ['weighted'],
+            'absolute': ['absolute'],
+            'mg': ['MG_pass']
+        }
+        filtered = filtered[['unique_cell_id'] + method_columns[method_key]]
+        
+        # Define the desired output columns for removed spots.
+        desired_columns = [
+            'z_px', 'y_px', 'x_px', 'is_nuc',
+            'cell_label', 'snr', 'signal', 'fov',
+            'FISH_Channel', 'condition', 'replica', 'time', 'Dex_Conc',
+            'NAS_location', 'h5_idx', 'unique_spot_id', 'unique_cell_id',
+            'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0',
+            'nuc_intensity_std-0', 'cyto_intensity_mean-0', 'cyto_intensity_std-0',
+            'MG_SNR'
+        ]
+        # Keep only those columns that are present in the removed spots DataFrame.
+        removed = removed[[col for col in desired_columns if col in removed.columns]]
+        
+        return filtered, removed
+    
+    def remove_partial_cells(self, clusters: pd.DataFrame, cellprops: pd.DataFrame) -> tuple:
+        """Remove partial cells from the clusters and cellprops DataFrames."""
+        partial_cells = cellprops[cellprops['touching_border'] == True]['unique_cell_id']
+        filtered_clusters = clusters[~clusters['unique_cell_id'].isin(partial_cells)]
+        filtered_cellprops = cellprops[~cellprops['unique_cell_id'].isin(partial_cells)]
+        return filtered_clusters, filtered_cellprops
+    
+#############################
+# DisplayManager Class
+#############################
 
 # Global matplotlib settings for publication quality
 plt.rcParams['figure.dpi'] = 300
@@ -662,7 +803,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         mask = masks[fov, 0, :, :]
         plt.figure(figsize=(10, 10))
         plt.imshow(img, cmap='gray')
-        plt.imshow(mask, cmap='jet', alpha=0.3)
+        plt.imshow(mask, cmap='Spectral', alpha=0.3)
         
         if cell_id is not None:
             cell = self.cellprops[self.cellprops['unique_cell_id'] == cell_id]
@@ -975,6 +1116,152 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         plt.tight_layout()
         plt.show()
 
+    def display_gating(self):
+        Cyto_Channel = 1
+        required_columns = ['unique_cell_id']
+
+        # Ensure each DataFrame has a unique cell id (uci)
+        for df_name, df in [('spots', self.spots), ('cellprops', self.cellprops), ('clusters', self.clusters)]:
+            if not all(col in df.columns for col in required_columns):
+                raise ValueError(f"DataFrame '{df_name}' does not contain the required columns: {required_columns}")
+
+        # Check for unique 'uci' in each DataFrame
+        for df_name, df in [('cellprops', self.cellprops)]:
+            if df['unique_cell_id'].duplicated().any():
+                raise ValueError(f"DataFrame '{df_name}' contains duplicate 'unique_cell_id' values.")
+
+        # Remove UCIs that are not present in all dataframes
+        common_uci = set(self.cellprops['unique_cell_id']).intersection(
+            self.spots['unique_cell_id'],
+            # self.clusters['unique_cell_id'],
+        )
+        print(f'UCIs removed: {len(self.cellprops) - len(common_uci)}')
+
+        self.spots = self.spots[self.spots['unique_cell_id'].isin(common_uci)]
+        self.cellprops = self.cellprops[self.cellprops['unique_cell_id'].isin(common_uci)]
+        self.clusters = self.clusters[self.clusters['unique_cell_id'].isin(common_uci)]
+
+        # select a h5_index at random
+        id = np.random.choice(len(self.spots))
+        spot_row = self.spots.iloc[id]
+        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+        self.h5_idx = h5_idx
+        self.fov = fov
+        print(f'Selected H5 Index: {h5_idx}')
+        print(f'Nas Location: {nas_location}')
+        print(f'FOV: {fov}' )
+
+        img, mask = self.images[h5_idx][fov, 0, :, :, :, :], self.masks[h5_idx][fov, 0, :, :, :, :]
+        mask = np.max(mask, axis=1) # This should make czyx to cyz
+        img = np.max(img, axis=1)
+        
+        # Compute only if they are Dask arrays
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+        if isinstance(img, da.Array):
+            img = img.compute()
+
+        # Debugging: Explicitly check what `img` is
+        print("DEBUG: Type of img before percentile:", type(img))
+        if hasattr(img, "shape"):
+            print("DEBUG: Shape of img:", img.shape)
+        else:
+            print("DEBUG: img has no shape attribute")
+
+        # Rescale the image exposure
+        p1, p99 = np.percentile(img, (1, 99))
+        img = exposure.rescale_intensity(
+            img, in_range=(p1, p99), out_range=(0, 1)
+        )
+
+        # Find data frames of UCIs that have h5_idx, fov, nas_location
+        spots_frame = self.spots[
+            (self.spots['h5_idx'] == h5_idx) &
+            (self.spots['fov'] == fov) &
+            (self.spots['NAS_location'] == nas_location)
+        ]
+
+        cellprops_frame = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov'] == fov) &
+            (self.cellprops['NAS_location'] == nas_location)
+        ]
+
+        clusters_frame = self.clusters[
+            (self.clusters['h5_idx'] == h5_idx) &
+            (self.clusters['fov'] == fov) &
+            (self.clusters['NAS_location'] == nas_location)
+        ]
+
+        print(f"Spots DataFrame: {spots_frame.shape}")
+        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+        print(f"Clusters DataFrame: {clusters_frame.shape}")
+
+        # Compute mask if it's a Dask array
+        if isinstance(mask, da.Array):
+            mask = mask.compute()
+
+        # Identify which cell_labels appear in cellprops => "kept"
+        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+
+        # Identify which appear in the mask
+        cell_labels_in_mask = set(np.unique(mask))
+        if 0 in cell_labels_in_mask:
+            cell_labels_in_mask.remove(0)
+
+        # Colors
+        kept_colors = list(mcolors.TABLEAU_COLORS.values())  # distinct non-red
+        removed_color = 'red'
+
+        # Show gating overlay
+        fig, ax = plt.subplots(figsize=(10, 10))
+
+        # Ensure img is computed if necessary
+        if isinstance(img, da.Array):
+            img = img.compute()
+
+        ax.imshow(img[Cyto_Channel, :, :], cmap='gray')
+
+        # A) Plot the "kept" cell outlines
+        color_map = {
+            cell_label: kept_colors[i % len(kept_colors)]
+            for i, cell_label in enumerate(cell_labels_in_df)
+        }
+
+        for cell_label in cell_labels_in_df:
+            cell_mask = (mask == cell_label)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        linewidth=2, color=color_map[cell_label],
+                        label=f'Cell {cell_label}')
+
+        # B) Plot "discarded" cell outlines
+        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+
+        for cell_label in cell_labels_not_in_df:
+            cell_mask = (mask == cell_label)
+
+            # Ensure `cell_mask` is computed only if needed
+            if isinstance(cell_mask, da.Array):
+                cell_mask = cell_mask.compute()
+
+            contours = find_contours(cell_mask[Cyto_Channel, :, :], 0.5)
+            if contours:
+                largest_contour = max(contours, key=lambda x: x.shape[0])
+                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+                        color=removed_color, linewidth=2, linestyle='dashed',
+                        label=f'Removed: Cell {cell_label}')
+
+        plt.legend()
+        plt.show()
+
     def display(self, newFOV=True, newCell=True, spotChannel=0, cytoChannel=1, nucChannel=2):
         """
         Main display routine that sequentially performs:
@@ -1003,3 +1290,5 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         if chosen_spot is not None:
             self._display_zoom_on_one_spot(spotChannel, chosen_spot)
         self.display_snr_threshold_comparison(spotChannel, cytoChannel, nucChannel)
+
+        
