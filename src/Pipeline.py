@@ -138,7 +138,7 @@ class Pipeline:
     def _run(self, locations, steps):
         # save locations and steps
         if steps is not None:
-            self.independent_steps, self.sequential_steps, self.finalization_steps = copy.copy(StepClass.initalize_steps_from_list(steps))
+            self.independent_steps, self.sequential_steps, self.finalization_steps = copy.copy(StepClass.initalize_steps_from_list(steps)) # IDK why the copy is here
             print(self.finalization_steps)
             print(self.sequential_steps)
             print(self.independent_steps)
@@ -159,7 +159,6 @@ class Pipeline:
         # save params as a dictionary
         params = self.get_parameters()
         params_to_remove = self.data_container.todict().keys()
-
 
         # Remove specified keys from params
         keys_to_remove = ['temp', 'images', 'masks']  # specify the keys to remove
