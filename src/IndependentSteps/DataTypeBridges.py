@@ -129,6 +129,8 @@ class DataTypeBridge_Dataset(IndependentStepClass):
         # TODO: check if another file is already opening the h5 file
 
         images = [ds.as_array(['position', 'time', 'channel','z']) for ds in dss]
+        metadata = [ds.read_metadata(position=0, time=0, z=0, channel=0) for ds in dss]
+        exp_metadata = [m.get('exp_metadata', None) for m in metadata]
         position_indexs = [img.shape[0] for img in images]
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))
@@ -168,6 +170,9 @@ class DataTypeBridge_Dataset(IndependentStepClass):
             ip = {}
             for i, p in enumerate(position_indexs):
                 if independent_params is not None and len(independent_params) > 1:
+                    if exp_metadata[i] is not None:
+                        for key, val in exp_metadata[i].items():
+                            independent_params[i][key] = val
                     if nas_location is not None:
                         independent_params[i]['NAS_location'] = nas_location[i]
                     if i == 0:

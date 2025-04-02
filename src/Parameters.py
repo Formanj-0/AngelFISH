@@ -600,7 +600,7 @@ class Settings(Parameters):
                     mask_structure: dict = None,
                     order: str = 'pt',
                     share_name: str = 'share',
-                    log_location:str = 'Users\Jack\All_Analysis',
+                    log_location:str = r'Users\Jack\All_Analysis',
                     **kwargs):
         super().__init__()
         if not hasattr(self, 'init'):
