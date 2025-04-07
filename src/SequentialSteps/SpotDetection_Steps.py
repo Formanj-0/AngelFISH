@@ -57,9 +57,10 @@ class SpotDetection(SequentialStepsClass):
     def extract_cell_level_results(self, image, spots, clusters, nucChannel, FISHChannel, 
                                    nuc_mask, cell_mask, timepoint, fov,
                                     verbose, display_plots) -> pd.DataFrame:
-        if ((nuc_mask is not None and nuc_mask.max() != 0) and (cell_mask is not None and cell_mask.max() != 0)):
+        if ((nuc_mask is not None and nuc_mask.max() != 0) or (cell_mask is not None and cell_mask.max() != 0)):
             #### Extract cell level results
-            nuc = image[nucChannel, :, :, :].squeeze()
+            if nucChannel is not None:
+                nuc = image[nucChannel, :, :, :].squeeze()
             rna = image[FISHChannel, :, :, :].squeeze()
             # convert masks to max projection
             if nuc_mask is not None and len(nuc_mask.shape) != 2:
@@ -77,21 +78,27 @@ class SpotDetection(SequentialStepsClass):
             cell_mask = cell_mask.squeeze().astype("uint16") if cell_mask is not None else None
 
             # remove transcription sites
-            spots_no_ts, foci, ts = multistack.remove_transcription_site(spots, clusters, nuc_mask, ndim=3)
-            if verbose:
-                print("detected spots (without transcription sites)")
-                print("\r shape: {0}".format(spots_no_ts.shape))
-                print("\r dtype: {0}".format(spots_no_ts.dtype))
+            if nuc_mask is not None:
+                spots_no_ts, foci, ts = multistack.remove_transcription_site(spots, clusters, nuc_mask, ndim=3)
+                if verbose:
+                    print("detected spots (without transcription sites)")
+                    print("\r shape: {0}".format(spots_no_ts.shape))
+                    print("\r dtype: {0}".format(spots_no_ts.dtype))
+            else:
+                spots_no_ts, foci, ts = None, None, None
 
             # get spots inside and outside nuclei
-            spots_in, spots_out = multistack.identify_objects_in_region(nuc_mask, spots, ndim=3)
-            if verbose:
-                print("detected spots (inside nuclei)")
-                print("\r shape: {0}".format(spots_in.shape))
-                print("\r dtype: {0}".format(spots_in.dtype), "\n")
-                print("detected spots (outside nuclei)")
-                print("\r shape: {0}".format(spots_out.shape))
-                print("\r dtype: {0}".format(spots_out.dtype))
+            if nuc_mask is not None:
+                spots_in, spots_out = multistack.identify_objects_in_region(nuc_mask, spots, ndim=3)
+                if verbose:
+                    print("detected spots (inside nuclei)")
+                    print("\r shape: {0}".format(spots_in.shape))
+                    print("\r dtype: {0}".format(spots_in.dtype), "\n")
+                    print("detected spots (outside nuclei)")
+                    print("\r shape: {0}".format(spots_out.shape))
+                    print("\r dtype: {0}".format(spots_out.dtype))
+            else:
+                spots_in, spots_out = None, None
 
             # extract fov results
             cell_mask = cell_mask.astype("uint16") if cell_mask is not None else None # nuc_mask.astype("uint16")
@@ -380,9 +387,10 @@ class BIGFISH_SpotDetection(SpotDetection):
     def __init__(self):
         super().__init__()
 
-    def main(self, image, FISHChannel,  nucChannel, nuc_mask, cell_mask,
-             voxel_size_yx: int, voxel_size_z: int, spot_yx: int, spot_z: int, timepoint, fov, independent_params: dict,
-             bigfish_threshold: Union[int, str] = None, snr_threshold: float = None, snr_ratio: float = None,
+    def main(self, image, FISHChannel,  nucChannel, voxel_size_yx: int, voxel_size_z: int, 
+             spot_yx: int, spot_z: int, timepoint, fov, independent_params: dict,
+             nuc_mask:np.array=None, cell_mask:np.array=None, bigfish_threshold: Union[int, str] = None, 
+             snr_threshold: float = None, snr_ratio: float = None,
              bigfish_alpha: float = 0.7, bigfish_beta:float = 1, bigfish_gamma:float = 5, 
              CLUSTER_RADIUS:int = 500, MIN_NUM_SPOT_FOR_CLUSTER:int = 4, use_log_hook:bool = False, 
              verbose:bool = False, display_plots: bool = False, bigfish_use_pca: bool = False,
