@@ -139,16 +139,18 @@ class DataTypeBridge_Dataset(IndependentStepClass):
 
         # Find tifs in the directory and add them to the dask dictionary
         for location in locations:
-            tifs = [f for f in os.listdir(location) if f.endswith('.tif')]
-            for tif in tifs:
-                tif_path = os.path.join(location, tif)
-                if os.path.splitext(tif)[0] not in mask_locations.keys():
-                    mask_locations[os.path.splitext(tif)[0]] = []
-                mask_locations[os.path.splitext(tif)[0]].append(tif_path)
-                tif_data = dask_imread.imread(tif_path)
-                if os.path.splitext(tif)[0] not in masks.keys():
-                    masks[os.path.splitext(tif)[0]] = None
-                masks[os.path.splitext(tif)[0]] = tif_data
+            mask_path = [f for f in os.listdir(location) if 'mask' in f]
+            if len(mask_path) == 1:
+                tifs = [f for f in os.listdir(mask_path[0])]
+                for tif in tifs:
+                    tif_path = os.path.join(location, tif)
+                    if os.path.splitext(tif)[0] not in mask_locations.keys():
+                        mask_locations[os.path.splitext(tif)[0]] = []
+                    mask_locations[os.path.splitext(tif)[0]].append(tif_path)
+                    tif_data = dask_imread.imread(tif_path)
+                    if os.path.splitext(tif)[0] not in masks.keys():
+                        masks[os.path.splitext(tif)[0]] = None
+                    masks[os.path.splitext(tif)[0]] = tif_data
 
         for key in masks.keys():
             masks[key] = da.concatenate(masks[key], axis=0)
