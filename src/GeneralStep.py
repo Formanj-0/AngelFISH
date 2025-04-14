@@ -71,7 +71,7 @@ class StepClass(ABC):
         As long as the attributes are unique and saved using a step output class, this function will load them in.
         """
         parameters = Parameters() if parameters is None else parameters
-        params = parameters.get_parameters()
+        params = parameters.get_parameters() # TODO get_parameter
         if t is None != p is None:
             raise ValueError('t and p must be both None or both not None')
 

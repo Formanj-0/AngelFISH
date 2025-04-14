@@ -103,6 +103,8 @@ class SpotDetection(SequentialStepsClass):
             # extract fov results
             cell_mask = cell_mask.astype("uint16") if cell_mask is not None else None # nuc_mask.astype("uint16")
             nuc_mask = nuc_mask.astype("uint16") if nuc_mask is not None else None
+            if cell_mask is None:
+                cell_mask = nuc_mask
             rna = rna.astype("uint16")
             other_images = {}
             other_images["dapi"] = np.max(nuc, axis=0).astype("uint16") if nuc is not None else None

@@ -466,10 +466,10 @@ class DataContainer(Parameters):
             # self.temp = tempfile.TemporaryDirectory(dir=os.getcwd(), ignore_cleanup_errors=True)
 
             # Load masks and images
-            if hasattr(self, 'images') and self.images is not None:
-                del self.images
-            if hasattr(self, 'masks') and self.masks is not None:
-                del self.masks
+            # if hasattr(self, 'images') and self.images is not None:
+            #     del self.images
+            # if hasattr(self, 'masks') and self.masks is not None:
+            #     del self.masks
             gc.collect()
 
             # Load everything else:
