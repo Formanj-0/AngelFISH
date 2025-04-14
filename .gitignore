@@ -7,7 +7,6 @@ config_cluster.yml
 config_nas.yml
 *.tif
 *.zip
-*.txt
 *.sld
 *.npy
 config_cluster.yml
@@ -35,3 +34,4 @@ src/SequentialSteps/__pycache__/SpotDetection_Steps.cpython-312.pyc
 src/SequentialSteps/__pycache__/Segmentation_Steps.cpython-312.pyc
 src/SequentialSteps/__pycache__/CellProperty_Step.cpython-312.pyc
 *.pyc
+/Pipelines
