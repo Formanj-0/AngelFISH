@@ -83,11 +83,10 @@ class CellProperties(SequentialStepsClass):
         else:
             cyto_df = None
 
-        cell_df ['touching_border'] = touching_border(cell_df if cell_df is not None else nuc_df, image)
-
         combined_df = pd.concat([nuc_df, cell_df, cyto_df], axis=1)
         combined_df['fov'] = [fov]*len(combined_df)
         combined_df['timepoint'] = [timepoint]*len(combined_df)
+        combined_df['touching_border'] = touching_border(combined_df, image)
 
         return {'cell_properties': combined_df}
 
