@@ -779,7 +779,8 @@ def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
 
 class DUSP1DisplayManager(DUSP1AnalysisManager):
     def __init__(self, analysis_manager, cell_level_results=None,
-                 spots=None, clusters=None, cellprops=None, method='mg', h5_idx=None, fov=None, unique_cell_id=None):
+                 spots=None, clusters=None, cellprops=None, method='mg', removed_spots= None,
+                 h5_idx=None, fov=None, unique_cell_id=None):
         """
         Initialize the display manager.
         
@@ -790,6 +791,11 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
           - clusters: DataFrame with cluster-level data.
           - cellprops: DataFrame with cell property data.
           - method: filtering method ('mg', 'absolute', 'weighted', or 'none').
+          - removed_spots: DataFrame with removed spots.
+          - h5_idx: (Optional)index of the HDF5 file to load for display.
+          - fov: (Optional) field-of-view index within the HDF5 file for display.
+          - unique_cell_id: (Optional) unique cell ID within the FOV for display.
+
           
         Note: This class does not load all images/masks into memory.
               Instead, it only loads the specific FOV on demand.
@@ -810,6 +816,10 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             'absolute_count': 'red',
             'MG_count': 'maroon'
         }
+        self.removed_spots = removed_spots
+
+        # Set default values for h5_idx, fov, and unique_cell_id.
+        # If not provided, they will be set to None.
         if h5_idx is not None:
             self.h5_idx = h5_idx
         else:
@@ -1252,149 +1262,143 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         plt.tight_layout()
         plt.show()
 
-    def display_cell_plots_by_removal_percentage(self, spotChannel=0, cytoChannel=1, nucChannel=2):
+    def calculate_removal_percentage(self):
         """
-        For each removal bracket (high, medium, low), select one cell that meets the criteria.
-        Prints the h5_idx, fov, and cell_label for each selected cell, then loads only the
-        corresponding FOV to display a three-panel plot.
-        """
-        count_col = 'num_spots'
-        
-        
-        cell_stats = {}
-        for _, cell in self.cellprops.iterrows():
-            uid = cell['unique_cell_id']
-            try:
-                bbox = (int(cell['cell_bbox-0']), int(cell['cell_bbox-1']),
-                        int(cell['cell_bbox-2']), int(cell['cell_bbox-3']))
-            except Exception as e:
-                print(f"Error reading bbox for cell {uid}: {e}")
-                continue
-            
-            agg_df = self.cell_level_results[self.cell_level_results['unique_cell_id'] == uid]
-            if agg_df.empty:
-                continue
-            agg = agg_df.iloc[0]
-            total = agg.get('num_spots', 0)
-            method_count = agg.get(count_col, 0)
-            if total == 0:
-                continue
-            removed_count = total - method_count
-            removal_pct = removed_count / total
-            cell_stats[uid] = {
-                'removal_pct': removal_pct,
-                'total': total,
-                'kept_count': method_count,
-                'removed_count': removed_count,
-                'bbox': bbox,
-                'h5_idx': cell['h5_idx'],
-                'fov': cell['fov'],
-                'cell_label': cell['cell_label']
-            }
-        
-        selected = {}
-        brackets = [
-            ('high', lambda p: p >= 0.8),
-            ('medium', lambda p: 0.4 <= p < 0.6),
-            ('low', lambda p: p < 0.4)
-        ]
-        for bracket, condition in brackets:
-            candidates = [(uid, stats) for uid, stats in cell_stats.items() if condition(stats['removal_pct'])]
-            if candidates:
-                selected[bracket] = candidates[0]
-        
-        if not selected:
-            print("No cells match the desired removal percentage brackets.")
-            return
-        
-        for bracket, (uid, stats) in selected.items():
-            print(f"Bracket: {bracket} | h5_idx: {stats['h5_idx']}, fov: {stats['fov']}, cell_label: {stats['cell_label']}")
-            images, masks, h5_idx, fov = self.get_images_and_masks(stats['h5_idx'], stats['fov'])
-            self.h5_idx, self.fov, self.cell_label = stats['h5_idx'], stats['fov'], stats['cell_label']
-            bbox = stats['bbox']
-            try:
-                channel_data = images[spotChannel]  # shape: (27, 936, 640)
-                img_spot = channel_data.max(axis=0)   # shape: (936, 640)
-            except Exception as e:
-                print(f"Error extracting image for cell {uid}: {e}")
-                continue
-            crop_img = img_spot[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-            crop_img_stretched = adjust_contrast(crop_img)
-            
-            fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-            axs[0].imshow(crop_img_stretched, cmap='gray')
-            axs[0].set_title(f"Cell {uid} - No overlays")
-            axs[1].imshow(crop_img_stretched, cmap='gray')
-            text_str = f"Kept: {stats['kept_count']} | Removed: {stats['removed_count']}\nTotal: {stats['total']}"
-            axs[1].text(0.05, 0.95, text_str, transform=axs[1].transAxes,
-                        fontsize=12, color='white', verticalalignment='top',
-                        bbox=dict(facecolor='black', alpha=0.5))
-            axs[1].set_title(f"Cell {uid} - Counts")
-            axs[2].imshow(crop_img_stretched, cmap='gray')
-            cell_spots = self.spots[self.spots['unique_cell_id'] == uid]
-            for _, spot in cell_spots.iterrows():
-                sx = spot['x_px'] - bbox[1]
-                sy = spot['y_px'] - bbox[0]
-                draw_spot_circle(axs[2], sx, sy, radius=4, color='gold')
-            axs[2].set_title(f"Cell {uid} - Kept spots")
-            for ax in axs:
-                ax.axis('off')
-            plt.suptitle(f"Removal: {stats['removal_pct']*100:.1f}% ({stats['removed_count']}/{stats['total']} spots removed) [{bracket} bracket]")
-            plt.tight_layout()
-            plt.show()
+        input 
+        - spots DataFrame with kept spots
+        - removed_spots DataFrame with removed spots
+        - cellprops DataFrame with cell properties
 
-    def display_cell_TS_foci_variations(self, spotChannel=0, cytoChannel=1, nucChannel=2):
+        Calculates the percentage of spots removed for each cell.
+        Calculates summary stats for each 'h5_idx', 'fov', and 'cell'.
+            -  High: > 80% removed
+            -  Medium: 40% <= removed < 60%
+            -  Low: < 40% removed
+
+        Returns:
+            - cellprops DataFrame with removal percentage and summary stats for each cell.
         """
-        For cells meeting criteria, select one cell and display TS/foci variation plots.
-        Prints the h5_idx, fov, and cell_label being displayed.
+        if self.removed_spots is None:
+            print("No removed spots DataFrame provided.")
+            return
+
+        # Calculate the number of spots in each cell
+        num_spots_per_cell = self.spots.groupby('unique_cell_id').size().reset_index(name='num_spots')
+
+        # Merge with removed spots to get the number of removed spots per cell
+        removed_spots_per_cell = self.removed_spots.groupby('unique_cell_id').size().reset_index(name='num_removed_spots')
+        merged_df = pd.merge(num_spots_per_cell, removed_spots_per_cell, on='unique_cell_id', how='left')
+        merged_df['num_removed_spots'] = merged_df['num_removed_spots'].fillna(0)
+
+        # Calculate removal percentage
+        merged_df['removal_percentage'] = (merged_df['num_removed_spots'] / merged_df['num_spots']) * 100
+
+        # Add summary stats to the cellprops DataFrame
+        self.cellprops = pd.merge(self.cellprops, merged_df[['unique_cell_id', 'removal_percentage']], on='unique_cell_id', how='left')
+
+        # Categorize removal percentage into High, Medium, Low
+        conditions = [
+            (self.cellprops['removal_percentage'] > 80),
+            (self.cellprops['removal_percentage'] >= 40) & (self.cellprops['removal_percentage'] <= 60),
+            (self.cellprops['removal_percentage'] < 40)
+        ]
+        choices = ['High', 'Medium', 'Low']
+        self.cellprops['summary_stats'] = np.select(conditions, choices, default='Unknown')
+
+        return self.cellprops
+    
+    def display_representative_cells(self):
         """
-        cell_stats = {}
-        for _, cell in self.cellprops.iterrows():
-            uid = cell['unique_cell_id']
-            try:
-                bbox = (int(cell['cell_bbox-0']), int(cell['cell_bbox-1']),
-                        int(cell['cell_bbox-2']), int(cell['cell_bbox-3']))
-            except Exception as e:
-                continue
-            agg_df = self.cell_level_results[self.cell_level_results['unique_cell_id'] == uid]
-            if agg_df.empty:
-                continue
-            agg = agg_df.iloc[0]
-            total = agg.get('num_spots', 0)
-            method_count = agg.get('num_spots', 0)
-            if total == 0:
-                continue
-            removal_pct = (total - method_count) / total
-            cell_stats[uid] = {
-                'removal_pct': removal_pct,
-                'total': total,
-                'h5_idx': cell['h5_idx'],
-                'fov': cell['fov'],
-                'cell_label': cell['cell_label'],
-                'bbox': bbox
-            }
-        if not cell_stats:
-            print("No cells available for TS/foci variations.")
-            return
-        uid, stats = random.choice(list(cell_stats.items()))
-        print(f"Displaying TS/Foci variations for cell {uid}: h5_idx={stats['h5_idx']}, fov={stats['fov']}, cell_label={stats['cell_label']}")
-        images, masks, h5_idx, fov = self.get_images_and_masks(stats['h5_idx'], stats['fov'])
-        self.h5_idx, self.fov, self.cell_label = stats['h5_idx'], stats['fov'], stats['cell_label']
-        bbox = stats['bbox']
-        try:
-            channel_data = images[spotChannel]  # shape: (27, 936, 640)
-            img_spot = channel_data.max(axis=0)   # shape: (936, 640)
-        except Exception as e:
-            print(f"Error extracting image for cell {uid}: {e}")
-            return
-        crop_img = img_spot[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-        crop_img_stretched = adjust_contrast(crop_img)
+        For each HDF5 index (h5_idx), display up to three representative cells – one for each removal category
+        (preferably High, Medium, and Low). For each cell, the following will be displayed:
+        1. A zoomed-in view of the cell (via _display_zoom_on_cell), with a title that includes additional info
+            in the format: "conc_time_FOV{fov}_ID{unique_cell_id}".
+        2. A zoomed-in view of one representative spot from that cell (via _display_zoom_on_one_spot),
+            showing detected (gold) spots (and TS in magenta, foci in cyan).
         
-        plt.figure(figsize=(5, 5))
-        plt.imshow(crop_img_stretched, cmap='gray')
-        plt.title(f"TS/Foci variations for cell {uid} (h5_idx={stats['h5_idx']}, fov={stats['fov']}, cell_label={stats['cell_label']})")
-        plt.axis('off')
-        plt.show()
+        If a cell's metadata lacks a 'conc' or 'time' field, "NA" is shown.
+        """
+        if self.cellprops is None:
+            print("No cell properties DataFrame provided.")
+            return
+
+        # Update cellprops with removal percentage and summary stats.
+        self.calculate_removal_percentage()
+
+        # Get unique h5_idx values.
+        unique_h5_idx = self.cellprops['h5_idx'].unique()
+
+        # Desired removal categories – you might prioritize High over Low.
+        desired_categories = ["High", "Medium", "Low"]
+
+        for h5 in unique_h5_idx:
+            print(f"\nProcessing h5_idx {h5}")
+            # Get cell properties for this h5_idx.
+            cells_this_h5 = self.cellprops[self.cellprops['h5_idx'] == h5]
+            for cat in desired_categories:
+                # Filter for cells in the current removal category.
+                cat_cells = cells_this_h5[cells_this_h5['summary_stats'] == cat]
+                if cat_cells.empty:
+                    print(f"  No cells with removal category '{cat}' in h5_idx {h5}.")
+                    continue
+
+                # Select one representative cell at random.
+                rep_cell = cat_cells.sample(1).iloc[0]
+                print(f"  Selected cell with removal '{cat}' from h5_idx {h5}.")
+
+                # Set instance variables so that the zoom functions use the same FOV.
+                self.h5_idx = rep_cell['h5_idx']
+                self.fov = rep_cell['fov']
+                # Here, we use the 'unique_cell_id' from the cellprops.
+                self.cell_label = rep_cell['unique_cell_id']
+
+                # Compose a title in the format "conc_time_FOV{fov}_ID{unique_cell_id}".
+                conc = rep_cell.get('conc', "NA")
+                time_val = rep_cell.get('time', "NA")
+                title_str = f"{conc}_{time_val}_FOV{rep_cell['fov']}_ID{rep_cell['unique_cell_id']}"
+
+                # --- Plot 1: Zoomed-in view of the representative cell ---
+                print(f"    Displaying cell plot: {title_str}")
+                # _display_zoom_on_cell() should generate its own figure.
+                self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
+                plt.gcf().suptitle(title_str)
+                plt.show()
+
+                # --- Prepare for Plot 2: Select a representative spot from this cell ---
+                # Ensure the chosen spot is set by filtering for spots in this cell.
+                cell_spots = self.spots[
+                    (self.spots['h5_idx'] == self.h5_idx) &
+                    (self.spots['fov'] == self.fov) &
+                    (self.spots['unique_cell_id'] == self.cell_label)
+                ]
+                if cell_spots.empty:
+                    print(f"    No spots found for cell {self.cell_label} in FOV {self.fov}.")
+                    continue
+                # Randomly select one spot from the cell and assign it to self.chosen_spot.
+                self.chosen_spot = cell_spots.sample(1).iloc[0]
+                
+                # (Optional) If you also want to set TS and foci, you can add similar logic here.
+                # For instance, if the cell has TS or foci in your clusters_df:
+                cell_clusters = self.clusters_df[
+                    (self.clusters_df['h5_idx'] == self.h5_idx) &
+                    (self.clusters_df['fov'] == self.fov) &
+                    (self.clusters_df['unique_cell_id'] == self.cell_label)
+                ]
+                if not cell_clusters.empty:
+                    # For demonstration, pick one TS if available.
+                    ts_candidates = cell_clusters[cell_clusters['is_nuc'] == 1]
+                    self.chosen_ts = ts_candidates.sample(1).iloc[0] if not ts_candidates.empty else None
+                    # Pick one foci if available.
+                    foci_candidates = cell_clusters[cell_clusters['is_nuc'] == 0]
+                    self.chosen_foci = foci_candidates.sample(1).iloc[0] if not foci_candidates.empty else None
+                else:
+                    self.chosen_ts = None
+                    self.chosen_foci = None
+
+                # --- Plot 2: Zoom in on a representative spot in that cell ---
+                print(f"    Displaying spot zoom for cell ID {rep_cell['unique_cell_id']}.")
+                self._display_zoom_on_one_spot(spotChannel=0)
+        return self.cellprops
 
     def main_display(self):
         """
@@ -1409,8 +1413,8 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             print("Running _display_zoom_on_one_spot...")
             self._display_zoom_on_one_spot(spotChannel=0)
         
-        print("Running display_cell_plots_by_removal_percentage...")
-        self.display_cell_plots_by_removal_percentage(spotChannel=0, cytoChannel=1, nucChannel=2)
+        print("Running display_representative_cells...")
+        self.display_representative_cells()
         
         print("Running display_cell_TS_foci_variations...")
-        self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
+        # self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
