@@ -972,8 +972,8 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         valid_cells = self.cellprops[
             (self.cellprops['h5_idx'] == self.h5_idx) &
             (self.cellprops['fov'] == self.fov) &
-            (self.cellprops['cell_label'] != 0)
-        ]['cell_label'].unique()
+            (self.cellprops['unique_cell_id'] != 0)
+        ]['unique_cell_id'].unique()
 
         if len(valid_cells) == 0:
             print(f"No valid cells in FOV={self.fov}. Aborting.")
@@ -1246,7 +1246,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         cell_spots = self.spots[
             (self.spots['h5_idx'] == self.h5_idx) &
             (self.spots['fov'] == self.fov) &
-            (self.spots['cell_label'] == self.cell_label)
+            (self.spots['unique_cell_id'] == self.cell_label)
         ]
         for _, srow in cell_spots.iterrows():
             rx = srow['x_px'] - x1
