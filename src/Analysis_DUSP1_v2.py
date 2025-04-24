@@ -37,6 +37,7 @@ import seaborn as sns
 from skimage import exposure
 import matplotlib.colors as mcolors
 from skimage.measure import find_contours
+from tqdm import tqdm
 
 #############################
 # DUSP1AnalysisManager Class
@@ -294,6 +295,7 @@ class SNRAnalysis:
         - 'MG_SNR': The computed MG SNR.
         - 'weighted': Whether the spot passes the weighted threshold.
         - 'absolute': Whether the spot passes the absolute threshold (if provided).
+        - 'MG_pass': Whether the spot passes the MG SNR threshold (if provided).
         - 'snr_vs_mg': The difference between the original 'snr' and the computed MG SNR.
         - 'mg_gt_snr': Whether the MG SNR is greater than the original 'snr'.
     """
@@ -463,7 +465,7 @@ class DUSP1Measurement:
             return 0
         return unique_vals[-2]
     
-    def measure(self, snr_threshold: float, mg_threshold: float) -> pd.DataFrame:
+    def measure(self, abs_threshold: float, mg_threshold: float) -> pd.DataFrame:
         """
         Processes the data to produce cell-level measurements.
         
@@ -736,11 +738,25 @@ class DUSP1_filtering:
 # DisplayManager Class
 #############################
 
-# Global matplotlib settings for publication quality
-plt.rcParams['figure.dpi'] = 300
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['axes.titlesize'] = 14
-plt.rcParams['axes.labelsize'] = 12
+# # Global matplotlib settings for publication quality
+# plt.rcParams['figure.dpi'] = 300
+# plt.rcParams['font.family'] = 'Times New Roman'
+# plt.rcParams['axes.titlesize'] = 14
+# plt.rcParams['axes.labelsize'] = 12
+
+# Clean, minimal setup for fast and legible previews
+plt.rcParams.update({
+    'figure.dpi': 150,               # Slightly lower DPI for speed
+    'font.family': 'Times New Roman',     # Easier to read on screen
+    'axes.titlesize': 10,
+    'axes.labelsize': 9,
+    'xtick.labelsize': 8,
+    'ytick.labelsize': 8,
+    'axes.edgecolor': 'gray',
+    'axes.linewidth': 0.8,
+    'figure.autolayout': True,       # Prevent cutoff
+    'savefig.bbox': 'tight'
+})
 
 # Utility functions
 import os
@@ -1416,5 +1432,350 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         print("Running display_representative_cells...")
         self.display_representative_cells()
         
-        print("Running display_cell_TS_foci_variations...")
+        # print("Running display_cell_TS_foci_variations...")
         # self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
+        print("All display routines completed.")
+
+
+#############################
+# SpotCropSampler Class
+#############################
+import os
+import random
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import h5py
+from skimage import exposure
+from tqdm import tqdm
+from contextlib import contextmanager
+
+class SpotCropSampler:
+    def __init__(
+        self,
+        spots_df,
+        clusters_df,
+        cellprops_df,
+        mount_prefix: str = "/Volumes/share"
+    ):
+        import os
+
+        self.spots     = spots_df
+        self.clusters  = clusters_df
+        self.cellprops = cellprops_df
+
+        # Build a mapping h5_idx -> NAS_location (as you already have it)
+        raw_map = (
+            self.cellprops[['h5_idx','NAS_location']]
+                .drop_duplicates(subset='h5_idx')
+                .set_index('h5_idx')['NAS_location']
+                .to_dict()
+        )
+
+        self.file_paths = {}
+        for idx, rel in raw_map.items():
+            # 1) form absolute candidate
+            full = rel if os.path.isabs(rel) else os.path.join(mount_prefix, rel)
+
+            # 2) if that path is a directory OR not a file, try popping one level up
+            if not os.path.isfile(full):
+                parent = os.path.dirname(full)
+                grand = os.path.dirname(parent)
+                cand2  = os.path.join(grand, os.path.basename(full))
+                if os.path.isfile(cand2):
+                    full = cand2
+                else:
+                    raise FileNotFoundError(
+                        f"h5_idx {idx}: neither '{full}' nor '{cand2}' exists"
+                    )
+
+            # 3) record the valid .h5 path
+            self.file_paths[idx] = full
+
+    @contextmanager
+    def open_h5(self, h5_idx):
+        """Yield the raw_images dataset for that h5_idx."""
+        path = self.file_paths[h5_idx]
+        with h5py.File(path, 'r') as f:
+            yield f['raw_images'], f['masks']
+
+    def get_images_and_masks(self, h5_idx):
+        """
+        Load and project one FOV from HDF5:
+        - randomly pick fov if unspecified
+        - returns (images, masks, chosen_h5_idx, chosen_fov)
+        """
+        images_ds, masks_ds = None, None
+        with self.open_h5(h5_idx) as (raw_images, raw_masks):
+            num_fov = raw_images.shape[0]
+            fov = random.randrange(num_fov)
+            imgs = np.array(raw_images[fov])
+            msks = np.array(raw_masks[fov])
+            # squeeze singleton leading dim
+            if imgs.shape[0] == 1:
+                imgs = imgs.squeeze(0)
+            if msks.shape[0] == 1:
+                msks = msks.squeeze(0)
+            images_ds, masks_ds = imgs, msks
+        return images_ds, masks_ds, h5_idx, fov
+
+    def _select_cells(self, h5_idx, fov, raw_shape):
+        """Pick 4 quadrant cells + one central cell, by bounding-box centroids."""
+        df = self.cellprops[
+            (self.cellprops['h5_idx'] == h5_idx) &
+            (self.cellprops['fov']    == fov)
+        ].copy()
+        if df.empty:
+            return pd.DataFrame([])
+
+        H, W = raw_shape[-2], raw_shape[-1]
+        xm, ym = W/2, H/2
+
+        # compute centroids from cell_bbox-*
+        df['centroid_x'] = (df['cell_bbox-1'] + df['cell_bbox-3'])/2
+        df['centroid_y'] = (df['cell_bbox-0'] + df['cell_bbox-2'])/2
+
+        quads = [
+            lambda x,y: x <  xm and y <  ym,
+            lambda x,y: x >= xm and y <  ym,
+            lambda x,y: x <  xm and y >= ym,
+            lambda x,y: x >= xm and y >= ym,
+        ]
+        picks = []
+        for quad in quads:
+            qdf = df[df.apply(lambda r: quad(r['centroid_x'], r['centroid_y']), axis=1)]
+            if not qdf.empty:
+                picks.append(qdf.sample(1))
+
+        # center-most
+        df['dist2ctr'] = (df['centroid_x']-xm)**2 + (df['centroid_y']-ym)**2
+        picks.append(df.loc[[df['dist2ctr'].idxmin()]])
+
+        return pd.concat(picks).drop_duplicates().reset_index(drop=True)
+
+    def _crop_spots_in_cell(
+        self, raw_2d, h5_idx, fov, cell_id,
+        display, save, save_dir, pad=3, max_spots=20
+    ):
+        """7×7 spot crops with balanced MG_pass, two‐panel display & metadata."""
+        sdf = self.spots[
+            (self.spots.h5_idx == h5_idx) &
+            (self.spots.fov    == fov) &
+            (self.spots.unique_cell_id == cell_id)
+        ]
+        if sdf.empty:
+            return []
+
+        # balance MG_pass
+        passes = sdf[sdf.MG_pass]
+        fails  = sdf[~sdf.MG_pass]
+        n_fail = min(max_spots//2, len(fails))
+        n_pass = min(max_spots - n_fail, len(passes))
+        parts = []
+        if n_pass: parts.append(passes.sample(n_pass))
+        if n_fail: parts.append(fails.sample(n_fail))
+        sdf = pd.concat(parts).sample(frac=1).reset_index(drop=True)
+
+        # precompute cell‐level patch if displaying
+        if display > 0:
+            cdf = self.cellprops[
+                (self.cellprops.h5_idx == h5_idx) &
+                (self.cellprops.fov    == fov) &
+                (self.cellprops.unique_cell_id == cell_id)
+            ]
+            if not cdf.empty:
+                r0, c0, r1, c1 = map(int, cdf.iloc[0][[
+                    'cell_bbox-0','cell_bbox-1','cell_bbox-2','cell_bbox-3'
+                ]])
+                cell_patch = raw_2d[r0:r1, c0:c1]
+                p1, p99 = np.percentile(cell_patch, (1,99))
+                cell_patch = exposure.rescale_intensity(
+                    cell_patch,in_range=(p1,p99),out_range=(0,1))
+                mg_spots = self.spots[
+                    (self.spots.h5_idx==h5_idx)&
+                    (self.spots.fov   ==fov)&
+                    (self.spots.unique_cell_id==cell_id)&
+                    (self.spots.MG_pass)
+                ]
+            else:
+                display = 0
+
+        crops_info = []
+        H, W = raw_2d.shape
+
+        for _, spot in sdf.iterrows():
+            x0, y0 = int(spot.x_px), int(spot.y_px)
+            x1, x2 = x0-pad, x0+pad+1
+            y1, y2 = y0-pad, y0+pad+1
+            if x1<0 or y1<0 or x2>W or y2>H:
+                continue
+
+            patch = raw_2d[y1:y2, x1:x2]
+            if patch.shape != (2*pad+1,2*pad+1):
+                continue
+            p1,p99 = np.percentile(patch,(1,99))
+            patch = exposure.rescale_intensity(patch, in_range=(p1,p99), out_range=(0,1))
+
+            # metadata counts
+            others = self.spots[
+                (self.spots.h5_idx==h5_idx)&
+                (self.spots.fov   ==fov)&
+                (self.spots.x_px.between(x1,x2-1))&
+                (self.spots.y_px.between(y1,y2-1))
+            ]
+            n_others = len(others)-1
+            ts   = self.clusters.query(
+                "h5_idx==@h5_idx & fov==@fov & is_nuc==True & "
+                "x_px.between(@x1,@x2-1) & y_px.between(@y1,@y2-1)"
+            )
+            foci = self.clusters.query(
+                "h5_idx==@h5_idx & fov==@fov & is_nuc==False & "
+                "x_px.between(@x1,@x2-1) & y_px.between(@y1,@y2-1)"
+            )
+            # get the spot's cluster
+            cid = spot.get('cluster_index', None)
+
+            # find that cluster in ts / foci
+            ts_entry   = ts[ts['cluster_index'] == cid]
+            foci_entry = foci[foci['cluster_index'] == cid]
+
+            ts_size   = int(ts_entry['nb_spots'].iloc[0])   if not ts_entry.empty   else 0
+            foci_size = int(foci_entry['nb_spots'].iloc[0]) if not foci_entry.empty else 0
+
+            meta = {
+                'h5_idx':            h5_idx,
+                'fov':               fov,
+                'unique_cell_id':    cell_id,
+                'unique_spot_id':    spot['unique_spot_id'],
+                'snr':               spot['snr'],
+                'MG_SNR':            spot['MG_SNR'],
+                'MG_pass':           spot['MG_pass'],
+                'num_spots_in_crop': n_others + 1,
+                'num_TS_in_crop':    len(ts),
+                'num_foci_in_crop':  len(foci),
+                'ts_cluster_size':   ts_size,
+                'foci_cluster_size': foci_size,
+            }
+
+            if display > 0:
+                fig, (axC, axP) = plt.subplots(1, 2, figsize=(10, 5))
+
+                # --- LEFT: whole-cell patch, gold = MG_pass, blue = chosen spot ---
+                axC.imshow(cell_patch, cmap='gray')
+                # gold circles for MG_pass spots
+                mg_spots = self.spots[
+                    (self.spots.h5_idx == h5_idx) &
+                    (self.spots.fov    == fov) &
+                    (self.spots.unique_cell_id == cell_id) &
+                    (self.spots.MG_pass)
+                ]
+                for _, m in mg_spots.iterrows():
+                    rx, ry = m.x_px - c0, m.y_px - r0
+                    if 0 <= rx < cell_patch.shape[1] and 0 <= ry < cell_patch.shape[0]:
+                        circle = plt.Circle((rx, ry), 2, edgecolor='gold', facecolor='none', linewidth=1)
+                        axC.add_patch(circle)
+
+                # blue circle for the chosen spot (spot.x_px, spot.y_px)
+                rx0, ry0 = x0 - c0, y0 - r0
+                circle = plt.Circle((rx0, ry0), 3, edgecolor='blue', facecolor='none', linewidth=2)
+                axC.add_patch(circle)
+                axC.set_title(f"Cell {cell_id}") 
+                axC.axis('off')
+
+                # --- RIGHT: 7×7 crop, gold = any neighbor, center colored for this spot ---
+                axP.imshow(patch, cmap='gray')
+
+                # draw other spots in gold
+                for _, s2 in others.iterrows():
+                    rx, ry = s2.x_px - x1, s2.y_px - y1
+                    if (rx, ry) != (pad, pad):
+                        circle = plt.Circle((rx, ry), 1, edgecolor='gold', facecolor='none', linewidth=1)
+                        axP.add_patch(circle)
+
+                # pick center color
+                center_col = 'blue'
+                if spot.cluster_index in ts['cluster_index'].values:
+                    center_col = 'magenta'
+                elif spot.cluster_index in foci['cluster_index'].values:
+                    center_col = 'cyan'
+
+                # draw center circle
+                circle = plt.Circle((pad, pad), pad, edgecolor=center_col, facecolor='none', linewidth=2)
+                axP.add_patch(circle)
+
+                axP.set_title(
+                    f"spot {spot.unique_spot_id}\n"
+                    f"MG_SNR={spot.MG_SNR:.2f}, SNR={spot.snr:.2f}\n"
+                    f"{meta['num_spots_in_crop']} spots in patch"
+                )
+                axP.axis('off')
+
+                plt.tight_layout()
+                plt.show()
+                display -= 1
+
+            if save and save_dir:
+                fn=f"crop_h5{h5_idx}_f{fov}_c{cell_id}_s{spot.unique_spot_id}.npy"
+                np.save(os.path.join(save_dir,fn),patch)
+
+            crops_info.append({'crop':patch,'meta':meta})
+
+        return crops_info
+
+    def run(
+        self,
+        save_dir,
+        display: int = 0,
+        save_individual: bool = False,
+        save_summary: bool = True,
+        file_prefix: str = "",
+        pad: int = 3,
+        cells_per_quad: int = 1,
+        spots_per_cell: int = 20,
+        spotChannel: int = 0
+    ):
+        """
+        Main entry:
+          - load & project spotChannel
+          - select cells
+          - crop spots
+          - optional per‐spot saving
+          - optional summary saving
+        Returns:
+          crops, meta  (lists of patches and dicts)
+        """
+        os.makedirs(save_dir, exist_ok=True)
+        all_crops, all_meta = [], []
+
+        for h5_idx in tqdm(sorted(self.spots.h5_idx.unique()), desc="h5_idx"):
+            imgs, msks, _, fov = self.get_images_and_masks(h5_idx=h5_idx)
+            arr3d  = imgs[spotChannel]
+            raw_2d = np.max(arr3d, axis=0)
+            p1, p99 = np.percentile(raw_2d, (1, 99))
+            raw_2d = exposure.rescale_intensity(raw_2d, in_range=(p1, p99), out_range=(0, 1))
+
+            cells = self._select_cells(h5_idx, fov, raw_2d.shape)
+            for cid in cells['unique_cell_id']:
+                ci = self._crop_spots_in_cell(
+                    raw_2d, h5_idx, fov, cid,
+                    display=display,
+                    save=save_individual,
+                    save_dir=save_dir,
+                    pad=pad,
+                    max_spots=spots_per_cell
+                )
+                for e in ci:
+                    all_crops.append(e['crop'])
+                    all_meta .append(e['meta'])
+
+        # summary save
+        if save_summary:
+            crops_np = np.stack(all_crops)
+            name_crops = f"{file_prefix}_all_crops.npy" if file_prefix else "all_crops.npy"
+            np.save(os.path.join(save_dir, name_crops), crops_np)
+
+            meta_df = pd.DataFrame(all_meta)
+            name_meta = f"{file_prefix}_all_crop_metadata.csv" if file_prefix else "all_crop_metadata.csv"
+            meta_df.to_csv(os.path.join(save_dir, name_meta), index=False)
+
+        return all_crops, all_meta
