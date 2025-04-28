@@ -1655,6 +1655,16 @@ class SpotCropSampler:
                 'num_foci_in_crop':  len(foci),
                 'ts_cluster_size':   ts_size,
                 'foci_cluster_size': foci_size,
+                'cell intensity mean': spot['cell_intensity_mean-0'],
+                'cell intensity std':  spot['cell_intensity_std-0'],
+                'nuc intensity mean': spot['nuc_intensity_mean-0'],
+                'nuc intensity std':  spot['nuc_intensity_std-0'],
+                'cyto intensity mean': spot['cyto_intensity_mean-0'],
+                'cyto intensity std':  spot['cyto_intensity_std-0'],
+                'snr vs mg': spot['snr_vs_mg'],
+                'absolute pass': spot['absolute'],
+                'weighted pass': spot['weighted'],
+                'mg less than snr': spot['mg_lt_snr'],
             }
 
             if display > 0:
