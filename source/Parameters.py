@@ -52,6 +52,8 @@ from pathlib import Path
 import zarr
 from numcodecs import JSON
 import dask.dataframe as dd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 class Data:
     def __init__(self, zarr_path):
@@ -87,6 +89,11 @@ class Data:
             self._zarr_path.mkdir(parents=True, exist_ok=True)
             zarr.open(self._zarr_path, mode='w')
 
+        if name in self.dataset.attrs and self.dataset.attrs[name] == 'parquet':
+            parquet_path = self._zarr_path / f"{name}.parquet"
+            if parquet_path.exists():
+                return pd.read_parquet(parquet_path)
+
         result = self.dataset[name]
 
         if isinstance(result, zarr.Array):
@@ -105,8 +112,11 @@ class Data:
         elif isinstance(value, np.ndarray):
             self.dataset[name] = zarr.array(value)
         elif isinstance(value, pd.DataFrame):
-                ddf = dd.from_pandas(value, npartitions=1)
-                ddf.to_zarr(self._zarr_path / name)
+            # Save as Parquet inside the Zarr directory
+            parquet_path = self._zarr_path / f"{name}.parquet"
+            table = pa.Table.from_pandas(value)
+            pq.write_table(table, parquet_path)
+            self.dataset.attrs[name] = 'parquet'
         else:
             self.dataset[name] = json.dumps(value)
 
@@ -130,26 +140,6 @@ if __name__  == '__main__':
 
     print(params.__dict__)
     print(data.__dict__)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
