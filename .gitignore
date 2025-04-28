@@ -35,3 +35,4 @@ src/SequentialSteps/__pycache__/Segmentation_Steps.cpython-312.pyc
 src/SequentialSteps/__pycache__/CellProperty_Step.cpython-312.pyc
 *.pyc
 /Pipelines
+/source/Test_Steps
