@@ -13,6 +13,7 @@ from datetime import datetime
 from abc import abstractmethod
 import gc
 from typing import List, Dict, Any, Union
+import zarr
 
 from src.GeneralStep import FinalizingStepClass
 from src.Parameters import Parameters, DataContainer, ScopeClass, Settings, Experiment
@@ -72,13 +73,13 @@ class Save_Outputs(Saving):
         data_container.load_temp_data()
         return results
 
-    def main(self, data_container, **kwargs):
+    def main(self, data, **kwargs):
         params = kwargs
 
-        Analysis_name = params['name']
+        Analysis_name = params['analysis_name']
         local_dataset_location = params['local_dataset_location']
         independent_params = params['independent_params']
-        position_indexs = params['position_indexs']
+        position_indexs = data['position_indexs']
         if 'h5_files' in params.keys():
             for h5 in params['h5_files']:
                 h5.flush()
@@ -88,7 +89,6 @@ class Save_Outputs(Saving):
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
 
-        data = data_container.load_temp_data()
 
         self.save(data, local_dataset_location, f'Analysis_{Analysis_name}_{date}', position_indexs, independent_params)
 
@@ -170,7 +170,7 @@ class Save_Outputs(Saving):
                 save_loc = os.path.join(location, group_name)
                 os.makedirs(save_loc, exist_ok=True)
                 for key, data in attributes.items():
-                    if key not in ['_initialized', 'independent_params'] and not any(substring in key for substring in ['mask', 'image']):
+                    if key not in ['_initialized', 'independent_params', '_loaded', '_ds', '_zarr_path'] and not any(substring in key for substring in ['mask', 'image']):
                         if data is not None:
                             if isinstance(data, pd.DataFrame):
                                 # data = handle_df(data)
@@ -183,6 +183,13 @@ class Save_Outputs(Saving):
                                 with open(json_path, "w") as f:
                                     if isinstance(data, np.memmap):
                                         data = data.tolist()
+                                    if isinstance(data, (zarr.Array, np.ndarray, da.Array)):
+                                        if isinstance(data, zarr.Array):
+                                            data = np.array(data).tolist()
+                                        elif isinstance(data, np.ndarray):
+                                            data = data.tolist()
+                                        elif isinstance(data, da.Array):
+                                            data = data.compute().tolist()
                                     json.dump(data, f, indent=4)
 
 
@@ -211,8 +218,9 @@ class Save_Parameters(Saving):
         
         params = kwargs
         params_to_ignore = ['h5_file', 'local_dataset_location', 'images', 'masks', 'instances', 'state', 'temp']
+        badtypes = (np.ndarray, da.Array, zarr.Array)
 
-        Analysis_name = kwargs['name']
+        Analysis_name = kwargs['analysis_name']
         local_dataset_location = kwargs['local_dataset_location']
 
 
@@ -275,6 +283,7 @@ class Save_Parameters(Saving):
                 save_loc = os.path.join(location, group_name)
                 os.makedirs(save_loc, exist_ok=True)
                 filtered_params = {k: v for k, v in params.items() if k not in params_to_ignore}
+                filtered_params = {k: v for k, v in params.items() if isinstance(k, badtypes)}
                 file_path = os.path.join(save_loc, "parameters.json")
                 with open(file_path, "w") as f:
                     def convert_memmap_to_list(obj):
@@ -295,7 +304,7 @@ class Save_Parameters(Saving):
 class Save_Images(Saving):
     def main(self, **kwargs):
         params = kwargs
-        Analysis_name = params['name']
+        Analysis_name = params['analysis_name']
         local_dataset_location = params['local_dataset_location']
         images = params['images']
         position_indexs = params['position_indexs']

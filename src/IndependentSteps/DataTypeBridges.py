@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 from src import IndependentStepClass, DataContainer
 from src.Parameters import Parameters
-from src.NASConnection import NASConnection
+from source.NASConnection import NASConnection
 
 
 

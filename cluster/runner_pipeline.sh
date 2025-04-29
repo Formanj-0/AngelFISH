@@ -18,19 +18,23 @@ echo "Starting my job..."
 # Start timing the process
 start_time=$(date +%s)
 
-kwarg_location=$1
-path_to_executable="${PWD%/*}/src/pipeline_executable.py"
+fileLocation=$1
+args=$2
 
 # ########### PYTHON PROGRAM #############################
 # Ensure output directory exists
 mkdir -p "${PWD}/output"
 
 # Correct output file name
-output_names="${PWD}/output/output_${SLURM_JOB_ID}_$(basename ${kwarg_location})"
+output_names="${PWD}/output/output_${SLURM_JOB_ID}_$(basename ${fileLocation})"
 
 # Activate the environment and run the script
 source ../.venv/bin/activate
-python "$path_to_executable" "$kwarg_location" >> "$output_names" 2>&1 &
+if [ -z "$args" ]; then
+    python "$fileLocation" >> "$output_names" 2>&1 &
+else
+    python "$fileLocation" "$args" >> "$output_names" 2>&1 &
+fi
 wait
 
 

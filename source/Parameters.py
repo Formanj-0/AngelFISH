@@ -78,14 +78,19 @@ class Data:
         if not self._loaded:
             self._ds = zarr.open(self._zarr_path, mode='a')  # Open in append mode for read/write access
             self._loaded = True
+
+        for key in self._ds.keys():
+            super().__setattr__(key, self._ds[key])
+
         return self._ds
 
-
     def __getattr__(self, name):
+        # result = super().__getattr__(name)
+        
         if name in ['_zarr_path', '_ds', '_loaded']:
             return self.__dict__.get(name, None)
 
-        if '_zarr_path' in self.__dict__ and self._zarr_path is not None and not self._zarr_path.exists():
+        if self._zarr_path is not None and not self._zarr_path.exists():
             self._zarr_path.mkdir(parents=True, exist_ok=True)
             zarr.open(self._zarr_path, mode='w')
 
@@ -94,22 +99,23 @@ class Data:
             if parquet_path.exists():
                 return pd.read_parquet(parquet_path)
 
-        result = self.dataset[name]
+        if name in self.dataset.keys():
+            result = self.dataset[name]
+            return result
 
-        if isinstance(result, zarr.Array):
-            return da.from_array(result)
-
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        else:
+            return None
     
     def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+
         if name in ['_zarr_path', '_ds', '_loaded']:
-            super().__setattr__(name, value)
             return
 
         if isinstance(value, da.Array):
             value = value.compute()
             self.dataset[name] = zarr.array(value)
-        elif isinstance(value, np.ndarray):
+        elif isinstance(value, (np.ndarray, zarr.Array)):
             self.dataset[name] = zarr.array(value)
         elif isinstance(value, pd.DataFrame):
             # Save as Parquet inside the Zarr directory
@@ -120,12 +126,52 @@ class Data:
         else:
             self.dataset[name] = json.dumps(value)
 
+
+    def __setitem__(self, key, value):
+        """Handle item assignment for array-like data."""
+        # Lazy-load the dataset if not already loaded
+        self.dataset  # Ensure the dataset is loaded
+
+        # Check if the key is valid (i.e., a tuple of indices)
+        if isinstance(key, tuple):
+            # If the key corresponds to a zarr array (like data.array[p, t])
+            self.dataset[key] = value
+        else:
+            raise TypeError(f"Invalid key type: {type(key)}. Expected tuple of indices.")
+
     def append(self, newValues: dict):
         for k, v in newValues.items():
+            if isinstance(v, pd.DataFrame):
+                # Save as Parquet inside the Zarr directory
+                parquet_path = self._zarr_path / f"{k}.parquet"
+                if parquet_path.exists():
+                    # Read the existing DataFrame and concatenate
+                    existing_df = getattr(self, k)
+                    if existing_df is not None:
+                        v = pd.concat([existing_df, v], ignore_index=True)
+
             setattr(self, k, v)
 
     def __str__(self):
-        return f"Data(zarr_path={self._zarr_path}, loaded={self._loaded}, dataset_keys={list(self._ds.keys()) if self._ds else []})"
+        return f"Data(zarr_path={self._zarr_path}, loaded={self._loaded}, dataset_keys={list(self.__dict__.keys()) if self._ds else []})"
+
+    def __delattr__(self, name):
+        """Delete an attribute or dataset."""
+        if name in ['_zarr_path', '_ds', '_loaded']:
+            raise AttributeError(f"Cannot delete protected attribute: {name}")
+
+        if name in self.dataset.attrs and self.dataset.attrs[name] == 'parquet':
+            # Delete Parquet file if it exists
+            parquet_path = self._zarr_path / f"{name}.parquet"
+            if parquet_path.exists():
+                parquet_path.unlink()
+            del self.dataset.attrs[name]
+        elif name in self.dataset:
+            # Delete Zarr dataset
+            del self.dataset[name]
+        else:
+            raise AttributeError(f"Attribute or dataset '{name}' does not exist.")
+
 
 
 
@@ -139,7 +185,7 @@ if __name__  == '__main__':
     print(data)
 
     print(params.__dict__)
-    print(data.__dict__)
+    print(data.to_dict())
 
 
 

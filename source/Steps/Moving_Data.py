@@ -43,7 +43,7 @@ class return_to_NAS(Moving_Data):
                     NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(log_file, log_location)
                     NASConnection(connection_config_location, share_name=share_name).write_files_to_NAS(h5_file, initial_data_location[i])
             else:
-                Analysis_name = kwargs['name']
+                Analysis_name = kwargs['analysis_name']
                 today = datetime.today()
                 date = today.strftime("%Y-%m-%d")
                 group_name = f'Analysis_{Analysis_name}_{date}'
