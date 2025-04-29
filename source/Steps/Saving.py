@@ -15,8 +15,6 @@ import gc
 from typing import List, Dict, Any, Union
 import zarr
 
-from src.GeneralStep import FinalizingStepClass
-from src.Parameters import Parameters, DataContainer, ScopeClass, Settings, Experiment
 from source.NASConnection import NASConnection
 import tifffile
 import json
@@ -31,7 +29,7 @@ def close_h5_files():
             except OSError as e:
                 print(f"Could not close {obj.filename}: {e}")
 
-class Saving(FinalizingStepClass):
+class Saving:
     @abstractmethod
     def main(self, **kwargs):
         pass
@@ -64,15 +62,6 @@ def handle_dict(d):
 
 
 class Save_Outputs(Saving):
-    def run(self, p: int = None, t:int = None, data_container = None, parameters = None): # TODO confirm - local_dataset_location is where the h5_file is in the correct dataBase
-        data_container = DataContainer() if data_container is None else data_container
-        parameters = Parameters() if parameters is None else parameters
-        kwargs = self.load_in_parameters(p, t, parameters)
-        results = self.main(data_container, **kwargs) 
-        data_container.save_results(results, p, t, parameters)
-        data_container.load_temp_data()
-        return results
-
     def main(self, data, **kwargs):
         params = kwargs
 
@@ -194,20 +183,6 @@ class Save_Outputs(Saving):
 
 
 class Save_Parameters(Saving):
-    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
-        data_container = DataContainer() if data_container is None else data_container
-        parameters = Parameters() if parameters is None else parameters
-        
-        kwargs = self.load_in_parameters(p, t, parameters)
-        unwanted_keys = data_container.todict().keys()
-        for key in unwanted_keys:
-            if key not in ['local_dataset_location']:
-                kwargs.pop(key, None)
-        results = self.main(parameters, **kwargs) 
-        data_container.save_results(results, p, t, parameters)
-        data_container.load_temp_data()
-        return results
-    
     def main(self, parameters, **kwargs):
         def recursively_save_dict_contents_to_group(h5file, path, dic):
             for key, item in dic.items():

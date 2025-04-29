@@ -21,7 +21,7 @@ class Parameters:
         self.analysis_name = 'DEFAULT_NAME'
         self.number_of_cores = 4
         self.num_chunks_to_run = 100_000
-        self.connection_config_location = ''
+        self.connection_config_location = os.path.join(os.path.dirname(__file__), '..', 'config_nas.yml')
         self.display_plots = True
         self.load_in_mask = True
         self.order = 'pt'
@@ -36,7 +36,11 @@ class Parameters:
         self.timestep_s = None
 
     def to_json(self):
-        return json.dumps(self.load(), default=str)
+        non_default_values = {
+            key: value for key, value in self.__dict__.items()
+            if getattr(Parameters(), key, None) != value
+        }
+        return json.dumps(non_default_values, default=str)
 
     @classmethod
     def from_json(cls, json_str):
@@ -85,8 +89,6 @@ class Data:
         return self._ds
 
     def __getattr__(self, name):
-        # result = super().__getattr__(name)
-        
         if name in ['_zarr_path', '_ds', '_loaded']:
             return self.__dict__.get(name, None)
 
@@ -108,7 +110,6 @@ class Data:
     
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
-
         if name in ['_zarr_path', '_ds', '_loaded']:
             return
 
@@ -141,16 +142,17 @@ class Data:
 
     def append(self, newValues: dict):
         for k, v in newValues.items():
-            if isinstance(v, pd.DataFrame):
-                # Save as Parquet inside the Zarr directory
-                parquet_path = self._zarr_path / f"{k}.parquet"
-                if parquet_path.exists():
-                    # Read the existing DataFrame and concatenate
-                    existing_df = getattr(self, k)
-                    if existing_df is not None:
-                        v = pd.concat([existing_df, v], ignore_index=True)
+            if v is not None:
+                if isinstance(v, pd.DataFrame):
+                    # Save as Parquet inside the Zarr directory
+                    parquet_path = self._zarr_path / f"{k}.parquet"
+                    if parquet_path.exists():
+                        # Read the existing DataFrame and concatenate
+                        existing_df = getattr(self, k)
+                        if existing_df is not None:
+                            v = pd.concat([existing_df, v], ignore_index=True)
 
-            setattr(self, k, v)
+                setattr(self, k, v)
 
     def __str__(self):
         return f"Data(zarr_path={self._zarr_path}, loaded={self._loaded}, dataset_keys={list(self.__dict__.keys()) if self._ds else []})"

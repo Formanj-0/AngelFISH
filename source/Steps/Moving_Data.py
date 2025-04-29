@@ -12,14 +12,12 @@ import dask.array as da
 from datetime import datetime
 from abc import abstractmethod
 
-from src.GeneralStep import FinalizingStepClass
-from src.Parameters import Parameters, DataContainer
 from source.NASConnection import NASConnection
 
 
 
 #%% abstract class for moving data
-class Moving_Data(FinalizingStepClass):
+class Moving_Data:
     @abstractmethod
     def main(self, **kwargs):
         pass
@@ -59,19 +57,6 @@ class return_to_NAS(Moving_Data):
                             NASConnection(connection_config_location, share_name=share_name).write_folder_to_NAS(os.path.join(location, item), initial_data_location[i])
 
 class remove_local_data(Moving_Data):
-
-    def run(self, p: int = None, t:int = None, data_container = None, parameters = None):
-        data_container = DataContainer() if data_container is None else data_container
-        parameters = Parameters() if parameters is None else parameters
-        kwargs = self.load_in_parameters(p, t, parameters)
-        local_dataset_location = kwargs['local_dataset_location']
-        temp = kwargs['temp']
-        del kwargs
-        results = self.main(local_dataset_location, temp) 
-        data_container.save_results(results, p, t, parameters)
-        data_container.load_temp_data()
-        return results
-
     def main(self, local_dataset_location, temp, **kwargs):
         images = kwargs.get('images')
         del images

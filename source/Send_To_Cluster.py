@@ -26,16 +26,16 @@ def send_file_and_run_on_cluster(remote_path: str, local_file: str, args=None, p
     ssh.connect(remote_address, port, usr, pwd)
 
     # Remote path to file with all directories
-    remote_path = os.path.join(remote_path, os.path.basename(local_file))
-    remote_path = remote_path.replace('\\', '/')
+    remote_file_path = os.path.join(remote_path, os.path.basename(local_file))
+    remote_file_path = remote_file_path.replace('\\', '/')
 
     # Transfer the file
     sftp = ssh.open_sftp()
-    sftp.put(local_file, remote_path)
+    sftp.put(local_file, remote_file_path)
     sftp.close()
 
     # Command to execute the batch script
-    sbatch_command = f'sbatch runner_pipeline.sh {remote_path} {args} /dev/null 2>&1 & disown'
+    sbatch_command = f'sbatch runner_pipeline.sh {remote_file_path} {args} /dev/null 2>&1 & disown'
 
     # Execute the command on the cluster
     # Combine commands to change directory and execute the batch script

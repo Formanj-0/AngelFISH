@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 # from src import IndependentStepClass, DataContainer
 # from src.Parameters import Parameters
-# from src.NASConnection import NASConnection
+from source.NASConnection import NASConnection
 
 
 
@@ -141,9 +141,9 @@ class DataTypeBridge_Dataset: # (IndependentStepClass):
         for location in locations:
             mask_path = [f for f in os.listdir(location) if 'mask' in f]
             if len(mask_path) == 1:
-                tifs = [f for f in os.listdir(mask_path[0])]
+                tifs = [f for f in os.listdir(os.path.join(location, mask_path[0]))]
                 for tif in tifs:
-                    tif_path = os.path.join(location, tif)
+                    tif_path = os.path.join(location, mask_path[0], tif)
                     if os.path.splitext(tif)[0] not in mask_locations.keys():
                         mask_locations[os.path.splitext(tif)[0]] = []
                     mask_locations[os.path.splitext(tif)[0]].append(tif_path)

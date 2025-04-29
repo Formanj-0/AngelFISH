@@ -17,11 +17,11 @@ from abc import abstractmethod
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src import SequentialStepsClass, IndependentStepClass
-from src.Parameters import Parameters
+# from src import SequentialStepsClass, IndependentStepClass
+# from src.Parameters import Parameters
 
 #%% Abstract Class
-class SpotDetection(SequentialStepsClass):
+class SpotDetection:
     def main(self, image, nuc_mask, cell_mask, nucChannel, cytoChannel, FISHChannel, timepoint, fov, verbose, display_plots,
              voxel_size_yx, voxel_size_z, spot_yx, spot_z, **kwargs):
         for c in range(len(FISHChannel)):
@@ -57,7 +57,7 @@ class SpotDetection(SequentialStepsClass):
     def extract_cell_level_results(self, image, spots, clusters, nucChannel, FISHChannel, 
                                    nuc_mask, cell_mask, timepoint, fov,
                                     verbose, display_plots) -> pd.DataFrame:
-        if ((nuc_mask is not None and nuc_mask.max() != 0) or (cell_mask is not None and cell_mask.max() != 0)):
+        if ((nuc_mask is not None and np.max(nuc_mask) != 0) or (cell_mask is not None and np.max(cell_mask) != 0)):
             #### Extract cell level results
             if nucChannel is not None:
                 nuc = image[nucChannel, :, :, :].squeeze()
@@ -690,7 +690,7 @@ class BIGFISH_SpotDetection(SpotDetection):
             return df_spotresults, df_clusterresults
 
 
-class UFISH_SpotDetection_Step(SequentialStepsClass):
+class UFISH_SpotDetection_Step:
     def __init__(self):
         super().__init__()
 
@@ -714,7 +714,7 @@ class UFISH_SpotDetection_Step(SequentialStepsClass):
             plt.show()
 
 
-class TrackPy_SpotDetection(SequentialStepsClass):
+class TrackPy_SpotDetection:
     def __init__(self):
         super().__init__()
 
@@ -857,7 +857,7 @@ class TrackPy_SpotDetection(SequentialStepsClass):
         return output
 
 #%% Axilary Steps
-class Calculate_BIGFISH_Threshold(IndependentStepClass):
+class Calculate_BIGFISH_Threshold:
     def __init__(self):
         super().__init__()
 
@@ -906,7 +906,7 @@ class Calculate_BIGFISH_Threshold(IndependentStepClass):
         return {'bigfish_threshold': thresholds}
 
 
-class Automatic_BIGFISH_Threshold(IndependentStepClass):
+class Automatic_BIGFISH_Threshold:
         def __init__(self):
             super().__init__()
 
@@ -1036,7 +1036,7 @@ class Automatic_BIGFISH_Threshold(IndependentStepClass):
             return threshold
 
 #%% Masking
-class DetectedSpot_Mask(SequentialStepsClass):
+class DetectedSpot_Mask:
     def __init__(self):
         super().__init__()
     
@@ -1049,7 +1049,7 @@ class DetectedSpot_Mask(SequentialStepsClass):
             except:
                 pass
         
-        New_Parameters({'masks': masks})
+            
         
 
         
