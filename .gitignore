@@ -38,3 +38,6 @@ src/SequentialSteps/__pycache__/CellProperty_Step.cpython-312.pyc
 /source/Test_Steps
 /source/Testing_Zarr_Data
 /dataBases
+/Demos/Demo_Pipeline
+config_cluster.yml
+config_nas.yml
