@@ -31,3 +31,5 @@ Desktop.ini
 /Demos 2
 Publications/Ron_2024/.DS_Store
 *.csv
+
+dev/tmp*/
