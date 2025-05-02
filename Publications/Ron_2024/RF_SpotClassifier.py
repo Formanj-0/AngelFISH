@@ -3,11 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import log_loss
 import os
 import glob
+import joblib
 
 class ManualLabeler:
-    def __init__(self, crops_path, meta_path, meta_df, output_path=None):
+    def __init__(self, crops_path, meta_path, meta_df, output_path=None, model=None):
         self.crops = np.load(crops_path)
         self.meta = meta_df.copy()
         self.meta_path = meta_path
@@ -16,6 +18,11 @@ class ManualLabeler:
 
         if "manual_label" not in self.meta.columns:
             self.meta["manual_label"] = np.nan
+
+        self.model = None
+        if model and os.path.exists(model):
+            self.model = joblib.load(model)
+            print(f"Loaded pre-trained model from: {model}")
 
         self.batch_size = 25
         self.fig, self.axes = None, None
@@ -98,9 +105,29 @@ class ManualLabeler:
 
         unlabeled_df = self.meta[self.meta['manual_label'].isna()]
         indices = unlabeled_df.index[:self.batch_size]
+        if len(indices) == 0:
+            print("No unlabeled crops left to predict.")
+            return
+
         X_pred = self.get_feature_matrix(unlabeled_df.loc[indices])
+        if X_pred.empty:
+            print("No valid numeric features found to predict.")
+            return
+
         preds = clf.predict(X_pred)
         self.meta.loc[indices, 'rf_prediction'] = preds
+
+    def show_training_progress(self, clf):
+        labeled_df = self.meta[self.meta['manual_label'].notna()]
+        if labeled_df.empty or clf is None:
+            print("No training progress to show.")
+            return
+
+        X = self.get_feature_matrix(labeled_df)
+        y_true = labeled_df['manual_label']
+        y_proba = clf.predict_proba(X)
+        loss = log_loss(y_true, y_proba)
+        print(f"Log loss on current labeled data: {loss:.4f}")
 
 class ClassifierLoop:
     def __init__(self, directory):
@@ -133,33 +160,38 @@ class ClassifierLoop:
         if labeled_df.empty:
             print("No labeled data available to train.")
             return None
+
         features = labeled_df.drop(columns=['manual_label', 'rf_prediction', 'source_file'], errors='ignore')
         X = features.select_dtypes(include=[np.number])
         y = labeled_df['manual_label']
+
         clf = RandomForestClassifier(n_estimators=100, random_state=42)
         clf.fit(X, y)
         print("Trained global Random Forest on", len(X), "samples")
+
+        joblib.dump(clf, os.path.join(self.directory, "global_random_forest.pkl"))
+
         return clf
 
-    def run(self):
+    def run(self, model_path=None):
         for i, (crops_path, meta_path) in enumerate(self.pairs):
             print(f"\nReplica {i+1}/{len(self.pairs)}: {os.path.basename(meta_path)}")
             replica_df = pd.read_csv(meta_path)
-            labeler = ManualLabeler(crops_path, meta_path, replica_df)
+            labeler = ManualLabeler(crops_path, meta_path, replica_df, model=model_path)
 
             while True:
                 clf = self.train_global_random_forest()
                 labeler.apply_predictions(clf)
                 labeler.show_batch_with_predictions()
+                labeler.show_training_progress(clf)
 
                 input("Done labeling this batch? Press ENTER to save and continue...")
                 labeler.save_current_labels()
 
-                # Update the global meta with new labels
                 updated_df = pd.read_csv(meta_path)
                 updated_df['source_file'] = meta_path
                 self.global_meta = pd.concat(
-                    [df for df in self.global_meta[self.global_meta['source_file'] != meta_path]] + [updated_df],
+                    [self.global_meta[self.global_meta['source_file'] != meta_path], updated_df],
                     ignore_index=True
                 )
 
@@ -175,5 +207,6 @@ if __name__ == '__main__':
     parser.add_argument('--dir', required=True, help="Path to directory with .npy and .csv files")
     args = parser.parse_args()
 
+    model_path = os.path.join(args.dir, "global_random_forest.pkl")
     loop = ClassifierLoop(args.dir)
-    loop.run()
+    loop.run(model_path=model_path)
