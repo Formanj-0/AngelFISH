@@ -38,6 +38,8 @@ from skimage import exposure
 import matplotlib.colors as mcolors
 from skimage.measure import find_contours
 from tqdm import tqdm
+import joblib
+from sklearn.ensemble import RandomForestClassifier
 
 #############################
 # DUSP1AnalysisManager Class
@@ -452,11 +454,34 @@ class DUSP1Measurement:
       - Metadata (time, Dex concentration, replica, FOV, etc.).
     """
 
-    def __init__(self, spots: pd.DataFrame, clusters: pd.DataFrame, cellprops: pd.DataFrame):
+    def __init__(
+        self,
+        spots: pd.DataFrame,
+        clusters: pd.DataFrame,
+        cellprops: pd.DataFrame,
+        model: Union[str, RandomForestClassifier] = None
+    ):
         self.spots = spots.copy()
         self.clusters = clusters.copy()
         self.cellprops = cellprops.copy()
-    
+
+        # Optional Random Forest classifier:
+        # - If you pass in an estimator, just grab it
+        # - If you pass in a path, try to load it
+        self.clf = None
+        if isinstance(model, RandomForestClassifier):
+            self.clf = model
+            print("Using provided RandomForestClassifier instance.")
+        elif isinstance(model, str):
+            if os.path.isfile(model):
+                try:
+                    self.clf = joblib.load(model)
+                    print(f"Loaded RF model from: {model}")
+                except Exception as e:
+                    print(f"Warning: could not load model at {model}: {e}")
+            else:
+                print(f"Model file not found at: {model}. Continuing without RF.")    
+
     @staticmethod
     def second_largest(series):
         """Return the second-largest unique value in the series; if not available, return 0."""
@@ -481,7 +506,20 @@ class DUSP1Measurement:
           
         Other cell-level metrics (from clusters and cellprops) are also included.
         """
-        
+        # — Predict on every spot, regardless of manual_label —
+        # — RF prediction on all spots, using exactly the features the model expects —
+        if getattr(self, 'clf', None) is not None:
+            feature_names = list(self.clf.feature_names_in_)
+            # build X_rf with the right columns in the right order
+            X_rf = pd.DataFrame(
+                {f: (self.spots[f] if f in self.spots.columns 
+                    else np.zeros(len(self.spots), dtype=float))
+                for f in feature_names},
+                index=self.spots.index
+            )
+            # now run predict
+            self.spots['rf_prediction'] = self.clf.predict(X_rf)
+
         # --- Aggregate to Cell-Level Metrics ---
         # Sort dataframes by unique_cell_id for consistent aggregation.
         self.spots = self.spots.sort_values(by='unique_cell_id')
@@ -516,13 +554,28 @@ class DUSP1Measurement:
                               .apply(DUSP1Measurement.second_largest).reindex(cell_ids, fill_value=0)
         num_spots_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
 
-        # For example, the following are left from your original design:
+        # Left from original method:
         num_spots = self.spots.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
         num_nuc_spots = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id').size()\
                             .reindex(cell_ids, fill_value=0)
         num_cyto_spots = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id').size()\
                              .reindex(cell_ids, fill_value=0)
         
+        # Random Forest prediction count:
+        if 'rf_prediction' in self.spots.columns:
+            RF_count = self.spots.groupby('unique_cell_id')['rf_prediction'] \
+                                .sum().reindex(cell_ids, fill_value=0)
+            nuc_RF_count = self.spots[self.spots['is_nuc'] == 1] \
+                                .groupby('unique_cell_id')['rf_prediction'] \
+                                .sum().reindex(cell_ids, fill_value=0)
+            cyto_RF_count = self.spots[self.spots['is_nuc'] == 0] \
+                                .groupby('unique_cell_id')['rf_prediction'] \
+                                .sum().reindex(cell_ids, fill_value=0)
+        else:
+            RF_count = pd.Series(index=cell_ids, data=np.nan)
+            nuc_RF_count = pd.Series(index=cell_ids, data=np.nan)
+            cyto_RF_count = pd.Series(index=cell_ids, data=np.nan)
+
         # Other cell properties from props:
         nuc_area = self.cellprops['nuc_area']
         cyto_area = self.cellprops['cyto_area']
@@ -550,6 +603,9 @@ class DUSP1Measurement:
             'MG_count': mg_count.values,
             'nuc_MG_count': nuc_mg_count.values,
             'cyto_MG_count': cyto_mg_count.values,
+            'RF_count': RF_count.values,
+            'nuc_RF_count': nuc_RF_count.values,
+            'cyto_RF_count': cyto_RF_count.values,
             'num_spots': num_spots.values,
             'num_nuc_spots': num_nuc_spots.values,
             'num_cyto_spots': num_cyto_spots.values,
@@ -595,144 +651,137 @@ class DUSP1_filtering:
     
     For the spots DataFrame:
       - Optionally removes spots that belong to partial cells (if a results DataFrame is provided).
-      - Selects the method-specific spot columns.
+      - Selects the method‐specific spot columns, or for 'all' returns per‐method keep/remove flags.
     """
-    
     def __init__(self, method: str = 'MG'):
-        # Normalize method to lowercase for consistency.
         self.method = method.lower()
 
     def apply(self, results: pd.DataFrame) -> pd.DataFrame:
-        """
-        Filter a results DataFrame:
-         - Remove partial cells using the 'touching_border' column.
-         - Select method-specific quantification columns plus common columns.
-        """
-        # Filter out partial cells.
-        filtered = results[results['touching_border'] == False].copy()
-        
-        # Define method-specific columns for results.
+        # drop partial cells
+        filtered = results.loc[results['touching_border'] == False].copy()
+
+        # define count‐column groups
         method_columns = {
-            'weighted': ['weighted_count', 'nuc_weighted_count', 'cyto_weighted_count'],
-            'absolute': ['absolute_count', 'nuc_absolute_count', 'cyto_absolute_count'],
-            'mg': ['MG_count', 'nuc_MG_count', 'cyto_MG_count'],
-            'none': ['num_spots', 'num_nuc_spots', 'num_cyto_spots']
+            'weighted': ['weighted_count',   'nuc_weighted_count',   'cyto_weighted_count'],
+            'absolute': ['absolute_count',   'nuc_absolute_count',   'cyto_absolute_count'],
+            'mg':       ['MG_count',         'nuc_MG_count',         'cyto_MG_count'],
+            'rf':       ['RF_count',         'nuc_RF_count',         'cyto_RF_count'],
+            'none':     ['num_spots',        'num_nuc_spots',        'num_cyto_spots'],
         }
-        
+        # union of all above for 'all'
+        method_columns['all'] = (
+            method_columns['mg']
+            + method_columns['absolute']
+            + method_columns['weighted']
+            + method_columns['rf']
+            + method_columns['none']
+        )
+
         if self.method not in method_columns:
-            raise ValueError("Invalid method. Choose from 'weighted', 'absolute', 'mg', 'none'.")
-        
-        # Define common columns to keep (note: include 'touching_border').
+            raise ValueError("Invalid method. Choose from 'weighted','absolute','mg','rf','none','all'.")
+
         common_columns = [
-            'unique_cell_id', 'touching_border', 'num_ts', 'num_foci', 'num_spots_foci', 'num_spots_ts',
-            'largest_ts', 'second_largest_ts', 'nuc_area_px', 'cyto_area_px',
-            'avg_nuc_int', 'avg_cyto_int', 'avg_cell_int', 'std_cell_int',
-            'time', 'dex_conc', 'replica', 'fov', 'nas_location', 'h5_idx'
+            'unique_cell_id', 'touching_border', 'num_ts', 'num_foci',
+            'num_spots_foci', 'num_spots_ts', 'largest_ts', 'second_largest_ts',
+            'nuc_area_px', 'cyto_area_px', 'avg_nuc_int', 'avg_cyto_int',
+            'avg_cell_int', 'std_cell_int', 'time', 'dex_conc',
+            'replica', 'fov', 'nas_location', 'h5_idx'
         ]
-        
-        # Combine columns: start with 'unique_cell_id' and 'touching_border', then add method-specific,
-        # and finally add the rest of the common columns (avoiding duplicates).
-        columns_to_keep = ['unique_cell_id', 'touching_border'] + \
-                          method_columns[self.method] + \
-                          [col for col in common_columns if col not in ['unique_cell_id', 'touching_border']]
-        filtered = filtered[columns_to_keep]
-        return filtered
 
-    def apply_spots(self, spots: pd.DataFrame = None, results: pd.DataFrame = None, method: str = None) -> tuple:
-        """
-        Filter a spots DataFrame based on the method and remove partial cells.
-        
-        Parameters:
-        spots (pd.DataFrame): Spots DataFrame. It must contain at least the following columns:
-            'unique_cell_id', 'MG_pass', 'absolute', 'weighted', plus additional columns.
-        results (pd.DataFrame): Results DataFrame used to remove partial cells. It must contain:
-            'touching_border' and 'unique_cell_id'.
-        method (str): The method to filter by. Options are 'mg', 'absolute', 'weighted', or 'none'.
-                        If 'mg' is provided, filtered spots are rows where MG_pass is True, etc.
-        
-        Returns:
-        tuple: (filtered_spots, removed_spots)
-            Both DataFrames contain exactly these columns:
-            'z_px', 'y_px', 'x_px', 'is_nuc', 'cluster_index',
-            'cell_label', 'snr', 'signal', 'fov',
-            'FISH_Channel', 'condition', 'replica', 'time', 'Dex_Conc',
-            'NAS_location', 'h5_idx', 'unique_spot_id', 'unique_cell_id',
-            'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0',
-            'nuc_intensity_std-0', 'cyto_intensity_mean-0', 'cyto_intensity_std-0',
-            'MG_SNR'
-        """
+        # build and validate final column list
+        cols = (
+            ['unique_cell_id', 'touching_border']
+            + method_columns[self.method]
+            + [c for c in common_columns if c not in ('unique_cell_id','touching_border')]
+        )
+        cols = [c for c in cols if c in filtered.columns]
+        return filtered[cols]
+
+    def apply_spots(
+        self,
+        spots: pd.DataFrame,
+        results: pd.DataFrame = None,
+        method: str = None
+    ) -> tuple:
+        method = (method or self.method).lower()
+
+        # desired metadata columns for downstream use
         desired_columns = [
-            'z_px', 'y_px', 'x_px', 'is_nuc', 'cluster_index',
-            'cell_label', 'snr', 'signal', 'fov',
-            'FISH_Channel', 'condition', 'replica', 'time', 'Dex_Conc',
-            'NAS_location', 'h5_idx', 'unique_spot_id', 'unique_cell_id',
-            'cell_intensity_mean-0', 'cell_intensity_std-0', 'nuc_intensity_mean-0',
-            'nuc_intensity_std-0', 'cyto_intensity_mean-0', 'cyto_intensity_std-0',
-            'MG_SNR'
+            'z_px','y_px','x_px','is_nuc','cluster_index',
+            'cell_label','snr','signal','fov','FISH_Channel',
+            'condition','replica','time','Dex_Conc','NAS_location',
+            'h5_idx','unique_spot_id','unique_cell_id',
+            'cell_intensity_mean-0','cell_intensity_std-0',
+            'nuc_intensity_mean-0','nuc_intensity_std-0',
+            'cyto_intensity_mean-0','cyto_intensity_std-0',
+            'MG_SNR','rf_prediction'
         ]
-        
-        # If no method is provided, use the instance's method.
-        if method is None:
-            method = self.method
-        method = method.lower()
-        
-        # Use results to remove partial cells.
-        if results is not None:
-            if 'touching_border' not in results.columns or 'unique_cell_id' not in results.columns:
-                raise ValueError("The provided results DataFrame must contain 'touching_border' and 'unique_cell_id' columns.")
-            valid_ids = results.loc[results['touching_border'] == False, 'unique_cell_id'].unique()
-            spots = spots[spots['unique_cell_id'].isin(valid_ids)]
-        
-        # For method 'none', return the full spots DataFrame as filtered and an empty DataFrame for removed.
-        if method == 'none':
-            filtered = spots.copy()
-            removed = pd.DataFrame(columns=desired_columns)
-        else:
-            # Create a condition based on the method.
-            if method == 'mg':
-                condition = spots['MG_pass'] == True
-            elif method == 'absolute':
-                condition = spots['absolute'] == True
-            elif method == 'weighted':
-                condition = spots['weighted'] == True
-            else:
-                raise ValueError("Invalid method. Choose from 'mg', 'absolute', 'weighted', or 'none'.")
-            
-            filtered = spots[condition].copy()
-            removed = spots[~condition].copy()
-        
-        # Rename the column names to match the original dataframes based on the method
-        if method == 'mg':
-            spots.rename(columns={
-            "MG_count": "num_spots",
-            "nuc_MG_count": "num_nuc_spots",
-            "cyto_MG_count": "num_cyto_spots"
-            }, inplace=True)
-        elif method == 'absolute':
-            spots.rename(columns={
-            "absolute_count": "num_spots",
-            "nuc_absolute_count": "num_nuc_spots",
-            "cyto_absolute_count": "num_cyto_spots"
-            }, inplace=True)
-        elif method == 'weighted':
-            spots.rename(columns={
-            "weighted_count": "num_spots",
-            "nuc_weighted_count": "num_nuc_spots",
-            "cyto_weighted_count": "num_cyto_spots"
-            }, inplace=True)
 
-        # Subset both DataFrames to the desired columns.
-        filtered = filtered[[col for col in desired_columns if col in filtered.columns]]
-        removed = removed[[col for col in desired_columns if col in removed.columns]]
-        
+        # 1) if results provided, drop spots from partial cells
+        if results is not None:
+            valid = results.loc[results['touching_border'] == False, 'unique_cell_id']
+            spots = spots[spots['unique_cell_id'].isin(valid)].copy()
+
+        # 2) compute per-method keep flags
+        spots['keep_mg']       = spots.get('MG_pass', False).astype(bool)
+        spots['keep_absolute'] = spots.get('absolute', False).astype(bool)
+        spots['keep_weighted'] = spots.get('weighted', False).astype(bool)
+        spots['keep_rf']       = spots.get('rf_prediction', 0).astype(bool)
+
+        # 3) compute remove flags
+        spots['remove_mg']       = ~spots['keep_mg']
+        spots['remove_absolute'] = ~spots['keep_absolute']
+        spots['remove_weighted'] = ~spots['keep_weighted']
+        spots['remove_rf']       = ~spots['keep_rf']
+
+        # 4) handle 'all': return full spots + remove_* flags only
+        if method == 'all':
+            filtered = spots.copy()
+            removed  = spots[['remove_mg','remove_absolute','remove_weighted','remove_rf']].copy()
+            return filtered, removed
+
+        # 5) otherwise build boolean mask for the chosen method
+        if method == 'mg':
+            mask = spots['keep_mg']
+        elif method == 'absolute':
+            mask = spots['keep_absolute']
+        elif method == 'weighted':
+            mask = spots['keep_weighted']
+        elif method == 'rf':
+            mask = spots['keep_rf']
+        elif method == 'none':
+            mask = pd.Series(True, index=spots.index)
+        else:
+            raise ValueError("Invalid method. Choose from 'mg','absolute','weighted','rf','none','all'.")
+
+        filtered = spots[mask].copy()
+        removed  = spots[~mask].copy()
+
+        # 6) rename method-specific counts to unified names
+        rename_map = {
+            'mg':       {"MG_count":"num_spots","nuc_MG_count":"num_nuc_spots","cyto_MG_count":"num_cyto_spots"},
+            'absolute': {"absolute_count":"num_spots","nuc_absolute_count":"num_nuc_spots","cyto_absolute_count":"num_cyto_spots"},
+            'weighted': {"weighted_count":"num_spots","nuc_weighted_count":"num_nuc_spots","cyto_weighted_count":"num_cyto_spots"},
+            'rf':       {"RF_count":"num_spots","nuc_RF_count":"num_nuc_spots","cyto_RF_count":"num_cyto_spots"},
+            'none':     {"num_spots":"num_spots","num_nuc_spots":"num_nuc_spots","num_cyto_spots":"num_cyto_spots"},
+            'all':      {}
+        }
+        if rename_map.get(method):
+            filtered.rename(columns=rename_map[method], inplace=True)
+            removed.rename(columns=rename_map[method], inplace=True)
+
+        # 7) subset to desired_columns
+        filtered = filtered[[c for c in desired_columns if c in filtered.columns]]
+        removed  = removed[[c for c in desired_columns if c in removed.columns]]
+
         return filtered, removed
-    
+
     def remove_partial_cells(self, clusters: pd.DataFrame, cellprops: pd.DataFrame) -> tuple:
-        """Remove partial cells from the clusters and cellprops DataFrames."""
-        partial_cells = cellprops[cellprops['touching_border'] == True]['unique_cell_id']
-        filtered_clusters = clusters[~clusters['unique_cell_id'].isin(partial_cells)]
-        filtered_cellprops = cellprops[~cellprops['unique_cell_id'].isin(partial_cells)]
-        return filtered_clusters, filtered_cellprops
+        pcs = cellprops.loc[cellprops['touching_border'] == True, 'unique_cell_id']
+        return (
+            clusters.loc[~clusters['unique_cell_id'].isin(pcs)].copy(),
+            cellprops.loc[~cellprops['unique_cell_id'].isin(pcs)].copy()
+        )
     
 #############################
 # DisplayManager Class
@@ -1554,10 +1603,9 @@ class SpotCropSampler:
         return pd.concat(picks).drop_duplicates().reset_index(drop=True)
 
     def _crop_spots_in_cell(
-        self, raw_2d, h5_idx, fov, cell_id,
+        self, raw_3d, h5_idx, fov, cell_id,
         display, save, save_dir, pad=3, max_spots=20
     ):
-        """7×7 spot crops with balanced MG_pass, two‐panel display & metadata."""
         sdf = self.spots[
             (self.spots.h5_idx == h5_idx) &
             (self.spots.fov    == fov) &
@@ -1566,54 +1614,66 @@ class SpotCropSampler:
         if sdf.empty:
             return []
 
-        # balance MG_pass
-        passes = sdf[sdf.MG_pass]
-        fails  = sdf[~sdf.MG_pass]
-        n_fail = min(max_spots//2, len(fails))
-        n_pass = min(max_spots - n_fail, len(passes))
-        parts = []
-        if n_pass: parts.append(passes.sample(n_pass))
-        if n_fail: parts.append(fails.sample(n_fail))
-        sdf = pd.concat(parts).sample(frac=1).reset_index(drop=True)
+        # --- Define categories ---
+        likely_true = sdf[sdf['MG_pass']]
+        fail_and_abs = sdf[~sdf['MG_pass'] & sdf.get('absolute', False)]
+        mg_underestimates_snr = sdf[~sdf['MG_pass'] & (sdf.get('snr_vs_mg', 0) < 0)]
+        confirmed_negatives = sdf[~sdf['MG_pass'] & (sdf.get('snr_vs_mg', 0) > 0)]
 
-        # precompute cell‐level patch if displaying
-        if display > 0:
-            cdf = self.cellprops[
-                (self.cellprops.h5_idx == h5_idx) &
-                (self.cellprops.fov    == fov) &
-                (self.cellprops.unique_cell_id == cell_id)
-            ]
-            if not cdf.empty:
-                r0, c0, r1, c1 = map(int, cdf.iloc[0][[
-                    'cell_bbox-0','cell_bbox-1','cell_bbox-2','cell_bbox-3'
-                ]])
-                cell_patch = raw_2d[r0:r1, c0:c1]
-                p1, p99 = np.percentile(cell_patch, (1,99))
-                cell_patch = exposure.rescale_intensity(
-                    cell_patch,in_range=(p1,p99),out_range=(0,1))
-                mg_spots = self.spots[
-                    (self.spots.h5_idx==h5_idx)&
-                    (self.spots.fov   ==fov)&
-                    (self.spots.unique_cell_id==cell_id)&
-                    (self.spots.MG_pass)
-                ]
-            else:
-                display = 0
+        # --- Prioritized sampling ---
+        parts = []
+        used_ids = set()
+
+        def sample_unique(df, n):
+            df = df[~df['unique_spot_id'].isin(used_ids)]
+            s = df.sample(n=min(n, len(df)))
+            used_ids.update(s['unique_spot_id'])
+            return s
+
+        # Try to get at least half from interesting negatives (false negatives or MG underestimations)
+        n_interesting = max_spots * 3 // 5
+        n_fail_and_abs = int(n_interesting * 0.5)
+        n_underestimates = n_interesting - n_fail_and_abs
+
+        if not fail_and_abs.empty:
+            parts.append(sample_unique(fail_and_abs, n_fail_and_abs))
+        if not mg_underestimates_snr.empty:
+            parts.append(sample_unique(mg_underestimates_snr, n_underestimates))
+
+        # Then get likely true positives
+        remaining = max_spots - sum(len(p) for p in parts)
+        if not likely_true.empty and remaining > 0:
+            parts.append(sample_unique(likely_true, remaining))
+
+        # Fill remainder with confirmed negatives (e.g., to train against true negatives)
+        remaining = max_spots - sum(len(p) for p in parts)
+        if not confirmed_negatives.empty and remaining > 0:
+            parts.append(sample_unique(confirmed_negatives, remaining))
+
+        # Final set
+        if parts:
+            sdf = pd.concat(parts).drop_duplicates('unique_spot_id').sample(frac=1).reset_index(drop=True)
+        else:
+            return []
 
         crops_info = []
-        H, W = raw_2d.shape
+        Z, H, W = raw_3d.shape
 
         for _, spot in sdf.iterrows():
-            x0, y0 = int(spot.x_px), int(spot.y_px)
+            x0, y0, z0 = int(spot.x_px), int(spot.y_px), int(spot.z_px)
             x1, x2 = x0-pad, x0+pad+1
             y1, y2 = y0-pad, y0+pad+1
+            z1, z2 = max(z0 - 2, 0), min(z0 + 3, Z)
+
             if x1<0 or y1<0 or x2>W or y2>H:
                 continue
 
-            patch = raw_2d[y1:y2, x1:x2]
-            if patch.shape != (2*pad+1,2*pad+1):
+            patch_3d = raw_3d[z1:z2, y1:y2, x1:x2]
+            if patch_3d.shape[1:] != (2*pad+1, 2*pad+1) or patch_3d.shape[0] < 1:
                 continue
-            p1,p99 = np.percentile(patch,(1,99))
+
+            patch = np.max(patch_3d, axis=0)
+            p1, p99 = np.percentile(patch, (1,99))
             patch = exposure.rescale_intensity(patch, in_range=(p1,p99), out_range=(0,1))
 
             # metadata counts
@@ -1650,7 +1710,7 @@ class SpotCropSampler:
                 'unique_spot_id':    spot['unique_spot_id'],
                 'cluster_index':     spot['cluster_index'],
                 'time':             spot['time'],
-                'Dex_conc':        spot['Dex_conc'],
+                'Dex_conc':        spot['Dex_Conc'],
                 'is_nuc':            spot['is_nuc'],
                 'signal':           spot['signal'],
                 'snr':               spot['snr'],
@@ -1676,12 +1736,35 @@ class SpotCropSampler:
                 'mg less than snr': spot['mg_lt_snr'],
             }
 
+        # Precompute full-cell patch from max-projection for display
+        if display > 0:
+            cdf = self.cellprops[
+                (self.cellprops.h5_idx == h5_idx) &
+                (self.cellprops.fov    == fov) &
+                (self.cellprops.unique_cell_id == cell_id)
+            ]
+            if not cdf.empty:
+                r0, c0, r1, c1 = map(int, cdf.iloc[0][[
+                    'cell_bbox-0','cell_bbox-1','cell_bbox-2','cell_bbox-3'
+                ]])
+                # Project full 3D image for display of whole cell
+                full_proj = np.max(raw_3d, axis=0)
+                cell_patch = full_proj[r0:r1, c0:c1]
+                p1, p99 = np.percentile(cell_patch, (1,99))
+                cell_patch = exposure.rescale_intensity(
+                    cell_patch, in_range=(p1, p99), out_range=(0, 1)
+                )
+            else:
+                display = 0
+
+        # Loop over selected spots
+        for _, spot in sdf.iterrows():
+
             if display > 0:
                 fig, (axC, axP) = plt.subplots(1, 2, figsize=(10, 5))
 
                 # --- LEFT: whole-cell patch, gold = MG_pass, blue = chosen spot ---
                 axC.imshow(cell_patch, cmap='gray')
-                # gold circles for MG_pass spots
                 mg_spots = self.spots[
                     (self.spots.h5_idx == h5_idx) &
                     (self.spots.fov    == fov) &
@@ -1694,36 +1777,31 @@ class SpotCropSampler:
                         circle = plt.Circle((rx, ry), 2, edgecolor='gold', facecolor='none', linewidth=1)
                         axC.add_patch(circle)
 
-                # blue circle for the chosen spot (spot.x_px, spot.y_px)
                 rx0, ry0 = x0 - c0, y0 - r0
-                circle = plt.Circle((rx0, ry0), 3, edgecolor='blue', facecolor='none', linewidth=2)
+                circle = plt.Circle((rx0, ry0), 2, edgecolor='blue', facecolor='none', linewidth=2)
                 axC.add_patch(circle)
-                axC.set_title(f"Cell {cell_id}") 
+                axC.set_title(f"Cell {cell_id} (max Z-projection)")
                 axC.axis('off')
 
-                # --- RIGHT: 7×7 crop, gold = any neighbor, center colored for this spot ---
+                # --- RIGHT: 7×7 crop from 5-slice Z projection ---
                 axP.imshow(patch, cmap='gray')
-
-                # draw other spots in gold
                 for _, s2 in others.iterrows():
                     rx, ry = s2.x_px - x1, s2.y_px - y1
                     if (rx, ry) != (pad, pad):
                         circle = plt.Circle((rx, ry), 1, edgecolor='gold', facecolor='none', linewidth=1)
                         axP.add_patch(circle)
 
-                # pick center color
                 center_col = 'blue'
                 if spot.cluster_index in ts['cluster_index'].values:
                     center_col = 'magenta'
                 elif spot.cluster_index in foci['cluster_index'].values:
                     center_col = 'cyan'
 
-                # draw center circle
-                circle = plt.Circle((pad, pad), pad, edgecolor=center_col, facecolor='none', linewidth=2)
+                circle = plt.Circle((rx0, ry0), 2, edgecolor=center_col, facecolor='none', linewidth=2)
                 axP.add_patch(circle)
 
                 axP.set_title(
-                    f"spot {spot.unique_spot_id}\n"
+                    f"Spot {spot.unique_spot_id} (5-slice Z-max)\n"
                     f"MG_SNR={spot.MG_SNR:.2f}, SNR={spot.snr:.2f}\n"
                     f"{meta['num_spots_in_crop']} spots in patch"
                 )
@@ -1734,10 +1812,10 @@ class SpotCropSampler:
                 display -= 1
 
             if save and save_dir:
-                fn=f"crop_h5{h5_idx}_f{fov}_c{cell_id}_s{spot.unique_spot_id}.npy"
-                np.save(os.path.join(save_dir,fn),patch)
+                fn = f"crop_h5{h5_idx}_f{fov}_c{cell_id}_s{spot.unique_spot_id}.npy"
+                np.save(os.path.join(save_dir, fn), patch)
 
-            crops_info.append({'crop':patch,'meta':meta})
+            crops_info.append({'crop': patch, 'meta': meta})
 
         return crops_info
 
@@ -1755,28 +1833,29 @@ class SpotCropSampler:
     ):
         """
         Main entry:
-          - load & project spotChannel
-          - select cells
-          - crop spots
-          - optional per‐spot saving
-          - optional summary saving
+        - load & project spotChannel
+        - select cells
+        - crop spots using 5-slice Z max projection
+        - optional per‐spot saving
+        - optional summary saving
         Returns:
-          crops, meta  (lists of patches and dicts)
+        crops, meta  (lists of patches and dicts)
         """
         os.makedirs(save_dir, exist_ok=True)
         all_crops, all_meta = [], []
 
         for h5_idx in tqdm(sorted(self.spots.h5_idx.unique()), desc="h5_idx"):
             imgs, msks, _, fov = self.get_images_and_masks(h5_idx=h5_idx)
-            arr3d  = imgs[spotChannel]
-            raw_2d = np.max(arr3d, axis=0)
-            p1, p99 = np.percentile(raw_2d, (1, 99))
-            raw_2d = exposure.rescale_intensity(raw_2d, in_range=(p1, p99), out_range=(0, 1))
+            raw_3d = imgs[spotChannel]  # (Z, Y, X)
+            proj_2d = np.max(raw_3d, axis=0)
+            p1, p99 = np.percentile(proj_2d, (1, 99))
+            proj_2d = exposure.rescale_intensity(proj_2d, in_range=(p1, p99), out_range=(0, 1))
 
-            cells = self._select_cells(h5_idx, fov, raw_2d.shape)
+            # Use projected image shape to select cells
+            cells = self._select_cells(h5_idx, fov, proj_2d.shape)
             for cid in cells['unique_cell_id']:
                 ci = self._crop_spots_in_cell(
-                    raw_2d, h5_idx, fov, cid,
+                    raw_3d, h5_idx, fov, cid,
                     display=display,
                     save=save_individual,
                     save_dir=save_dir,
