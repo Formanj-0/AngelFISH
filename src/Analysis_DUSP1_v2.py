@@ -637,48 +637,80 @@ class DUSP1Measurement:
         results.to_csv(csv_path, index=False)
         print(f"Saved cell-level results to {csv_path}")
 
+    def summarize_filtered_cells(self) -> pd.DataFrame:
+        """
+        Generate cell-level summary metrics based on already-filtered spots, clusters, and cellprops.
+        Assumes all inputs have already been filtered for a specific thresholding method.
+
+        Returns:
+            pd.DataFrame: One row per cell with counts of nuclear/cytoplasmic spots, clusters, and cell metadata.
+        """
+        self.spots = self.spots.sort_values(by='unique_cell_id')
+        self.clusters = self.clusters.sort_values(by='unique_cell_id')
+        self.cellprops = self.cellprops.sort_values(by='unique_cell_id')
+        cell_ids = self.cellprops['unique_cell_id']
+
+        # Spot-based counts
+        num_spots = self.spots.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_nuc_spots = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_cyto_spots = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+
+        # Cluster-based counts
+        num_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_spots_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
+        largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].max().reindex(cell_ids, fill_value=0)
+        second_largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots']\
+                                .apply(self.second_largest).reindex(cell_ids, fill_value=0)
+        num_spots_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
+
+        # Metadata and morphometrics
+        results = pd.DataFrame({
+            'unique_cell_id': cell_ids,
+            'num_spots': num_spots.values,
+            'num_nuc_spots': num_nuc_spots.values,
+            'num_cyto_spots': num_cyto_spots.values,
+            'num_ts': num_ts.values,
+            'num_foci': num_foci.values,
+            'num_spots_ts': num_spots_ts.values,
+            'largest_ts': largest_ts.values,
+            'second_largest_ts': second_largest_ts.values,
+            'num_spots_foci': num_spots_foci.values,
+            'nuc_area': self.cellprops['nuc_area'].values,
+            'cyto_area': self.cellprops['cyto_area'].values,
+            'time': self.cellprops['time'].values,
+            'dex_conc': self.cellprops['Dex_Conc'].values,
+            'replica': self.cellprops['replica'].values,
+            'fov': self.cellprops['fov'].values,
+            'nas_location': self.cellprops['NAS_location'].values,
+            'h5_idx': self.cellprops['h5_idx'].values
+        })
+
+        return results        
+
 #############################
 # DUSP1_filtering Class
 #############################
 
 class DUSP1_filtering:
-    """
-    A class to filter results and spots DataFrames.
-    
-    For the results DataFrame:
-      - Removes partial cells (where touching_border == True).
-      - Selects quantification columns based on the chosen method.
-    
-    For the spots DataFrame:
-      - Optionally removes spots that belong to partial cells (if a results DataFrame is provided).
-      - Selects the method‐specific spot columns, or for 'all' returns per‐method keep/remove flags.
-    """
-    def __init__(self, method: str = 'MG'):
+    def __init__(self, method: str = 'MG', abs_threshold: float = 4.0):
         self.method = method.lower()
+        self.abs_threshold = abs_threshold
 
     def apply(self, results: pd.DataFrame) -> pd.DataFrame:
-        # drop partial cells
         filtered = results.loc[results['touching_border'] == False].copy()
-
-        # define count‐column groups
         method_columns = {
-            'weighted': ['weighted_count',   'nuc_weighted_count',   'cyto_weighted_count'],
-            'absolute': ['absolute_count',   'nuc_absolute_count',   'cyto_absolute_count'],
-            'mg':       ['MG_count',         'nuc_MG_count',         'cyto_MG_count'],
-            'rf':       ['RF_count',         'nuc_RF_count',         'cyto_RF_count'],
-            'none':     ['num_spots',        'num_nuc_spots',        'num_cyto_spots'],
+            'weighted': ['weighted_count', 'nuc_weighted_count', 'cyto_weighted_count'],
+            'absolute': ['absolute_count', 'nuc_absolute_count', 'cyto_absolute_count'],
+            'mg':       ['MG_count', 'nuc_MG_count', 'cyto_MG_count'],
+            'rf':       ['RF_count', 'nuc_RF_count', 'cyto_RF_count'],
+            'none':     ['num_spots', 'num_nuc_spots', 'num_cyto_spots'],
+            'mg_abs':   ['MG_count', 'nuc_MG_count', 'cyto_MG_count'],  # fallback to MG counts
         }
-        # union of all above for 'all'
-        method_columns['all'] = (
-            method_columns['mg']
-            + method_columns['absolute']
-            + method_columns['weighted']
-            + method_columns['rf']
-            + method_columns['none']
-        )
+        method_columns['all'] = sum(method_columns.values(), [])
 
         if self.method not in method_columns:
-            raise ValueError("Invalid method. Choose from 'weighted','absolute','mg','rf','none','all'.")
+            raise ValueError("Invalid method. Choose from 'weighted','absolute','mg','rf','none','mg_abs','all'.")
 
         common_columns = [
             'unique_cell_id', 'touching_border', 'num_ts', 'num_foci',
@@ -688,59 +720,44 @@ class DUSP1_filtering:
             'replica', 'fov', 'nas_location', 'h5_idx'
         ]
 
-        # build and validate final column list
-        cols = (
-            ['unique_cell_id', 'touching_border']
-            + method_columns[self.method]
-            + [c for c in common_columns if c not in ('unique_cell_id','touching_border')]
-        )
+        cols = ['unique_cell_id', 'touching_border'] + method_columns[self.method]
+        cols += [c for c in common_columns if c not in ('unique_cell_id', 'touching_border')]
         cols = [c for c in cols if c in filtered.columns]
         return filtered[cols]
 
-    def apply_spots(
-        self,
-        spots: pd.DataFrame,
-        results: pd.DataFrame = None,
-        method: str = None
-    ) -> tuple:
+    def apply_spots(self, spots: pd.DataFrame, results: pd.DataFrame = None, method: str = None) -> tuple:
         method = (method or self.method).lower()
 
-        # desired metadata columns for downstream use
         desired_columns = [
-            'z_px','y_px','x_px','is_nuc','cluster_index',
-            'cell_label','snr','signal','fov','FISH_Channel',
-            'condition','replica','time','Dex_Conc','NAS_location',
-            'h5_idx','unique_spot_id','unique_cell_id',
-            'cell_intensity_mean-0','cell_intensity_std-0',
-            'nuc_intensity_mean-0','nuc_intensity_std-0',
-            'cyto_intensity_mean-0','cyto_intensity_std-0',
-            'MG_SNR','rf_prediction'
+            'z_px','y_px','x_px','is_nuc','cluster_index','cell_label','snr','signal',
+            'fov','FISH_Channel','condition','replica','time','Dex_Conc','NAS_location',
+            'h5_idx','unique_spot_id','unique_cell_id','cell_intensity_mean-0','cell_intensity_std-0',
+            'nuc_intensity_mean-0','nuc_intensity_std-0','cyto_intensity_mean-0','cyto_intensity_std-0',
+            'MG_SNR'
         ]
 
-        # 1) if results provided, drop spots from partial cells
+        # Optional RF prediction
+        if 'rf_prediction' in spots.columns:
+            desired_columns.append('rf_prediction')
+
         if results is not None:
             valid = results.loc[results['touching_border'] == False, 'unique_cell_id']
             spots = spots[spots['unique_cell_id'].isin(valid)].copy()
 
-        # 2) compute per-method keep flags
+        # Compute per-method keep flags
         spots['keep_mg']       = spots.get('MG_pass', False).astype(bool)
         spots['keep_absolute'] = spots.get('absolute', False).astype(bool)
         spots['keep_weighted'] = spots.get('weighted', False).astype(bool)
-        spots['keep_rf']       = spots.get('rf_prediction', 0).astype(bool)
 
-        # 3) compute remove flags
-        spots['remove_mg']       = ~spots['keep_mg']
-        spots['remove_absolute'] = ~spots['keep_absolute']
-        spots['remove_weighted'] = ~spots['keep_weighted']
-        spots['remove_rf']       = ~spots['keep_rf']
+        if 'rf_prediction' in spots.columns:
+            spots['keep_rf'] = spots['rf_prediction'].astype(bool)
+        else:
+            spots['keep_rf'] = False
 
-        # 4) handle 'all': return full spots + remove_* flags only
-        if method == 'all':
-            filtered = spots.copy()
-            removed  = spots[['remove_mg','remove_absolute','remove_weighted','remove_rf']].copy()
-            return filtered, removed
+        # mg_abs: MG_pass OR (snr > abs_threshold)
+        spots['keep_mg_abs'] = spots['keep_mg'] | (~spots['keep_mg'] & (spots['snr'] > self.abs_threshold))
 
-        # 5) otherwise build boolean mask for the chosen method
+        # Determine mask
         if method == 'mg':
             mask = spots['keep_mg']
         elif method == 'absolute':
@@ -751,26 +768,31 @@ class DUSP1_filtering:
             mask = spots['keep_rf']
         elif method == 'none':
             mask = pd.Series(True, index=spots.index)
+        elif method == 'mg_abs':
+            mask = spots['keep_mg_abs']
         else:
-            raise ValueError("Invalid method. Choose from 'mg','absolute','weighted','rf','none','all'.")
+            raise ValueError("Invalid method. Choose from 'mg','absolute','weighted','rf','none','mg_abs','all'.")
 
+        # Subset filtered and removed
         filtered = spots[mask].copy()
         removed  = spots[~mask].copy()
 
-        # 6) rename method-specific counts to unified names
-        rename_map = {
-            'mg':       {"MG_count":"num_spots","nuc_MG_count":"num_nuc_spots","cyto_MG_count":"num_cyto_spots"},
-            'absolute': {"absolute_count":"num_spots","nuc_absolute_count":"num_nuc_spots","cyto_absolute_count":"num_cyto_spots"},
-            'weighted': {"weighted_count":"num_spots","nuc_weighted_count":"num_nuc_spots","cyto_weighted_count":"num_cyto_spots"},
-            'rf':       {"RF_count":"num_spots","nuc_RF_count":"num_nuc_spots","cyto_RF_count":"num_cyto_spots"},
-            'none':     {"num_spots":"num_spots","num_nuc_spots":"num_nuc_spots","num_cyto_spots":"num_cyto_spots"},
-            'all':      {}
-        }
-        if rename_map.get(method):
-            filtered.rename(columns=rename_map[method], inplace=True)
-            removed.rename(columns=rename_map[method], inplace=True)
+        # Ensure expected columns exist for downstream measurement
+        if method == 'weighted':
+            filtered['weighted'] = True
+            removed['weighted'] = False
+        elif method == 'absolute':
+            filtered['absolute'] = True
+            removed['absolute'] = False
+        elif method in ['mg', 'mg_abs']:
+            # MG_SNR is already present
+            pass
+        elif method == 'rf':
+            if 'rf_prediction' not in filtered.columns:
+                filtered['rf_prediction'] = 0
+            if 'rf_prediction' not in removed.columns:
+                removed['rf_prediction'] = 0
 
-        # 7) subset to desired_columns
         filtered = filtered[[c for c in desired_columns if c in filtered.columns]]
         removed  = removed[[c for c in desired_columns if c in removed.columns]]
 
@@ -782,6 +804,46 @@ class DUSP1_filtering:
             clusters.loc[~clusters['unique_cell_id'].isin(pcs)].copy(),
             cellprops.loc[~cellprops['unique_cell_id'].isin(pcs)].copy()
         )
+    
+    def apply_all(
+        self,
+        spots: pd.DataFrame,
+        clusters: pd.DataFrame,
+        cellprops: pd.DataFrame,
+        results: pd.DataFrame = None
+    ) -> tuple:
+        """
+        Filters spots, clusters, and cellprops according to the selected method,
+        removes border-touching cells, and returns:
+        - filtered_spots
+        - filtered_clusters
+        - filtered_cellprops
+        - SSITcellresults (cell-level summary from DUSP1Measurement)
+        - removed_spots (spots excluded by the filter)
+        """
+
+        # 1. Apply spot filtering
+        filtered_spots, removed_spots = self.apply_spots(spots, results)
+
+        # 2. Get valid (non-border, passing-filter) cell IDs
+        valid_cell_ids = set(filtered_spots['unique_cell_id'])
+
+        # 3. Filter clusters and cellprops
+        filtered_clusters = clusters[clusters['unique_cell_id'].isin(valid_cell_ids)].copy()
+        filtered_cellprops = cellprops[
+            (cellprops['unique_cell_id'].isin(valid_cell_ids)) &
+            (cellprops['touching_border'] == False)
+        ].copy()
+
+        # 4. Compute SSITcellresults using local DUSP1Measurement class
+        measurer = DUSP1Measurement(
+            spots=filtered_spots,
+            clusters=filtered_clusters,
+            cellprops=filtered_cellprops
+        )
+        SSITcellresults = measurer.summarize_filtered_cells()
+
+        return filtered_spots, filtered_clusters, filtered_cellprops, SSITcellresults, removed_spots
     
 #############################
 # DisplayManager Class
@@ -844,7 +906,7 @@ def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
 
 class DUSP1DisplayManager(DUSP1AnalysisManager):
     def __init__(self, analysis_manager, cell_level_results=None,
-                 spots=None, clusters=None, cellprops=None, method='mg', removed_spots= None,
+                 spots=None, clusters=None, cellprops=None, removed_spots= None,
                  h5_idx=None, fov=None, unique_cell_id=None):
         """
         Initialize the display manager.
@@ -855,7 +917,6 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
           - spots: DataFrame with spot-level data.
           - clusters: DataFrame with cluster-level data.
           - cellprops: DataFrame with cell property data.
-          - method: filtering method ('mg', 'absolute', 'weighted', or 'none').
           - removed_spots: DataFrame with removed spots.
           - h5_idx: (Optional)index of the HDF5 file to load for display.
           - fov: (Optional) field-of-view index within the HDF5 file for display.
@@ -873,14 +934,6 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         self.clusters_df = (analysis_manager.select_datasets("clusterresults", dtype="dataframe")
                             if clusters is None else clusters)
         self.cell_level_results = cell_level_results
-        self.method = method.lower()
-        self.method_names = ['num_spots', 'weighted_count', 'absolute_count', 'MG_count']
-        self.method_colors = {
-            'num_spots': 'gold',
-            'weighted_count': 'tomato',
-            'absolute_count': 'red',
-            'MG_count': 'maroon'
-        }
         self.removed_spots = removed_spots
 
         # Set default values for h5_idx, fov, and unique_cell_id.
@@ -1464,6 +1517,211 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                 print(f"    Displaying spot zoom for cell ID {rep_cell['unique_cell_id']}.")
                 self._display_zoom_on_one_spot(spotChannel=0)
         return self.cellprops
+
+    def display_overview_plots(self):
+        """
+        Display overview plots for the entire dataset.
+        This function is a placeholder and should be implemented as needed.
+        """
+        print("Overview plots are not implemented yet.")
+        # Implement your overview plotting logic here.
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import pandas as pd
+        import numpy as np
+
+        # ============================================================================
+        # Settings and Data
+        # ============================================================================
+        metrics = ['nuc_MG_count', 'cyto_MG_count', 'MG_count', 'num_ts', 'num_foci']
+
+        # Sorted unique values for concentrations and time
+        concentrations = sorted(filtered_cell_level_results['dex_conc'].unique())
+        timepoints = sorted(filtered_cell_level_results['time'].unique())
+
+        # Set common aesthetics
+        sns.set_context('talk')
+        sns.set_style('whitegrid')
+
+        # Make a copy of the main dataframe
+        df = filtered_cell_level_results.copy()
+
+        # ============================================================================
+        # Get the control (baseline) data: all rows with time == 0.
+        # ============================================================================
+        reference_data = df[df['time'] == 0]
+        print("Reference (control) data sample:")
+        print(reference_data.head())
+
+        # For the histograms below, we also calculate CDF thresholds based on one metric.
+        # (In this example, we use 'nuc_MG_count'; update as needed for other metrics.)
+        cdf_values = np.sort(reference_data['nuc_MG_count'])
+        cdf = np.arange(1, len(cdf_values) + 1) / len(cdf_values)
+        cdf_50_threshold = np.interp(0.50, cdf, cdf_values)
+        cdf_95_threshold = np.interp(0.95, cdf, cdf_values)
+
+        # Define the concentrations and desired timepoints for the histograms (e.g., concentration 100 only)
+        concentrations_to_plot = [100]  # modify as needed
+        desired_timepoints = [10, 20, 30, 40, 50, 60, 75, 90, 120, 150, 180]
+
+
+        # ============================================================================
+        # 1. HISTOGRAMS
+        # For each desired timepoint and concentration, compare the histogram for the 
+        # experimental condition (given dex_conc and time) with the control (time==0) data.
+        # ============================================================================
+        for time in desired_timepoints:
+            for dex_conc in concentrations_to_plot:
+                plt.figure(figsize=(10, 6))
+                specific_data = df[(df['dex_conc'] == dex_conc) & (df['time'] == time)]
+                
+                sns.histplot(reference_data['nuc_MG_count'], color='grey', label='Control (0 min)', kde=True)
+                sns.histplot(specific_data['nuc_MG_count'], color='blue', label=f'{dex_conc} nM, {time} min', kde=True)
+                
+                plt.axvline(cdf_50_threshold, color='red', linestyle='--', label='CDF 50% Threshold')
+                plt.axvline(cdf_95_threshold, color='red', linestyle='-',  label='CDF 95% Threshold')
+                
+                plt.annotate(f'Ref Cell Count: {len(reference_data)}\nSpec Cell Count: {len(specific_data)}',
+                            xy=(0.77, 0.70), xycoords='axes fraction', verticalalignment='top')
+                plt.title(f'Nuclear Distribution Comparison: Control vs {dex_conc} nM, {time} min')
+                plt.xlabel('nuc_MG_count')
+                plt.ylabel('Density')
+                plt.legend()
+                plt.show()
+
+
+        # ============================================================================
+        # 2. LINE PLOTS (with control overlay)
+        # For each concentration, plot the mean metric value over time
+        # and overlay a horizontal dashed line indicating the control (0 min) mean.
+        # ============================================================================
+        for conc in concentrations:
+            fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 5))
+            fig.suptitle(f'Line Plots with Shared Control — Concentration {conc} nM', fontsize=16)
+
+            # Experimental data for this concentration
+            data_conc = df[df['dex_conc'] == conc]
+
+            # Control data (baseline): dex_conc == 0 and time == 0
+            control_data = df[(df['dex_conc'] == 0) & (df['time'] == 0)]
+
+            for i, metric in enumerate(metrics):
+                ax = axes[i]
+
+                # Experimental mean metric over time
+                grouped_exp = data_conc.groupby('time')[metric].mean().reset_index()
+
+                # Add baseline mean as the 0 min point
+                if not control_data.empty:
+                    control_mean = control_data[metric].mean()
+                    # Create a new row at time=0
+                    control_point = pd.DataFrame({'time': [0], metric: [control_mean]})
+                    # Concatenate with experimental data
+                    combined = pd.concat([control_point, grouped_exp], ignore_index=True)
+                else:
+                    combined = grouped_exp.copy()
+
+                sns.lineplot(data=combined, x='time', y=metric, marker='o', ax=ax, label=f'{conc} nM + Control')
+
+                ax.set_title(metric)
+                ax.set_xlabel('Time (min)')
+                ax.set_ylabel(f'Mean {metric}')
+                ax.legend()
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
+
+
+        # ============================================================================
+        # 3. BAR PLOTS (with control overlay)
+        # For each concentration, plot a bar chart displaying the mean metric value at each timepoint
+        # and overlay a horizontal dashed line indicating the control (0 min) mean.
+        # ============================================================================
+        for conc in concentrations:
+            fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 5))
+            fig.suptitle(f'Bar Plots for Concentration {conc} nM', fontsize=16)
+            
+            # Data for this concentration
+            data_conc = df[df['dex_conc'] == conc]
+            
+            for i, metric in enumerate(metrics):
+                ax = axes[i]
+                df_grouped = data_conc.groupby('time')[metric].mean().reset_index()
+                sns.barplot(data=df_grouped, x='time', y=metric, ax=ax, palette='viridis')
+                
+                # Compute control mean from reference
+                control_mean = reference_data[metric].mean()
+                ax.axhline(control_mean, color='black', linestyle='--', label='Control (0 min)')
+                
+                ax.set_title(metric)
+                ax.set_xlabel('Time (min)')
+                ax.set_ylabel(f'Mean {metric}')
+                ax.legend()
+            
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
+
+
+        # ============================================================================
+        # 4. CATEGORY-BASED BAR PLOTS FOR 'num_ts' and 'num_foci'
+        # For each concentration, display for each timepoint the fraction (percentage) of cells 
+        # falling into the categories "0", "1", "2", "3", or ">=4".
+        # Now baseline (control) data is included by concatenating the control data.
+        # ============================================================================
+        def cat_func(x):
+            if x == 1:
+                return '1'
+            elif x == 2:
+                return '2'
+            elif x == 3:
+                return '3'
+            elif x >= 4:
+                return '>=4'
+            else:
+                return '0'
+
+        cat_metrics = ['num_ts', 'num_foci']
+
+        for conc in concentrations:
+            data_conc = df[df['dex_conc'] == conc]
+            control_data = df[(df['time'] == 0) & (df['dex_conc'] == 0)]
+            data_for_plot = pd.concat([control_data, data_conc], ignore_index=True)
+            time_points = sorted(data_for_plot['time'].unique())
+
+            fig, axes = plt.subplots(len(time_points), len(cat_metrics), 
+                                    figsize=(8 * len(cat_metrics), 4 * len(time_points)))
+
+            # ---- MAKE AXES ALWAYS 2D ----
+            if len(time_points) == 1 and len(cat_metrics) == 1:
+                axes = np.array([[axes]])
+            elif len(time_points) == 1:
+                axes = np.expand_dims(axes, axis=0)
+            elif len(cat_metrics) == 1:
+                axes = np.expand_dims(axes, axis=1)
+            # -----------------------------
+
+            fig.suptitle(f'Percentage of Cells by TS Category for {conc} nM (including control)', fontsize=16)
+
+            for row, t in enumerate(time_points):
+                for col, metric in enumerate(cat_metrics):
+                    ax = axes[row][col]
+                    subset = data_for_plot[data_for_plot['time'] == t].copy()
+                    subset['category'] = subset[metric].apply(cat_func)
+
+                    counts = subset['category'].value_counts(normalize=True).sort_index() * 100
+                    categories = ['0', '1', '2', '3', '>=4']
+                    counts = counts.reindex(categories, fill_value=0)
+
+                    sns.barplot(x=counts.index, y=counts.values, ax=ax, palette='viridis')
+                    ax.set_title(f'{metric} at {t} min')
+                    ax.set_xlabel('Category')
+                    ax.set_ylabel('Percentage (%)')
+
+                    for i, v in enumerate(counts.values):
+                        ax.text(i, v + 1, f"{v:.1f}%", ha='center', va='bottom', fontsize=9)
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
 
     def main_display(self):
         """
