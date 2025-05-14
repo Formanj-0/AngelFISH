@@ -1524,33 +1524,58 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                 self._display_zoom_on_one_spot(spotChannel=0)
         return self.cellprops
 
+    def main_display(self):
+        """
+        Main display function that sequentially runs various display routines.
+        """
+        print("Running display_gating_overlay...")
+        self.display_gating_overlay()
+        
+        print("Running _display_zoom_on_cell...")
+        cell = self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
+        if cell is not None:
+            print("Running _display_zoom_on_one_spot...")
+            self._display_zoom_on_one_spot(spotChannel=0)
+        
+        print("Running display_representative_cells...")
+        self.display_representative_cells()
+        
+        # print("Running display_cell_TS_foci_variations...")
+        # self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
+        print("All display routines completed.")
+
+
+class PostProcessingDisplay:
+    """
+    Class to handle post-processing display of images and masks.
+    """
+    def __init__(self, spots_df, clusters_df, cellprops_df, cellresults_df):
+        self.spots = spots_df
+        self.clusters = clusters_df
+        self.cellprops = cellprops_df
+        self.cellresults = cellresults_df
+
     def display_overview_plots(self):
         """
         Display overview plots for the entire dataset.
         This function is a placeholder and should be implemented as needed.
         """
-        print("Overview plots are not implemented yet.")
-        # Implement your overview plotting logic here.
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import pandas as pd
-        import numpy as np
 
         # ============================================================================
         # Settings and Data
         # ============================================================================
-        metrics = ['nuc_MG_count', 'cyto_MG_count', 'MG_count', 'num_ts', 'num_foci']
+        metrics = ['num_spots', 'num_nuc_spots', 'num_cyto_spots', 'num_ts', 'num_foci']
 
         # Sorted unique values for concentrations and time
-        concentrations = sorted(filtered_cell_level_results['dex_conc'].unique())
-        timepoints = sorted(filtered_cell_level_results['time'].unique())
+        concentrations = sorted(self.cellresults['dex_conc'].unique())
+        timepoints = sorted(self.cellresults['time'].unique())
 
         # Set common aesthetics
         sns.set_context('talk')
         sns.set_style('whitegrid')
 
         # Make a copy of the main dataframe
-        df = filtered_cell_level_results.copy()
+        df = self.cellresults.copy()
 
         # ============================================================================
         # Get the control (baseline) data: all rows with time == 0.
@@ -1559,16 +1584,15 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         print("Reference (control) data sample:")
         print(reference_data.head())
 
-        # For the histograms below, we also calculate CDF thresholds based on one metric.
-        # (In this example, we use 'nuc_MG_count'; update as needed for other metrics.)
+        # Calculate CDF thresholds for 50% and 95% using the control data
         cdf_values = np.sort(reference_data['nuc_MG_count'])
         cdf = np.arange(1, len(cdf_values) + 1) / len(cdf_values)
         cdf_50_threshold = np.interp(0.50, cdf, cdf_values)
         cdf_95_threshold = np.interp(0.95, cdf, cdf_values)
 
         # Define the concentrations and desired timepoints for the histograms (e.g., concentration 100 only)
-        concentrations_to_plot = [100]  # modify as needed
-        desired_timepoints = [10, 20, 30, 40, 50, 60, 75, 90, 120, 150, 180]
+        concentrations_to_plot = (df['dex_conc'].unique() & ~ df['dex_conc'] == 0)
+        desired_timepoints = [df['time'].unique()]  
 
 
         # ============================================================================
@@ -1729,25 +1753,6 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()
 
-    def main_display(self):
-        """
-        Main display function that sequentially runs various display routines.
-        """
-        print("Running display_gating_overlay...")
-        self.display_gating_overlay()
-        
-        print("Running _display_zoom_on_cell...")
-        cell = self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
-        if cell is not None:
-            print("Running _display_zoom_on_one_spot...")
-            self._display_zoom_on_one_spot(spotChannel=0)
-        
-        print("Running display_representative_cells...")
-        self.display_representative_cells()
-        
-        # print("Running display_cell_TS_foci_variations...")
-        # self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
-        print("All display routines completed.")
 
 
 #############################
