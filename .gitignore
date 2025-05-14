@@ -1,0 +1,39 @@
+# Virtual environments
+.venv/
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.eggs/
+build/
+dist/
+
+# Jupyter notebook artifacts
+.ipynb_checkpoints/
+
+# macOS system files
+.DS_Store
+
+# VS Code settings (optional)
+.vscode/
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Hidden system files
+Thumbs.db
+Desktop.ini
+
+# Intermediate data/output files (ignore everywhere)
+*.csv
+*.npy
+*.npz
+*.h5
+*.zarr/
+*.yml
+
+# Temporary or auto-generated folders
+dev/tmp*/
