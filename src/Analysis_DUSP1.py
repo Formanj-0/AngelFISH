@@ -1210,6 +1210,9 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             (self.clusters_df['is_nuc'] == 0)
         ]
 
+        if cell_TS.empty:
+            print('No TS in this cell')
+
         if cell_foci.empty:
             print('No Foci in this cell')
 
@@ -1463,7 +1466,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                 # Filter for cells in the current removal category.
                 cat_cells = cells_this_h5[cells_this_h5['summary_stats'] == cat]
                 if cat_cells.empty:
-                    print(f"  No cells with removal category '{cat}' in h5_idx {h5}.")
+                    print(f"No cells with removal category '{cat}' in h5_idx {h5}.")
                     continue
 
                 # Select one representative cell at random.
@@ -1482,7 +1485,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                 title_str = f"{conc}_{time_val}_FOV{rep_cell['fov']}_ID{rep_cell['unique_cell_id']}"
 
                 # --- Plot 1: Zoomed-in view of the representative cell ---
-                print(f"    Displaying cell plot: {title_str}")
+                print(f"Displaying cell plot: {title_str}")
                 # _display_zoom_on_cell() should generate its own figure.
                 self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
                 plt.gcf().suptitle(title_str)
@@ -1496,13 +1499,13 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                     (self.spots['unique_cell_id'] == self.cell_label)
                 ]
                 if cell_spots.empty:
-                    print(f"    No spots found for cell {self.cell_label} in FOV {self.fov}.")
+                    print(f"No spots found for cell {self.cell_label} in FOV {self.fov}.")
                     continue
                 # Randomly select one spot from the cell and assign it to self.chosen_spot.
-                self.chosen_spot = cell_spots.sample(1).iloc[0]
-                
-                # (Optional) If you also want to set TS and foci, you can add similar logic here.
-                # For instance, if the cell has TS or foci in your clusters_df:
+                # self.chosen_spot = cell_spots.sample(1).iloc[0]
+                self.chosen_spot = self.chosen_spot
+
+                # Display TS and Foci for this cell.
                 cell_clusters = self.clusters_df[
                     (self.clusters_df['h5_idx'] == self.h5_idx) &
                     (self.clusters_df['fov'] == self.fov) &
@@ -1539,221 +1542,167 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         
         print("Running display_representative_cells...")
         self.display_representative_cells()
-        
-        # print("Running display_cell_TS_foci_variations...")
-        # self.display_cell_TS_foci_variations(spotChannel=0, cytoChannel=1, nucChannel=2)
+
         print("All display routines completed.")
 
 
 class PostProcessingDisplay:
     """
-    Class to handle post-processing display of images and masks.
+    Class to handle post-processing display of statistical results:
+      1) TS-frequency bar chart
+      2) Ridge (joy) plots for nuclear, cytoplasmic, and total mRNA
+      3) Line plots of nuclear & cytoplasmic mRNA counts over time (including 0 min control)
     """
-    def __init__(self, spots_df, clusters_df, cellprops_df, cellresults_df):
-        self.spots = spots_df
-        self.clusters = clusters_df
-        self.cellprops = cellprops_df
-        self.cellresults = cellresults_df
+    def __init__(self, spots_df, clusters_df, cellprops_df, ssit_cellresults_df):
+        self.spots            = spots_df
+        self.clusters         = clusters_df
+        self.cellprops        = cellprops_df
+        self.ssit_cellresults = ssit_cellresults_df
 
     def display_overview_plots(self):
-        """
-        Display overview plots for the entire dataset.
-        This function is a placeholder and should be implemented as needed.
-        """
+        #  ——————————————————————————————
+        #  Setup & styling
+        #  ——————————————————————————————
+        df = self.ssit_cellresults.copy()
+        sns.set_theme(style="whitegrid", context="paper")
 
-        # ============================================================================
-        # Settings and Data
-        # ============================================================================
-        metrics = ['num_spots', 'num_nuc_spots', 'num_cyto_spots', 'num_ts', 'num_foci']
+        # 1) TS‐frequency bar chart
+        #  ——————————————————————————————
+        ts_df = self.clusters[self.clusters['is_nuc'] == 1]
+        ts_count = (
+            ts_df
+              .groupby(['h5_idx','time','fov','cell_label'])
+              .size()
+              .reset_index(name='ts_count')
+        )
+        all_cells = (
+            self.cellprops[['h5_idx','time','fov','cell_label']]
+            .drop_duplicates()
+        )
+        merged = (
+            pd.merge(all_cells, ts_count,
+                     on=['h5_idx','time','fov','cell_label'],
+                     how='left')
+              .fillna({'ts_count': 0})
+        )
+        merged['ts_cat'] = merged['ts_count'].apply(lambda x: '≥4' if x >= 4 else str(int(x)))
+        grp = (
+            merged[merged['ts_cat'] != '0']
+              .groupby(['time','ts_cat'])
+              .size()
+              .reset_index(name='count')
+        )
+        total = merged.groupby('time').size().reset_index(name='total')
+        grp = pd.merge(grp, total, on='time')
+        grp['fraction'] = grp['count'] / grp['total']
 
-        # Sorted unique values for concentrations and time
-        concentrations = sorted(self.cellresults['dex_conc'].unique())
-        timepoints = sorted(self.cellresults['time'].unique())
+        pivot = (
+            grp
+              .pivot(index='time', columns='ts_cat', values='fraction')
+              .fillna(0)
+              .reindex(columns=['1','2','3','≥4'], fill_value=0)
+        )
 
-        # Set common aesthetics
-        sns.set_context('talk')
-        sns.set_style('whitegrid')
+        fig, ax = plt.subplots(figsize=(8,4))
+        pal = sns.color_palette("tab10", n_colors=4)
+        pivot.plot(kind='bar', ax=ax, color=pal, width=0.8, edgecolor='k')
+        ax.set_xlabel("Time (min)")
+        ax.set_ylabel("Fraction of Cells")
+        ax.set_title("Fraction of Cells with 1, 2, 3, ≥4 TS by Time")
+        ax.legend(title="TS count", bbox_to_anchor=(1.02,1), loc='upper left')
+        plt.tight_layout()
+        plt.show()
 
-        # Make a copy of the main dataframe
-        df = self.cellresults.copy()
+        # 2) Ridge (joy) plots for mRNA distributions
+        #  ——————————————————————————————
+        metrics = ['num_nuc_spots', 'num_cyto_spots', 'num_spots']
+        for rep in sorted(df['replica'].unique()):
+            df_rep = df[df['replica'] == rep]
+            for conc in sorted(set(df_rep['dex_conc']) - {0}):
+                # times with control (0 min) first
+                times = [0] + sorted(set(df_rep['time']) - {0})
+                n = len(times)
 
-        # ============================================================================
-        # Get the control (baseline) data: all rows with time == 0.
-        # ============================================================================
-        reference_data = df[df['time'] == 0]
-        print("Reference (control) data sample:")
-        print(reference_data.head())
+                # compute CDF thresholds on control
+                ref = df_rep[(df_rep['dex_conc']==0) & (df_rep['time']==0)]
+                thr = {}
+                for m in metrics:
+                    vals = np.sort(ref[m].dropna())
+                    cdf  = np.arange(1, len(vals)+1) / len(vals)
+                    thr[m] = (
+                        np.interp(0.50, cdf, vals),
+                        np.interp(0.95, cdf, vals)
+                    )
 
-        # Calculate CDF thresholds for 50% and 95% using the control data
-        cdf_values = np.sort(reference_data['nuc_MG_count'])
-        cdf = np.arange(1, len(cdf_values) + 1) / len(cdf_values)
-        cdf_50_threshold = np.interp(0.50, cdf, cdf_values)
-        cdf_95_threshold = np.interp(0.95, cdf, cdf_values)
+                # colormap, reversed so control (first) is darkest
+                cmap = sns.color_palette("rocket_r", n_colors=n)[::-1]
 
-        # Define the concentrations and desired timepoints for the histograms (e.g., concentration 100 only)
-        concentrations_to_plot = (df['dex_conc'].unique() & ~ df['dex_conc'] == 0)
-        desired_timepoints = [df['time'].unique()]  
+                for m in metrics:
+                    fig, ax = plt.subplots(figsize=(8, n*1.2))
+                    fig.suptitle(
+                        f"Replica {rep} — {conc} nM Dex: {m.replace('_',' ').title()}",
+                        fontsize=14
+                    )
+
+                    # shared bins across all times
+                    all_vals = df_rep[m].dropna()
+                    bins = np.linspace(all_vals.min(), all_vals.max(), 30)
+
+                    for i, t in enumerate(times):
+                        data = (
+                            ref[m] if t == 0
+                            else df_rep[(df_rep['dex_conc']==conc)&(df_rep['time']==t)][m]
+                        )
+                        hist, edges = np.histogram(data.dropna(), bins=bins, density=True)
+                        xs = (edges[:-1] + edges[1:]) / 2
+                        heights = hist / hist.max() * 0.8
+                        y_off = (n - 1 - i)
+                        ax.fill_between(xs, y_off, y_off + heights,
+                                        color=cmap[i], alpha=0.7)
+
+                    # overlay CDF threshold lines
+                    lo, hi = thr[m]
+                    ax.axvline(lo, color='red', linestyle='--', linewidth=1)
+                    ax.axvline(hi, color='red', linestyle='-',  linewidth=1)
+
+                    # y‐axis as time labels
+                    ax.set_yticks([n-1 - i for i in range(n)])
+                    ax.set_yticklabels([f"{t} min" for t in times])
+                    ax.set_xlabel("mRNA Count")
+                    ax.set_xlim(bins[0], bins[-1])
+                    ax.set_ylabel("")
+                    plt.tight_layout(rect=[0,0,1,0.95])
+                    plt.show()
 
 
-        # ============================================================================
-        # 1. HISTOGRAMS
-        # For each desired timepoint and concentration, compare the histogram for the 
-        # experimental condition (given dex_conc and time) with the control (time==0) data.
-        # ============================================================================
-        for time in desired_timepoints:
-            for dex_conc in concentrations_to_plot:
-                plt.figure(figsize=(10, 6))
-                specific_data = df[(df['dex_conc'] == dex_conc) & (df['time'] == time)]
-                
-                sns.histplot(reference_data['nuc_MG_count'], color='grey', label='Control (0 min)', kde=True)
-                sns.histplot(specific_data['nuc_MG_count'], color='blue', label=f'{dex_conc} nM, {time} min', kde=True)
-                
-                plt.axvline(cdf_50_threshold, color='red', linestyle='--', label='CDF 50% Threshold')
-                plt.axvline(cdf_95_threshold, color='red', linestyle='-',  label='CDF 95% Threshold')
-                
-                plt.annotate(f'Ref Cell Count: {len(reference_data)}\nSpec Cell Count: {len(specific_data)}',
-                            xy=(0.77, 0.70), xycoords='axes fraction', verticalalignment='top')
-                plt.title(f'Nuclear Distribution Comparison: Control vs {dex_conc} nM, {time} min')
-                plt.xlabel('nuc_MG_count')
-                plt.ylabel('Density')
-                plt.legend()
-                plt.show()
+        # 3) Line plots of nuclear & cytoplasmic mRNA counts over time
+        # ——————————————————————————————
+        # build per-replicate means
+        rep_means = (
+            df
+              .groupby(['replica','time','dex_conc'])
+              .agg(mean_nuc=('num_nuc_spots','mean'),
+                   mean_cyto=('num_cyto_spots','mean'))
+              .reset_index()
+        )
 
+        for conc in sorted(set(df['dex_conc']) - {0}):
+            # include baseline (dex_conc=0,time=0) plus this conc
+            plot_df = rep_means[
+                rep_means['dex_conc'].isin([0, conc])
+            ]
 
-        # ============================================================================
-        # 2. LINE PLOTS (with control overlay)
-        # For each concentration, plot the mean metric value over time
-        # and overlay a horizontal dashed line indicating the control (0 min) mean.
-        # ============================================================================
-        for conc in concentrations:
-            fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 5))
-            fig.suptitle(f'Line Plots with Shared Control — Concentration {conc} nM', fontsize=16)
+            fig, ax = plt.subplots(figsize=(8,4))
+            sns.lineplot(data=plot_df, x='time', y='mean_nuc',
+                         ci='sd', marker='o', label='Nuclear mRNA', ax=ax)
+            sns.lineplot(data=plot_df, x='time', y='mean_cyto',
+                         ci='sd', marker='o', label='Cytoplasmic mRNA', ax=ax)
 
-            # Experimental data for this concentration
-            data_conc = df[df['dex_conc'] == conc]
-
-            # Control data (baseline): dex_conc == 0 and time == 0
-            control_data = df[(df['dex_conc'] == 0) & (df['time'] == 0)]
-
-            for i, metric in enumerate(metrics):
-                ax = axes[i]
-
-                # Experimental mean metric over time
-                grouped_exp = data_conc.groupby('time')[metric].mean().reset_index()
-
-                # Add baseline mean as the 0 min point
-                if not control_data.empty:
-                    control_mean = control_data[metric].mean()
-                    # Create a new row at time=0
-                    control_point = pd.DataFrame({'time': [0], metric: [control_mean]})
-                    # Concatenate with experimental data
-                    combined = pd.concat([control_point, grouped_exp], ignore_index=True)
-                else:
-                    combined = grouped_exp.copy()
-
-                sns.lineplot(data=combined, x='time', y=metric, marker='o', ax=ax, label=f'{conc} nM + Control')
-
-                ax.set_title(metric)
-                ax.set_xlabel('Time (min)')
-                ax.set_ylabel(f'Mean {metric}')
-                ax.legend()
-
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            ax.set_title(f"{conc} nM Dex: mRNA Counts Over Time")
+            ax.set_xlabel("Time (min)")
+            ax.set_ylabel("Mean ± SD")
+            plt.tight_layout()
             plt.show()
-
-
-        # ============================================================================
-        # 3. BAR PLOTS (with control overlay)
-        # For each concentration, plot a bar chart displaying the mean metric value at each timepoint
-        # and overlay a horizontal dashed line indicating the control (0 min) mean.
-        # ============================================================================
-        for conc in concentrations:
-            fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 5))
-            fig.suptitle(f'Bar Plots for Concentration {conc} nM', fontsize=16)
-            
-            # Data for this concentration
-            data_conc = df[df['dex_conc'] == conc]
-            
-            for i, metric in enumerate(metrics):
-                ax = axes[i]
-                df_grouped = data_conc.groupby('time')[metric].mean().reset_index()
-                sns.barplot(data=df_grouped, x='time', y=metric, ax=ax, palette='viridis')
-                
-                # Compute control mean from reference
-                control_mean = reference_data[metric].mean()
-                ax.axhline(control_mean, color='black', linestyle='--', label='Control (0 min)')
-                
-                ax.set_title(metric)
-                ax.set_xlabel('Time (min)')
-                ax.set_ylabel(f'Mean {metric}')
-                ax.legend()
-            
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show()
-
-
-        # ============================================================================
-        # 4. CATEGORY-BASED BAR PLOTS FOR 'num_ts' and 'num_foci'
-        # For each concentration, display for each timepoint the fraction (percentage) of cells 
-        # falling into the categories "0", "1", "2", "3", or ">=4".
-        # Now baseline (control) data is included by concatenating the control data.
-        # ============================================================================
-        def cat_func(x):
-            if x == 1:
-                return '1'
-            elif x == 2:
-                return '2'
-            elif x == 3:
-                return '3'
-            elif x >= 4:
-                return '>=4'
-            else:
-                return '0'
-
-        cat_metrics = ['num_ts', 'num_foci']
-
-        for conc in concentrations:
-            data_conc = df[df['dex_conc'] == conc]
-            control_data = df[(df['time'] == 0) & (df['dex_conc'] == 0)]
-            data_for_plot = pd.concat([control_data, data_conc], ignore_index=True)
-            time_points = sorted(data_for_plot['time'].unique())
-
-            fig, axes = plt.subplots(len(time_points), len(cat_metrics), 
-                                    figsize=(8 * len(cat_metrics), 4 * len(time_points)))
-
-            # ---- MAKE AXES ALWAYS 2D ----
-            if len(time_points) == 1 and len(cat_metrics) == 1:
-                axes = np.array([[axes]])
-            elif len(time_points) == 1:
-                axes = np.expand_dims(axes, axis=0)
-            elif len(cat_metrics) == 1:
-                axes = np.expand_dims(axes, axis=1)
-            # -----------------------------
-
-            fig.suptitle(f'Percentage of Cells by TS Category for {conc} nM (including control)', fontsize=16)
-
-            for row, t in enumerate(time_points):
-                for col, metric in enumerate(cat_metrics):
-                    ax = axes[row][col]
-                    subset = data_for_plot[data_for_plot['time'] == t].copy()
-                    subset['category'] = subset[metric].apply(cat_func)
-
-                    counts = subset['category'].value_counts(normalize=True).sort_index() * 100
-                    categories = ['0', '1', '2', '3', '>=4']
-                    counts = counts.reindex(categories, fill_value=0)
-
-                    sns.barplot(x=counts.index, y=counts.values, ax=ax, palette='viridis')
-                    ax.set_title(f'{metric} at {t} min')
-                    ax.set_xlabel('Category')
-                    ax.set_ylabel('Percentage (%)')
-
-                    for i, v in enumerate(counts.values):
-                        ax.text(i, v + 1, f"{v:.1f}%", ha='center', va='bottom', fontsize=9)
-
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show()
-
-
 
 #############################
 # SpotCropSampler Class
