@@ -1675,34 +1675,56 @@ class PostProcessingDisplay:
                     plt.show()
 
 
-        # 3) Line plots of nuclear & cytoplasmic mRNA counts over time
-        # ——————————————————————————————
-        # build per-replicate means
-        rep_means = (
-            df
-              .groupby(['replica','time','dex_conc'])
-              .agg(mean_nuc=('num_nuc_spots','mean'),
-                   mean_cyto=('num_cyto_spots','mean'))
-              .reset_index()
-        )
+            # 3) Line plots of nuclear & cytoplasmic mRNA counts over time (mean ± SD)
+            # ————————————————————————————————————————————————————————————————
 
-        for conc in sorted(set(df['dex_conc']) - {0}):
-            # include baseline (dex_conc=0,time=0) plus this conc
-            plot_df = rep_means[
-                rep_means['dex_conc'].isin([0, conc])
-            ]
+            # Step 1: from the raw DataFrame, compute both mean and std _at the cell‐level_ for each time, dex_conc
+            time_stats = (
+                df
+                .groupby(['time','dex_conc'])
+                .agg(
+                    mean_nuc=('num_nuc_spots','mean'),
+                    sd_nuc  =('num_nuc_spots','std'),
+                    mean_cyto=('num_cyto_spots','mean'),
+                    sd_cyto =('num_cyto_spots','std')
+                )
+                .reset_index()
+            )
 
-            fig, ax = plt.subplots(figsize=(8,4))
-            sns.lineplot(data=plot_df, x='time', y='mean_nuc',
-                         ci='sd', marker='o', label='Nuclear mRNA', ax=ax)
-            sns.lineplot(data=plot_df, x='time', y='mean_cyto',
-                         ci='sd', marker='o', label='Cytoplasmic mRNA', ax=ax)
+            # Step 2: for each nonzero concentration, extract that subset (plus the 0 min control),
+            #           then draw the lines with error bars via matplotlib's `errorbar()`
+            for conc in sorted(set(df['dex_conc']) - {0}):
+                subset = time_stats[time_stats['dex_conc'].isin([0, conc])].sort_values('time')
 
-            ax.set_title(f"{conc} nM Dex: mRNA Counts Over Time")
-            ax.set_xlabel("Time (min)")
-            ax.set_ylabel("Mean ± SD")
-            plt.tight_layout()
-            plt.show()
+                fig, ax = plt.subplots(figsize=(8, 4))
+
+                # Plot Nuclear mRNA: mean ± SD
+                ax.errorbar(
+                    subset['time'],
+                    subset['mean_nuc'],
+                    yerr=subset['sd_nuc'],
+                    fmt='-o',
+                    color='blue',
+                    label='Nuclear mRNA'
+                )
+
+                # Plot Cytoplasmic mRNA: mean ± SD
+                ax.errorbar(
+                    subset['time'],
+                    subset['mean_cyto'],
+                    yerr=subset['sd_cyto'],
+                    fmt='-o',
+                    color='orange',
+                    label='Cytoplasmic mRNA'
+                )
+
+                ax.set_title(f"{conc} nM Dex: mRNA Counts Over Time")
+                ax.set_xlabel("Time (min)")
+                ax.set_ylabel("Mean ± SD")
+                ax.set_xticks(subset['time'])   # ensure 0 min is shown on the x‐axis
+                ax.legend()
+                plt.tight_layout()
+                plt.show()
 
 #############################
 # SpotCropSampler Class
