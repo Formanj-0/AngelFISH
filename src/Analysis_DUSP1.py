@@ -1725,6 +1725,8 @@ class PostProcessingDisplay:
                 ax.legend()
                 plt.tight_layout()
                 plt.show()
+        print("All overview plots displayed.")
+    
 
 #############################
 # SpotCropSampler Class
