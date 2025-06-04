@@ -1546,12 +1546,17 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         print("All display routines completed.")
 
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 class PostProcessingDisplay:
     """
     Class to handle post-processing display of statistical results:
-      1) TS-frequency bar chart
+      1) TS-frequency bar chart (by time AND concentration, always including 0 min control)
       2) Ridge (joy) plots for nuclear, cytoplasmic, and total mRNA
-      3) Line plots of nuclear & cytoplasmic mRNA counts over time (including 0 min control)
+      3) Line plots of nuclear & cytoplasmic mRNA counts over time (including 0 min control)
     """
     def __init__(self, spots_df, clusters_df, cellprops_df, ssit_cellresults_df):
         self.spots            = spots_df
@@ -1560,25 +1565,31 @@ class PostProcessingDisplay:
         self.ssit_cellresults = ssit_cellresults_df
 
     def display_overview_plots(self):
-        #  ——————————————————————————————
-        #  Setup & styling
-        #  ——————————————————————————————
+        # ——————————————————————————————
+        # Setup & styling
+        # ——————————————————————————————
         df = self.ssit_cellresults.copy()
         sns.set_theme(style="whitegrid", context="paper")
 
-        # 1) TS‐frequency bar chart
-        #  ——————————————————————————————
+        # 1) TS‐frequency bar chart (by time AND Dex_Conc)
+        # ——————————————————————————————
         ts_df = self.clusters[self.clusters['is_nuc'] == 1]
+
+        # Count nuclear TS per cell (h5_idx, time, fov, cell_label)
         ts_count = (
             ts_df
               .groupby(['h5_idx','time','fov','cell_label'])
               .size()
               .reset_index(name='ts_count')
         )
+
+        # All cells, now including Dex_Conc (from cellprops_df)
         all_cells = (
-            self.cellprops[['h5_idx','time','fov','cell_label']]
+            self.cellprops[['h5_idx','time','fov','cell_label','Dex_Conc']]
             .drop_duplicates()
         )
+
+        # Merge TS‐counts onto all_cells; missing → ts_count=0
         merged = (
             pd.merge(all_cells, ts_count,
                      on=['h5_idx','time','fov','cell_label'],
@@ -1586,44 +1597,82 @@ class PostProcessingDisplay:
               .fillna({'ts_count': 0})
         )
         merged['ts_cat'] = merged['ts_count'].apply(lambda x: '≥4' if x >= 4 else str(int(x)))
-        grp = (
-            merged[merged['ts_cat'] != '0']
-              .groupby(['time','ts_cat'])
-              .size()
-              .reset_index(name='count')
-        )
-        total = merged.groupby('time').size().reset_index(name='total')
-        grp = pd.merge(grp, total, on='time')
-        grp['fraction'] = grp['count'] / grp['total']
 
-        pivot = (
-            grp
-              .pivot(index='time', columns='ts_cat', values='fraction')
-              .fillna(0)
-              .reindex(columns=['1','2','3','≥4'], fill_value=0)
-        )
+        # Unique concentrations (including 0)
+        concs = sorted(merged['Dex_Conc'].unique())
 
-        fig, ax = plt.subplots(figsize=(8,4))
-        pal = sns.color_palette("tab10", n_colors=4)
-        pivot.plot(kind='bar', ax=ax, color=pal, width=0.8, edgecolor='k')
-        ax.set_xlabel("Time (min)")
-        ax.set_ylabel("Fraction of Cells")
-        ax.set_title("Fraction of Cells with 1, 2, 3, ≥4 TS by Time")
-        ax.legend(title="TS count", bbox_to_anchor=(1.02,1), loc='upper left')
-        plt.tight_layout()
-        plt.show()
+        # Mask for “0 min control” (Dex_Conc=0 & time=0)
+        control_mask = (merged['Dex_Conc'] == 0) & (merged['time'] == 0)
+
+        # Loop over each nonzero Dex_Conc
+        for conc in concs:
+            if conc == 0:
+                continue
+
+            # Subset = all rows at this conc, plus the 0 min control
+            subset = merged[
+                (merged['Dex_Conc'] == conc) |
+                control_mask
+            ]
+
+            # Group by (Dex_Conc, time, ts_cat)
+            grp = (
+                subset[subset['ts_cat'] != '0']
+                  .groupby(['Dex_Conc','time','ts_cat'])
+                  .size()
+                  .reset_index(name='count')
+            )
+            total = (
+                subset
+                  .groupby(['Dex_Conc','time'])
+                  .size()
+                  .reset_index(name='total')
+            )
+            grp = pd.merge(grp, total, on=['Dex_Conc','time'])
+            grp['fraction'] = grp['count'] / grp['total']
+
+            # Pivot so ts_cat are columns
+            pivot = (
+                grp
+                  .pivot(index=['Dex_Conc','time'],
+                         columns='ts_cat',
+                         values='fraction')
+                  .fillna(0)
+                  .reindex(columns=['1','2','3','≥4'], fill_value=0)
+            )
+
+            # For this concentration only (rows indexed by conc)
+            pivot_conc = pivot.loc[conc]
+
+            # Plot stacked bar-chart
+            fig, ax = plt.subplots(figsize=(8,4))
+            pal = sns.color_palette("tab10", n_colors=4)
+            pivot_conc.plot(
+                kind='bar',
+                ax=ax,
+                color=pal,
+                width=0.8,
+                edgecolor='k'
+            )
+            ax.set_xlabel("Time (min)")
+            ax.set_ylabel("Fraction of Cells")
+            ax.set_title(f"Fraction of Cells with 1,2,3,≥4 TS\nat {conc} nM Dex (including 0 min control)")
+            ax.legend(title="TS count", bbox_to_anchor=(1.02,1), loc='upper left')
+            plt.tight_layout()
+            plt.show()
+
 
         # 2) Ridge (joy) plots for mRNA distributions
-        #  ——————————————————————————————
+        # ——————————————————————————————
         metrics = ['num_nuc_spots', 'num_cyto_spots', 'num_spots']
         for rep in sorted(df['replica'].unique()):
             df_rep = df[df['replica'] == rep]
             for conc in sorted(set(df_rep['dex_conc']) - {0}):
-                # times with control (0 min) first
+                # Always include 0 min first
                 times = [0] + sorted(set(df_rep['time']) - {0})
                 n = len(times)
 
-                # compute CDF thresholds on control
+                # Calculate CDF thresholds on control (dex_conc=0, time=0)
                 ref = df_rep[(df_rep['dex_conc']==0) & (df_rep['time']==0)]
                 thr = {}
                 for m in metrics:
@@ -1634,7 +1683,6 @@ class PostProcessingDisplay:
                         np.interp(0.95, cdf, vals)
                     )
 
-                # colormap, reversed so control (first) is darkest
                 cmap = sns.color_palette("rocket_r", n_colors=n)[::-1]
 
                 for m in metrics:
@@ -1644,7 +1692,6 @@ class PostProcessingDisplay:
                         fontsize=14
                     )
 
-                    # shared bins across all times
                     all_vals = df_rep[m].dropna()
                     bins = np.linspace(all_vals.min(), all_vals.max(), 30)
 
@@ -1660,12 +1707,10 @@ class PostProcessingDisplay:
                         ax.fill_between(xs, y_off, y_off + heights,
                                         color=cmap[i], alpha=0.7)
 
-                    # overlay CDF threshold lines
                     lo, hi = thr[m]
                     ax.axvline(lo, color='red', linestyle='--', linewidth=1)
                     ax.axvline(hi, color='red', linestyle='-',  linewidth=1)
 
-                    # y‐axis as time labels
                     ax.set_yticks([n-1 - i for i in range(n)])
                     ax.set_yticklabels([f"{t} min" for t in times])
                     ax.set_xlabel("mRNA Count")
@@ -1674,57 +1719,50 @@ class PostProcessingDisplay:
                     plt.tight_layout(rect=[0,0,1,0.95])
                     plt.show()
 
+        # 3) Line plots of nuclear & cytoplasmic mRNA counts over time (mean ± SD)
+        # ————————————————————————————————————————————————————————————————
+        time_stats = (
+            df
+            .groupby(['time','dex_conc'])
+            .agg(
+                mean_nuc = ('num_nuc_spots','mean'),
+                sd_nuc   = ('num_nuc_spots','std'),
+                mean_cyto= ('num_cyto_spots','mean'),
+                sd_cyto  = ('num_cyto_spots','std'),
+            )
+            .reset_index()
+        )
 
-            # 3) Line plots of nuclear & cytoplasmic mRNA counts over time (mean ± SD)
-            # ————————————————————————————————————————————————————————————————
+        for conc in sorted(set(df['dex_conc']) - {0}):
+            subset = time_stats[time_stats['dex_conc'].isin([0, conc])].sort_values('time')
 
-            # Step 1: from the raw DataFrame, compute both mean and std _at the cell‐level_ for each time, dex_conc
-            time_stats = (
-                df
-                .groupby(['time','dex_conc'])
-                .agg(
-                    mean_nuc=('num_nuc_spots','mean'),
-                    sd_nuc  =('num_nuc_spots','std'),
-                    mean_cyto=('num_cyto_spots','mean'),
-                    sd_cyto =('num_cyto_spots','std')
-                )
-                .reset_index()
+            fig, ax = plt.subplots(figsize=(8, 4))
+
+            ax.errorbar(
+                subset['time'],
+                subset['mean_nuc'],
+                yerr=subset['sd_nuc'],
+                fmt='-o',
+                color='blue',
+                label='Nuclear mRNA'
+            )
+            ax.errorbar(
+                subset['time'],
+                subset['mean_cyto'],
+                yerr=subset['sd_cyto'],
+                fmt='-o',
+                color='orange',
+                label='Cytoplasmic mRNA'
             )
 
-            # Step 2: for each nonzero concentration, extract that subset (plus the 0 min control),
-            #           then draw the lines with error bars via matplotlib's `errorbar()`
-            for conc in sorted(set(df['dex_conc']) - {0}):
-                subset = time_stats[time_stats['dex_conc'].isin([0, conc])].sort_values('time')
+            ax.set_title(f"{conc} nM Dex: mRNA Counts Over Time (including 0 min control)")
+            ax.set_xlabel("Time (min)")
+            ax.set_ylabel("Mean ± SD")
+            ax.set_xticks(subset['time'])
+            ax.legend()
+            plt.tight_layout()
+            plt.show()
 
-                fig, ax = plt.subplots(figsize=(8, 4))
-
-                # Plot Nuclear mRNA: mean ± SD
-                ax.errorbar(
-                    subset['time'],
-                    subset['mean_nuc'],
-                    yerr=subset['sd_nuc'],
-                    fmt='-o',
-                    color='blue',
-                    label='Nuclear mRNA'
-                )
-
-                # Plot Cytoplasmic mRNA: mean ± SD
-                ax.errorbar(
-                    subset['time'],
-                    subset['mean_cyto'],
-                    yerr=subset['sd_cyto'],
-                    fmt='-o',
-                    color='orange',
-                    label='Cytoplasmic mRNA'
-                )
-
-                ax.set_title(f"{conc} nM Dex: mRNA Counts Over Time")
-                ax.set_xlabel("Time (min)")
-                ax.set_ylabel("Mean ± SD")
-                ax.set_xticks(subset['time'])   # ensure 0 min is shown on the x‐axis
-                ax.legend()
-                plt.tight_layout()
-                plt.show()
         print("All overview plots displayed.")
     
 
