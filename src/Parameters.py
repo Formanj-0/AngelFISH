@@ -42,13 +42,10 @@ class Parameters:
         }
         return json.dumps(non_default_values, default=str)
 
-    @classmethod
-    def from_json(cls, json_str):
+    def from_json(self, json_str):
         data = json.loads(json_str)
-        instance = cls()
         for key, value in data.items():
-            setattr(instance, key, value)
-        return instance
+            setattr(self, key, value)
 
 
 
@@ -61,7 +58,14 @@ import pyarrow.parquet as pq
 
 class Data:
     def __init__(self, zarr_path):
-        self._zarr_path = Path(zarr_path)
+        zarr_path = Path(zarr_path)
+        base = zarr_path
+        count = 1
+        while zarr_path.exists():
+            zarr_path = base.with_name(f"{base.stem}_{count}{base.suffix}")
+            count += 1
+        self._zarr_path = zarr_path
+        
         self._ds = None
         self._loaded = False
 
@@ -101,6 +105,9 @@ class Data:
             if parquet_path.exists():
                 return pd.read_parquet(parquet_path)
 
+        if name in self.dataset.attrs:
+            return self.dataset.attrs[name]
+
         if name in self.dataset.keys():
             result = self.dataset[name]
             return result
@@ -115,9 +122,9 @@ class Data:
 
         if isinstance(value, da.Array):
             value = value.compute()
-            self.dataset[name] = zarr.array(value)
+            self.dataset[name] = value
         elif isinstance(value, (np.ndarray, zarr.Array)):
-            self.dataset[name] = zarr.array(value)
+            self.dataset[name] = value
         elif isinstance(value, pd.DataFrame):
             # Save as Parquet inside the Zarr directory
             parquet_path = self._zarr_path / f"{name}.parquet"
@@ -125,7 +132,8 @@ class Data:
             pq.write_table(table, parquet_path)
             self.dataset.attrs[name] = 'parquet'
         else:
-            self.dataset[name] = json.dumps(value)
+            # Use Zarr attributes for JSON-serializable values
+            self.dataset.attrs[name] = value
 
 
     def __setitem__(self, key, value):

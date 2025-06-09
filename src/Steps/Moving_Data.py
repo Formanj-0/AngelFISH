@@ -12,7 +12,7 @@ import dask.array as da
 from datetime import datetime
 from abc import abstractmethod
 
-from source.NASConnection import NASConnection
+from src.NASConnection import NASConnection
 
 
 

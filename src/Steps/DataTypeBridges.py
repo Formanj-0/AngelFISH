@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 # from src import IndependentStepClass, DataContainer
 # from src.Parameters import Parameters
-from source.NASConnection import NASConnection
+from src.NASConnection import NASConnection
 
 
 
@@ -130,7 +130,7 @@ class DataTypeBridge_Dataset: # (IndependentStepClass):
 
         images = [ds.as_array(['position', 'time', 'channel','z']) for ds in dss]
         metadata = [ds.read_metadata(position=0, time=0, z=0, channel=0) for ds in dss]
-        exp_metadata = [m.get('exp_metadata', None) for m in metadata]
+        exp_metadata = [m.get('experimental_metadata', None) for m in metadata]
         position_indexs = [img.shape[0] for img in images]
         images = da.concatenate(images, axis=0)
         images = images.rechunk((1, 1, -1, -1, -1, -1))

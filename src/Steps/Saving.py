@@ -15,7 +15,7 @@ import gc
 from typing import List, Dict, Any, Union
 import zarr
 
-from source.NASConnection import NASConnection
+from src.NASConnection import NASConnection
 import tifffile
 import json
 
