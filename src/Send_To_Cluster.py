@@ -35,7 +35,8 @@ def send_file_and_run_on_cluster(remote_path: str, local_file: str, args=None, p
     sftp.close()
 
     # Command to execute the batch script
-    sbatch_command = f'sbatch runner_pipeline.sh {remote_file_path} {args} /dev/null 2>&1 & disown'
+    sbatch_command = f'sbatch runner_pipeline.sh {remote_file_path} "{args}" /dev/null 2>&1 & disown'
+    print(sbatch_command)
 
     # Execute the command on the cluster
     # Combine commands to change directory and execute the batch script

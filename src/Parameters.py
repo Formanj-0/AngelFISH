@@ -43,7 +43,12 @@ class Parameters:
         return json.dumps(non_default_values, default=str)
 
     def from_json(self, json_str):
-        data = json.loads(json_str)
+        import ast
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # Try to parse as Python dict string (with single quotes)
+            data = ast.literal_eval(json_str)
         for key, value in data.items():
             setattr(self, key, value)
 
