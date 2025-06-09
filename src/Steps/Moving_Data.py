@@ -90,7 +90,7 @@ class remove_all_temp(Moving_Data):
 
 
 class save_copy(Moving_Data):
-    def main(self, data_names:list[str], copy_locations:list[str], temp:str, connection_config_location, share_name, **kwargs):
+    def main(self, data_names:list[str], copy_locations:list[str], connection_config_location, share_name, **kwargs):
         import random
         if len(data_names) != len(copy_locations):
             raise BaseException('data and locations need to align')
