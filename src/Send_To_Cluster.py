@@ -35,7 +35,14 @@ def send_file_and_run_on_cluster(remote_path: str, local_file: str, args=None, p
     sftp.close()
 
     # Command to execute the batch script
-    sbatch_command = f'sbatch runner_pipeline.sh {remote_file_path} "{args}" /dev/null 2>&1 & disown'
+    # Add quotes around args only if it's not None and not already quoted
+    if args is not None and not (isinstance(args, str) and args.startswith('"') and args.endswith('"')):
+        args_str = f'"{args}"'
+    elif args is not None:
+        args_str = args
+    else:
+        args_str = ''
+    sbatch_command = f'sbatch runner_pipeline.sh {remote_file_path} "{args_str}" /dev/null 2>&1 & disown'
     print(sbatch_command)
 
     # Execute the command on the cluster
