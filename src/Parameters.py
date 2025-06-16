@@ -115,6 +115,8 @@ class Data:
 
         if name in self.dataset.keys():
             result = self.dataset[name]
+            if isinstance(result, (zarr.core.Array, np.ndarray)):
+                result = result[...].copy()
             return result
 
         else:
@@ -149,7 +151,19 @@ class Data:
         # Check if the key is valid (i.e., a tuple of indices)
         if isinstance(key, tuple):
             # If the key corresponds to a zarr array (like data.array[p, t])
-            self.dataset[key] = value
+            def __setitem__(self, key, value):
+                # Ensure the dataset is loaded
+                self.dataset
+
+                if isinstance(key, tuple) and len(key) > 1:
+                    arr_name = key[0]
+                    arr_index = key[1:]
+                    if arr_name not in self.dataset:
+                        # Optionally create an empty array if needed
+                        pass
+                    self.dataset[arr_name][arr_index] = value
+                else:
+                    raise TypeError(f"Invalid key: {key}. Expected something like data['nuc_masks', p, t].")
         else:
             raise TypeError(f"Invalid key type: {type(key)}. Expected tuple of indices.")
 
