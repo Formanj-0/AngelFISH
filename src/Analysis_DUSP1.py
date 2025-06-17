@@ -1562,560 +1562,319 @@ def lowercase_columns(*dfs):
     return [df.rename(columns=str.lower) for df in dfs]
 
 
-class PostProcessingDisplay:
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import gaussian_kde
+
+class PostProcessingPlotter:
     """
-    Handles post-processing display for time and concentration sweeps.
-
-    display_overview_plots(
-        mode: 'time' or 'conc',
-        total: bool = False,    # False: single replicate; True: pool all replicates
-        display: bool = True,   # plt.show() if True
-        save_dir: str = None    # directory to save figures
-    )
-
-    Modes:
-      - 'time': multiple timepoints (dex_conc fixed >0)
-      - 'conc': multiple concentrations (time fixed >0)
-
-    When total=False: expects exactly one replica in data; plots per-replica results.
-    When total=True: pools across replicas; shows per-replica and overall summary
-    with control (time=0 or dex_conc=0) always included.
+    Plotting utilities for DUSP1 post‐processing across multiple days.
+    
+    Methods:
+      - plot_time_sweep(dex_conc, save_dir=None, display=True)
+      - plot_conc_sweep(timepoint, save_dir=None, display=True)
+      - plot_time_conc_sweep(conc_list, save_dir=None, display=True)
     """
-    def __init__(self, spots_df, clusters_df, cellprops_df, ssit_cellresults_df):
-        self.spots = spots_df
-        self.clusters = clusters_df
-        self.cellprops = cellprops_df
-        self.ssit = ssit_cellresults_df
-
-    def display_overview_plots(self, mode='time', total=False, display=True, save_dir=None):
-        import os
-        import numpy as np
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        from scipy.stats import gaussian_kde
-
-        # prepare output folder
-        if save_dir:
-            os.makedirs(save_dir, exist_ok=True)
-
-        # styling
+    def __init__(self, clusters_df, cellprops_df, ssit_df):
+        # lowercase all columns for consistency
+        self.clusters = clusters_df.rename(columns=str.lower).copy()
+        self.cellprops = cellprops_df.rename(columns=str.lower).copy()
+        self.ssit = ssit_df.rename(columns=str.lower).copy()
+        
+        # which metrics to ridge/line‐plot
+        self.metrics = ['num_nuc_spots', 'num_cyto_spots', 'num_spots']
+        
+        # global style
         sns.set_theme(style='whitegrid', context='paper')
         plt.rcParams['font.family'] = 'Times New Roman'
 
-        # normalize columns
-        spots, clusters, cellprops, df = lowercase_columns(
-            self.spots.copy(),
-            self.clusters.copy(),
-            self.cellprops.copy(),
-            self.ssit.copy()
+    def plot_time_sweep(self, dex_conc, save_dir=None, display=True):
+        """
+        1) TS bar plot (0 min control from dex=0, plus dex_conc at various times)
+        2) Ridge plots of [num_nuc_spots, num_cyto_spots, num_spots] vs time
+        3) Line plot of mean±SD nuc/cyto spot count vs time
+        """
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+        
+        # ──────────────────────────────────────────────────────
+        # 1) TS frequency bar
+        # ──────────────────────────────────────────────────────
+        clusters = self.clusters[self.clusters['is_nuc'] == 1]
+        ts_count = (
+            clusters
+            .groupby(['replica','h5_idx','time','fov','cell_label'])
+            .size()
+            .reset_index(name='ts_count')
         )
-
-        # define control mask helper
-        ctrl_mask = df['dex_conc'] == 0
-
-        if mode == 'time':
-            # for each experimental concentration >0
-            for conc in sorted(c for c in df['dex_conc'].unique() if c > 0):
-                subset = df[ctrl_mask | (df['dex_conc'] == conc)]
-
-                # 1) TS-frequency bar chart by time
-                ts_nuc   = clusters[clusters['is_nuc']==1]
-                ts_count = (
-                    ts_nuc
-                    .groupby(['replica','h5_idx','time','fov','cell_label'])
-                    .size().reset_index(name='ts_count')
-                )
-                cells    = (
-                    cellprops[['replica','h5_idx','time','fov','cell_label','dex_conc']]
-                    .drop_duplicates()
-                )
-                merged   = pd.merge(cells, ts_count,
-                                    on=['replica','h5_idx','time','fov','cell_label'],
-                                    how='left').fillna({'ts_count':0})
-
-                if not total:
-                    # single replicate: stacked categories
-                    # 1a) merge spots → ts counts → cells
-                    ts_nuc   = clusters[clusters['is_nuc']==1]
-                    ts_count = (
-                        ts_nuc
-                        .groupby(['h5_idx','time','fov','cell_label'])
-                        .size()
-                        .reset_index(name='ts_count')
-                    )
-                    cells    = (
-                        cellprops[['h5_idx','time','fov','cell_label','dex_conc']]
-                        .drop_duplicates()
-                    )
-                    merged   = pd.merge(cells, ts_count,
-                                        on=['h5_idx','time','fov','cell_label'],
-                                        how='left').fillna({'ts_count':0})
-
-                    # 1b) Define full set of times: control plus any at this conc
-                    all_times = sorted({0} | set(merged.loc[merged['dex_conc']==conc, 'time']))
-
-                    # 1c) Extract control row(s), relabel to this conc
-                    ctrl = merged[(merged['dex_conc']==0)&(merged['time']==0)].copy()
-                    ctrl['dex_conc'] = conc
-
-                    # 1d) Experimental rows
-                    exp  = merged[ merged['dex_conc']==conc ].copy()
-
-                    # 1e) Combine, categorize, and compute fractions
-                    tmp = pd.concat([ctrl, exp], ignore_index=True)
-                    tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x>=4 else str(int(x)))
-                    grp = (
-                        tmp[tmp['ts_cat']!='0']
-                        .groupby(['dex_conc','time','ts_cat'])
-                        .size()
-                        .reset_index(name='count')
-                    )
-                    tot = (
-                        tmp
-                        .groupby(['dex_conc','time'])
-                        .size()
-                        .reset_index(name='total')
-                    )
-                    grp = pd.merge(grp, tot, on=['dex_conc','time'])
-                    grp['fraction'] = grp['count']/grp['total']
-
-                    # 1f) Pivot and reindex on full time list
-                    pivot = (
-                        grp
-                        .pivot(index=['dex_conc','time'], columns='ts_cat', values='fraction')
-                        .reindex(index=pd.MultiIndex.from_product([[conc], all_times]),
-                                columns=['1','2','3','>=4'],
-                                fill_value=0)
-                    )
-                    pivot_conc = pivot.loc[conc]  # now index=all_times
-
-                    # 1g) Plot
-                    fig, ax = plt.subplots(figsize=(8,4))
-                    pal = sns.color_palette("tab10", n_colors=4)
-                    pivot_conc.plot(kind='bar', ax=ax, color=pal, edgecolor='k')
-                    ax.set_xlabel("Time (min)")
-                    ax.set_ylabel("Fraction of Cells")
-                    ax.set_title(f"TS categories at {conc} nM Dex")
-                    ax.legend(title="TS count", bbox_to_anchor=(1.02,1), loc='upper left')
-                    plt.tight_layout()
-                    if save_dir: fig.savefig(os.path.join(save_dir, f"TS_time_{conc}.png"), dpi=300)
-                    if display: plt.show()
-                    plt.close(fig)
-                else:
-                    # total: bars per replica + overall
-                    # compute replica fractions
-                    # full set of times for this conc
-                    all_times = sorted({0} | set(merged.loc[merged['dex_conc']==conc,'time']))
-                    tmp = merged[(merged['dex_conc']==conc) | ((merged['dex_conc']==0)&(merged['time']==0))].copy()
-                    tmp['has_ts'] = (tmp['ts_count'] >= 1).astype(int)
-
-                    # per‐replica fractions
-                    rep = (
-                        tmp
-                        .groupby(['replica','dex_conc','time'])['has_ts']
-                        .mean()
-                        .reset_index(name='fraction')
-                    )
-
-                    # pivot & reindex
-                    pivot_rep = (
-                        rep
-                        .pivot(index='time', columns='replica', values='fraction')
-                        .reindex(index=all_times, fill_value=0)
-                    )
-
-                    # overall
-                    ov = (
-                        rep
-                        .groupby('time')['fraction']
-                        .agg(['mean','std'])
-                        .reindex(index=all_times, fill_value=0)
-                        .reset_index()
-                    )
-
-                    fig, ax = plt.subplots(figsize=(8,4))
-                    pivot_rep.plot(kind='bar', ax=ax, width=0.8)
-                    ax.errorbar(ov['time'], ov['mean'], yerr=ov['std'],
-                                fmt='-k', capsize=5, label='Overall')
-                    ax.set_xlabel("Time (min)")
-                    ax.set_ylabel("Fraction ≥1 TS")
-                    ax.set_title(f"TS fraction at {conc} nM Dex (all reps + overall)")
-                    ax.legend()
-                    plt.tight_layout()
-                    if save_dir: fig.savefig(os.path.join(save_dir, f"TS_time_total_{conc}.png"), dpi=300)
-                    if display: plt.show()
-                    plt.close(fig)
-
-                # 2) Ridge plots of mRNA counts by time
-                print(f"\n→ [DEBUG] Starting ridge plots for conc={conc}, total={total}")
-                print(f"             subset rows = {len(subset)}; replica UIDs = {subset['replica'].unique()}")
-
-                metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
-                for m in metrics:
-                    if m not in subset.columns:
-                        raise ValueError(f"Column '{m}' missing in subset!")
-                    else:
-                        print(f"             will plot metric '{m}' (n={subset[m].notna().sum()})")
-
-                if not total:
-                    metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
-
-                    # find the rep that ran this concentration
-                    reps_for_conc = subset.loc[subset['dex_conc']==conc, 'replica'].unique()
-                    if len(reps_for_conc) == 0:
-                        print(f"⚠️ No replicate with conc={conc} found; skipping ridge.")
-                        continue
-                    rep = reps_for_conc[0]
-                    df_rep = subset[subset['replica']==rep]
-
-                    print(f"→ plotting ridge for {rep} at {conc} nM")
-
-                    times = sorted(df_rep['time'].unique())
-                    n     = len(times)
-                    xs    = np.linspace(df_rep[m].min(), df_rep[m].max(), 200)
-
-                    for m in metrics:
-                        times = sorted(df_rep['time'].unique())
-                        n = len(times)
-                        # CDF thresholds on control
-                        ref = df_rep[df_rep['time']==0]
-                        vals = np.sort(ref[m].dropna())
-                        if len(vals)>=2:
-                            cdf = np.arange(1,len(vals)+1)/len(vals)
-                            thr = (np.interp(0.5,cdf,vals), np.interp(0.95,cdf,vals))
-                        else:
-                            thr = (0,0)
-                        cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
-                        xs = np.linspace(df_rep[m].min(), df_rep[m].max(), 200)
-                        fig, ax = plt.subplots(figsize=(8,n*1.2))
-                        fig.suptitle(f'{rep} — {conc}nM Dex: {m}')
-                        for i,t in enumerate(times):
-                            data = df_rep[df_rep['time']==t][m].dropna()
-                            if len(data)>=2:
-                                kde = gaussian_kde(data); y = kde(xs); y = y/y.max()*0.8
-                            else:
-                                y = np.zeros_like(xs)
-                            y_off = n-1-i
-                            ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
-                        ax.axvline(thr[0], linestyle='--', color='red')
-                        ax.axvline(thr[1], linestyle='-', color='red')
-                        ax.set_yticks([n-1-i for i in range(n)])
-                        ax.set_yticklabels([f'{t}min' for t in times])
-                        ax.set_xlabel('mRNA Count')
-                        plt.tight_layout(rect=[0,0,1,0.95])
-                        if save_dir: fig.savefig(os.path.join(save_dir,f'ridge_time_rep_{conc}_{m}.png'), dpi=300)
-                        if display: plt.show()
-                        plt.close(fig)
-                else:
-                    # total pooled
-                    for m in metrics:
-                        times = sorted(subset['time'].unique())
-                        n = len(times)
-                        ref = subset[subset['time']==0]
-                        vals0 = np.sort(ref[m].dropna())
-                        if len(vals0)>=2:
-                            cdf0 = np.arange(1,len(vals0)+1)/len(vals0)
-                            thr = (np.interp(0.5,cdf0,vals0), np.interp(0.95,cdf0,vals0))
-                        else:
-                            thr = (0,0)
-                        xs = np.linspace(subset[m].min(), subset[m].max(), 200)
-                        cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
-                        fig, ax = plt.subplots(figsize=(8,n*1.2))
-                        fig.suptitle(f'Pooled — {conc}nM Dex: {m}')
-                        for i,t in enumerate(times):
-                            data = subset[subset['time']==t][m].dropna()
-                            if len(data)>=2:
-                                kde = gaussian_kde(data); y = kde(xs); y = y/y.max()*0.8
-                            else:
-                                y = np.zeros_like(xs)
-                            y_off = n-1-i
-                            ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
-                        ax.axvline(thr[0], linestyle='--', color='red')
-                        ax.axvline(thr[1], linestyle='-', color='red')
-                        ax.set_yticks([n-1-i for i in range(n)])
-                        ax.set_yticklabels([f'{t}min' for t in times])
-                        ax.set_xlabel('mRNA Count')
-                        plt.tight_layout(rect=[0,0,1,0.95])
-                        if save_dir: fig.savefig(os.path.join(save_dir,f'ridge_time_total_{conc}_{m}.png'), dpi=300)
-                        if display: plt.show()
-                        plt.close(fig)
-
-                # 3) Line plots vs time
-                print(f"\n→ [DEBUG] Starting line plots for conc={conc}, total={total}")
-                print(f"             subset rows = {len(subset)}; times = {sorted(subset['time'].unique())}")
-                if not total:
-                    # pick the correct replicate
-                    reps_for_conc = subset.loc[subset['dex_conc']==conc, 'replica'].unique()
-                    rep = reps_for_conc[0]
-                    df_rep = subset[subset['replica']==rep]
-
-                    print(f"→ plotting line for {rep} at {conc} nM")
-
-                    stats = (
-                        df_rep.groupby('time')
-                            .agg(mean_n=('num_nuc_spots','mean'),
-                                sd_n  =('num_nuc_spots','std'),
-                                mean_c=('num_cyto_spots','mean'),
-                                sd_c  =('num_cyto_spots','std'))
-                            .reset_index()
-                    )
-                    fig, ax = plt.subplots(figsize=(8,4))
-                    ax.errorbar(stats['time'], stats['mean_n'], yerr=stats['sd_n'], fmt='-o', color='blue', label='Nuc')
-                    ax.errorbar(stats['time'], stats['mean_c'], yerr=stats['sd_c'], fmt='-o', color='orange', label='Cyto')
-                    ax.set_xlabel('Time (min)')
-                    ax.set_ylabel('Mean ± SD')
-                    ax.set_title(f'{rep} — {conc} nM Dex over time')
-                    ax.legend()
-                    plt.tight_layout()
-                    if save_dir: fig.savefig(os.path.join(save_dir,f'line_time_rep_{conc}.png'), dpi=300)
-                    if display: plt.show()
-                    plt.close(fig)
-                else:
-                    # total: replica lines + overall
-                    # replica stats
-                    repm = (
-                        subset.groupby(['replica','time'])
-                              .agg(rm_n=('num_nuc_spots','mean'), rm_c=('num_cyto_spots','mean'))
-                              .reset_index()
-                    )
-                    repsd = (
-                        repm.groupby(['replica','time'])[['rm_n','rm_c']]
-                            .agg('std').reset_index()
-                    )
-                    overall = (
-                        subset.groupby('time')
-                              .agg(om_n=('num_nuc_spots','mean'), sd_om_n=('num_nuc_spots','std'),
-                                   om_c=('num_cyto_spots','mean'), sd_om_c=('num_cyto_spots','std'))
-                              .reset_index()
-                    )
-                    fig, ax = plt.subplots(figsize=(8,4))
-                    # shaded overall
-                    ax.fill_between(overall['time'],
-                                    overall['om_n']-overall['sd_om_n'],
-                                    overall['om_n']+overall['sd_om_n'],
-                                    color='lightblue', alpha=0.3)
-                    ax.fill_between(overall['time'],
-                                    overall['om_c']-overall['sd_om_c'],
-                                    overall['om_c']+overall['sd_om_c'],
-                                    color='lightcoral', alpha=0.3)
-                    # overall dotted + diamonds
-                    ax.plot(overall['time'], overall['om_n'], linestyle='--', marker='D', color='blue', label='Overall Nuc')
-                    ax.plot(overall['time'], overall['om_c'], linestyle='--', marker='D', color='orange', label='Overall Cyto')
-                    # replica
-                    for rep in repm['replica'].unique():
-                        rdat = repm[repm['replica']==rep]
-                        rsd  = repsd[repsd['replica']==rep]
-                        ax.errorbar(rdat['time'], rdat['rm_n'], yerr=rsd['rm_n'], fmt='-o', color='blue', alpha=0.6)
-                        ax.errorbar(rdat['time'], rdat['rm_c'], yerr=rsd['rm_c'], fmt='-o', color='orange', alpha=0.6)
-                    ax.set_xlabel('Time (min)')
-                    ax.set_ylabel('mRNA spot count')
-                    ax.set_title(f'All replicates — {conc} nM Dex (time)')
-                    ax.legend()
-                    plt.tight_layout()
-                    if save_dir: fig.savefig(os.path.join(save_dir,f'line_time_total_{conc}.png'), dpi=300)
-                    if display: plt.show()
-                    plt.close(fig)
-
-        # ---------------- CONC MODE ----------------
-        elif mode == 'conc':
-            # detect single nonzero time
-            times = sorted(df['time'].unique())
-            nonzero = [t for t in times if t!=0]
-            if len(nonzero)!=1:
-                raise ValueError(f"mode='conc' requires one nonzero time; found {nonzero}")
-            t = nonzero[0]
-            subset = df[(df['time']==t) | (df['time']==0)]
-
-            # 1) TS bar vs concentration
-            ts_nuc = clusters[clusters['is_nuc']==1]
-            ts_count = ts_nuc.groupby(['h5_idx','time','fov','cell_label']).size().reset_index(name='ts_count')
-            cells = cellprops[['h5_idx','time','fov','cell_label','dex_conc']].drop_duplicates()
-            merged = pd.merge(cells, ts_count, on=['h5_idx','time','fov','cell_label'], how='left').fillna({'ts_count':0})
-            merged = merged[merged['time'].isin([0,t])]
-
-            if not total:
-                # build merged for this time + control
-                ts_nuc   = clusters[clusters['is_nuc']==1]
-                ts_count = (
-                    ts_nuc
-                    .groupby(['h5_idx','time','fov','cell_label'])
-                    .size()
-                    .reset_index(name='ts_count')
-                )
-                cells    = (
-                    cellprops[['h5_idx','time','fov','cell_label','dex_conc']]
-                    .drop_duplicates()
-                )
-                merged   = pd.merge(cells, ts_count,
-                                    on=['h5_idx','time','fov','cell_label'],
-                                    how='left').fillna({'ts_count':0})
-                # times are now dex_concs
-                all_concs = sorted({0} | set(merged.loc[merged['time']==t, 'dex_conc']))
-
-                ctrl = merged[(merged['dex_conc']==0)&(merged['time']==0)].copy()
-                ctrl['time'] = t              # relabel control time
-                exp  = merged[ merged['time']==t ].copy()
-
-                tmp  = pd.concat([ctrl, exp], ignore_index=True)
-                tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x>=4 else str(int(x)))
-                grp = (
-                    tmp[tmp['ts_cat']!='0']
-                    .groupby(['dex_conc','ts_cat'])
-                    .size()
-                    .reset_index(name='count')
-                )
-                tot = tmp.groupby('dex_conc').size().reset_index(name='total')
-                grp = pd.merge(grp, tot, on='dex_conc')
-                grp['fraction'] = grp['count']/grp['total']
-
-                pivot = (
-                    grp
-                    .pivot(index='dex_conc', columns='ts_cat', values='fraction')
-                    .reindex(index=all_concs, columns=['1','2','3','>=4'], fill_value=0)
-                )
-
-                fig, ax = plt.subplots(figsize=(8,4))
-                pal = sns.color_palette("tab10", n_colors=4)
-                pivot.plot(kind='bar', ax=ax, edgecolor='k', color=pal)
-                ax.set_xlabel("Dex_Conc (nM)")
-                ax.set_ylabel("Fraction of Cells")
-                ax.set_title(f"TS categories at t={t} min")
-                plt.tight_layout()
-                if save_dir: fig.savefig(os.path.join(save_dir, f"TS_conc_{t}.png"), dpi=300)
-                if display: plt.show()
-                plt.close(fig)
+        cells = (
+            self.cellprops[['replica','h5_idx','time','fov','cell_label','dex_conc']]
+            .drop_duplicates()
+        )
+        # include the no-Dex 0 min control, plus this concentration at all times
+        subset_cells = cells[
+            (cells['dex_conc'] == dex_conc) |
+            ((cells['dex_conc'] == 0) & (cells['time'] == 0))
+        ]
+        merged = pd.merge(
+            subset_cells, ts_count,
+            on=['replica','h5_idx','time','fov','cell_label'],
+            how='left'
+        ).fillna({'ts_count': 0})
+        
+        tmp = merged.copy()
+        tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x >= 4 else str(int(x)))
+        grp = (
+            tmp[tmp['ts_cat'] != '0']
+            .groupby(['time','ts_cat'])
+            .size().reset_index(name='count')
+        )
+        tot = tmp.groupby('time').size().reset_index(name='total')
+        grp = pd.merge(grp, tot, on='time')
+        grp['fraction'] = grp['count'] / grp['total']
+        
+        pivot = (
+            grp
+            .pivot(index='time', columns='ts_cat', values='fraction')
+            .reindex(columns=['1','2','3','>=4'], fill_value=0)
+        )
+        
+        fig, ax = plt.subplots(figsize=(8,4))
+        pal = sns.color_palette("tab10", n_colors=4)
+        pivot.plot(kind='bar', ax=ax, color=pal, edgecolor='k')
+        ax.set_xlabel("Time (min)")
+        ax.set_ylabel("Fraction of Cells")
+        ax.set_title(f"TS categories at {dex_conc} nM Dex")
+        ax.legend(title="TS count", bbox_to_anchor=(1.02,1), loc='upper left')
+        plt.tight_layout()
+        if save_dir:
+            fig.savefig(os.path.join(save_dir, f"ts_time_{dex_conc}.png"), dpi=300)
+        if display:
+            plt.show()
+        plt.close(fig)
+        
+        # ──────────────────────────────────────────────────────
+        # 2) Ridge plots
+        # ──────────────────────────────────────────────────────
+        df = self.ssit[self.ssit['dex_conc'] == dex_conc]
+        times = sorted(df['time'].unique())
+        n = len(times)
+        for m in self.metrics:
+            xs = np.linspace(df[m].min(), df[m].max(), 200)
+            
+            # compute CDF thresholds from 0 min (dex_conc at time=0)
+            ref = df[df['time']==0][m].dropna()
+            if len(ref) >= 2:
+                cdf = np.arange(1,len(ref)+1)/len(ref)
+                thr0 = np.interp(0.5, cdf, np.sort(ref))
+                thr1 = np.interp(0.95, cdf, np.sort(ref))
             else:
-                all_concs = sorted({0} | set(merged.loc[merged['time']==t, 'dex_conc']))
+                thr0 = thr1 = None
+            
+            fig, ax = plt.subplots(figsize=(8, n*1.2))
+            fig.suptitle(f"Time sweep — {dex_conc} nM Dex: {m}")
+            cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
+            
+            for i, t in enumerate(times):
+                data = df[df['time']==t][m].dropna()
+                if len(data) >= 2:
+                    kde = gaussian_kde(data)
+                    y = kde(xs); y = y/y.max()*0.8
+                else:
+                    y = np.zeros_like(xs)
+                y_off = n-1-i
+                ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
+            
+            if thr0 is not None:
+                ax.axvline(thr0, linestyle='--', color='red')
+                ax.axvline(thr1, linestyle='-',  color='red')
+            
+            ax.set_yticks([n-1-i for i in range(n)])
+            ax.set_yticklabels([f"{t} min" for t in times])
+            ax.set_xlabel("mRNA Count")
+            plt.tight_layout(rect=[0,0,1,0.95])
+            if save_dir:
+                fig.savefig(os.path.join(save_dir, f"ridge_time_{dex_conc}_{m}.png"), dpi=300)
+            if display:
+                plt.show()
+            plt.close(fig)
+        
+        # ──────────────────────────────────────────────────────
+        # 3) Line plot vs time
+        # ──────────────────────────────────────────────────────
+        stats = (
+            df.groupby('time')
+              .agg(mean_n=('num_nuc_spots','mean'),
+                   sd_n  =('num_nuc_spots','std'),
+                   mean_c=('num_cyto_spots','mean'),
+                   sd_c  =('num_cyto_spots','std'))
+              .reset_index()
+        )
+        fig, ax = plt.subplots(figsize=(8,4))
+        ax.errorbar(stats['time'], stats['mean_n'], yerr=stats['sd_n'],
+                    fmt='-o', color='blue', label='Nuc')
+        ax.errorbar(stats['time'], stats['mean_c'], yerr=stats['sd_c'],
+                    fmt='-o', color='orange', label='Cyto')
+        ax.set_xlabel("Time (min)")
+        ax.set_ylabel("Mean ± SD")
+        ax.set_title(f"Time sweep — {dex_conc} nM Dex")
+        ax.legend()
+        plt.tight_layout()
+        if save_dir:
+            fig.savefig(os.path.join(save_dir, f"line_time_{dex_conc}.png"), dpi=300)
+        if display:
+            plt.show()
+        plt.close(fig)
 
-                tmp = merged[(merged['time']==t) | ((merged['dex_conc']==0)&(merged['time']==0))].copy()
-                tmp['has_ts'] = (tmp['ts_count'] >= 1).astype(int)
+    def plot_conc_sweep(self, timepoint, save_dir=None, display=True):
+        """
+        1) TS bar vs dex_conc (including 0 min control at dex=0)
+        2) Ridge plots vs dex_conc
+        3) Line plot vs dex_conc (log scale)
+        """
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
 
-                rep = (
-                    tmp
-                    .groupby(['replica','dex_conc'])['has_ts']
-                    .mean()
-                    .reset_index(name='fraction')
-                )
+        # ──────────────────────────────────────────────────────
+        # 1) TS frequency bar
+        # ──────────────────────────────────────────────────────
+        clusters = self.clusters[self.clusters['is_nuc'] == 1]
+        ts_count = (
+            clusters
+            .groupby(['replica','h5_idx','time','fov','cell_label'])
+            .size().reset_index(name='ts_count')
+        )
+        cells = (
+            self.cellprops[['replica','h5_idx','time','fov','cell_label','dex_conc']]
+            .drop_duplicates()
+        )
+        subset_cells = cells[
+            (cells['time']==timepoint) |
+            ((cells['dex_conc']==0)&(cells['time']==0))
+        ]
+        merged = pd.merge(
+            subset_cells, ts_count,
+            on=['replica','h5_idx','time','fov','cell_label'],
+            how='left'
+        ).fillna({'ts_count': 0})
+        
+        tmp = merged.copy()
+        tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x >= 4 else str(int(x)))
+        grp = (
+            tmp[tmp['ts_cat'] != '0']
+            .groupby(['dex_conc','ts_cat'])
+            .size().reset_index(name='count')
+        )
+        tot = tmp.groupby('dex_conc').size().reset_index(name='total')
+        grp = pd.merge(grp, tot, on='dex_conc')
+        grp['fraction'] = grp['count'] / grp['total']
+        
+        concs = sorted(tmp['dex_conc'].unique())
+        pivot = (
+            grp
+            .pivot(index='dex_conc', columns='ts_cat', values='fraction')
+            .reindex(index=concs, columns=['1','2','3','>=4'], fill_value=0)
+        )
+        
+        fig, ax = plt.subplots(figsize=(8,4))
+        pal = sns.color_palette("tab10", n_colors=4)
+        pivot.plot(kind='bar', ax=ax, color=pal, edgecolor='k')
+        ax.set_xlabel("Dex_Conc (nM)")
+        ax.set_ylabel("Fraction of Cells")
+        ax.set_title(f"TS categories at t={timepoint} min")
+        plt.tight_layout()
+        if save_dir:
+            fig.savefig(os.path.join(save_dir, f"ts_conc_{timepoint}.png"), dpi=300)
+        if display:
+            plt.show()
+        plt.close(fig)
 
-                pivot_rep = (
-                    rep
-                    .pivot(index='dex_conc', columns='replica', values='fraction')
-                    .reindex(index=all_concs, fill_value=0)
-                )
-
-                ov = (
-                    rep
-                    .groupby('dex_conc')['fraction']
-                    .agg(['mean','std'])
-                    .reindex(index=all_concs, fill_value=0)
-                    .reset_index()
-                )
-
-                fig, ax = plt.subplots(figsize=(8,4))
-                pivot_rep.plot(kind='bar', ax=ax, width=0.8)
-                ax.errorbar(ov['dex_conc'], ov['mean'], yerr=ov['std'],
-                            fmt='-k', capsize=5, label='Overall')
-                ax.set_xscale('log')
-                ax.set_xlabel("Dex_Conc (nM)")
-                ax.set_ylabel("Fraction ≥1 TS")
-                ax.set_title(f"TS fraction at t={t} min (all reps + overall)")
-                ax.legend()
-                plt.tight_layout()
-                if save_dir: fig.savefig(os.path.join(save_dir, f"TS_conc_total_{t}.png"), dpi=300)
-                if display: plt.show()
-                plt.close(fig)
-
-            # 2) Ridge vs concentration
-            metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
-            if not total:
-                rep = subset['replica'].unique()[0]
-                df_rep = subset[subset['replica']==rep]
-                for m in metrics:
-                    concs = sorted(df_rep['dex_conc'].unique())
-                    n = len(concs)
-                    xs = np.linspace(df_rep[m].min(), df_rep[m].max(),200)
-                    fig,ax=plt.subplots(figsize=(8,n*1.2))
-                    fig.suptitle(f'{rep} — {m} at t={t}min')
-                    for i,c in enumerate(concs):
-                        data = df_rep[df_rep['dex_conc']==c][m].dropna()
-                        if len(data)>=2:
-                            kde = gaussian_kde(data); y=kde(xs); y=y/y.max()*0.8
-                        else: y=np.zeros_like(xs)
-                        ax.fill_between(xs, n-1-i, n-1-i+y, alpha=0.7)
-                    ax.set_yticks([n-1-i for i in range(n)]); ax.set_yticklabels([str(c) for c in concs])
-                    ax.set_xlabel('mRNA Count'); plt.tight_layout(rect=[0,0,1,0.95])
-                    if save_dir: fig.savefig(os.path.join(save_dir,f'ridge_conc_{rep}_{t}_{m}.png'),dpi=300)
-                    if display: plt.show(); plt.close(fig)
+        # ──────────────────────────────────────────────────────
+        # 2) Ridge vs dex_conc
+        # ──────────────────────────────────────────────────────
+        df = self.ssit
+        subset = df[(df['time']==timepoint) | (df['time']==0)]
+        concs = sorted(subset['dex_conc'].unique())
+        n = len(concs)
+        for m in self.metrics:
+            xs = np.linspace(subset[m].min(), subset[m].max(), 200)
+            
+            # control thresholds at dex=0
+            ref = subset[subset['dex_conc']==0][m].dropna()
+            if len(ref) >= 2:
+                cdf = np.arange(1,len(ref)+1)/len(ref)
+                thr0 = np.interp(0.5, cdf, np.sort(ref))
+                thr1 = np.interp(0.95, cdf, np.sort(ref))
             else:
-                for m in metrics:
-                    concs = [0] + sorted(subset['dex_conc'].unique())
-                    n = len(concs)
-                    xs = np.linspace(subset[m].min(), subset[m].max(),200)
-                    fig,ax=plt.subplots(figsize=(8,n*1.2))
-                    fig.suptitle(f'Pooled — {m} at t={t}min')
-                    for i,c in enumerate(concs):
-                        if c==0: data=subset[subset['dex_conc']==0][m].dropna()
-                        else:    data=subset[subset['dex_conc']==c][m].dropna()
-                        if len(data)>=2:
-                            kde=gaussian_kde(data); y=kde(xs); y=y/y.max()*0.8
-                        else: y=np.zeros_like(xs)
-                        ax.fill_between(xs, n-1-i, n-1-i+y, alpha=0.7)
-                    ax.set_yticks([n-1-i for i in range(n)]); ax.set_yticklabels([str(c) for c in concs])
-                    ax.set_xlabel('mRNA Count'); plt.tight_layout(rect=[0,0,1,0.95])
-                    if save_dir: fig.savefig(os.path.join(save_dir,f'ridge_conc_total_{t}_{m}.png'),dpi=300)
-                    if display: plt.show(); plt.close(fig)
+                thr0 = thr1 = None
+            
+            fig, ax = plt.subplots(figsize=(8,n*1.2))
+            fig.suptitle(f"Conc sweep at t={timepoint} min: {m}")
+            cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
+            
+            for i, c in enumerate(concs):
+                data = subset[subset['dex_conc']==c][m].dropna()
+                if len(data) >= 2:
+                    kde = gaussian_kde(data)
+                    y = kde(xs); y = y/y.max()*0.8
+                else:
+                    y = np.zeros_like(xs)
+                y_off = n-1-i
+                ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
+            
+            if thr0 is not None:
+                ax.axvline(thr0, linestyle='--', color='red')
+                ax.axvline(thr1, linestyle='-',  color='red')
+            
+            ax.set_yticks([n-1-i for i in range(n)])
+            ax.set_yticklabels([f"{c} nM" for c in concs])
+            ax.set_xlabel("mRNA Count")
+            plt.tight_layout(rect=[0,0,1,0.95])
+            if save_dir:
+                fig.savefig(os.path.join(save_dir, f"ridge_conc_{timepoint}_{m}.png"), dpi=300)
+            if display:
+                plt.show()
+            plt.close(fig)
 
-            # 3) Line vs concentration
-            if not total:
-                rep= subset['replica'].unique()[0]
-                stats = (
-                    subset.groupby('dex_conc')
-                          .agg(mean_n=('num_nuc_spots','mean'), sd_n=('num_nuc_spots','std'),
-                               mean_c=('num_cyto_spots','mean'), sd_c=('num_cyto_spots','std'))
-                          .reset_index()
-                )
-                fig, ax = plt.subplots(figsize=(8,4))
-                ax.errorbar(stats['dex_conc'], stats['mean_n'], yerr=stats['sd_n'], fmt='-o', color='blue', label='Nuc')
-                ax.errorbar(stats['dex_conc'], stats['mean_c'], yerr=stats['sd_c'], fmt='-o', color='orange', label='Cyto')
-                ax.set_xscale('log'); ax.set_xlabel('Dex_Conc'); ax.set_ylabel('Mean ± SD'); ax.legend()
-                plt.tight_layout()
-                if save_dir: fig.savefig(os.path.join(save_dir,f'line_conc_{rep}_{t}.png'),dpi=300)
-                if display: plt.show(); plt.close(fig)
-            else:
-                # pooled
-                repm = (
-                    subset.groupby(['replica','dex_conc'])
-                          .agg(rm_n=('num_nuc_spots','mean'), rm_c=('num_cyto_spots','mean'))
-                          .reset_index()
-                )
-                repsd = repm.groupby(['replica','dex_conc'])[['rm_n','rm_c']].std().reset_index()
-                overall = (
-                    subset.groupby('dex_conc')
-                          .agg(om_n=('num_nuc_spots','mean'), sd_om_n=('num_nuc_spots','std'),
-                               om_c=('num_cyto_spots','mean'), sd_om_c=('num_cyto_spots','std'))
-                          .reset_index()
-                )
-                fig, ax = plt.subplots(figsize=(8,4))
-                # overall shading
-                ax.fill_between(overall['dex_conc'], overall['om_n']-overall['sd_om_n'], overall['om_n']+overall['sd_om_n'], color='lightblue', alpha=0.3)
-                ax.fill_between(overall['dex_conc'], overall['om_c']-overall['sd_om_c'], overall['om_c']+overall['sd_om_c'], color='lightcoral', alpha=0.3)
-                # overall dotted
-                ax.plot(overall['dex_conc'], overall['om_n'], '--D', color='blue', label='Overall Nuc')
-                ax.plot(overall['dex_conc'], overall['om_c'], '--D', color='orange', label='Overall Cyto')
-                # replica lines
-                for rep in repm['replica'].unique():
-                    rdat = repm[repm['replica']==rep]
-                    rsd  = repsd[repsd['replica']==rep]
-                    ax.errorbar(rdat['dex_conc'], rdat['rm_n'], yerr=rsd['rm_n'], fmt='-o', color='blue', alpha=0.6)
-                    ax.errorbar(rdat['dex_conc'], rdat['rm_c'], yerr=rsd['rm_c'], fmt='-o', color='orange', alpha=0.6)
-                ax.set_xscale('log'); ax.set_xlabel('Dex_Conc'); ax.set_ylabel('mRNA count'); ax.legend()
-                plt.tight_layout()
-                if save_dir: fig.savefig(os.path.join(save_dir,f'line_conc_total_{t}.png'),dpi=300)
-                if display: plt.show(); plt.close(fig)
+        # ──────────────────────────────────────────────────────
+        # 3) Line vs dex_conc
+        # ──────────────────────────────────────────────────────
+        stats = (
+            subset.groupby('dex_conc')
+                  .agg(mean_n=('num_nuc_spots','mean'),
+                       sd_n  =('num_nuc_spots','std'),
+                       mean_c=('num_cyto_spots','mean'),
+                       sd_c  =('num_cyto_spots','std'))
+                  .reset_index()
+        )
+        fig, ax = plt.subplots(figsize=(8,4))
+        ax.errorbar(stats['dex_conc'], stats['mean_n'], yerr=stats['sd_n'],
+                    fmt='-o', color='blue', label='Nuc')
+        ax.errorbar(stats['dex_conc'], stats['mean_c'], yerr=stats['sd_c'],
+                    fmt='-o', color='orange', label='Cyto')
+        ax.set_xscale('log')
+        ax.set_xlabel("Dex_Conc (nM)")
+        ax.set_ylabel("Mean ± SD")
+        ax.set_title(f"Conc sweep at t={timepoint} min")
+        ax.legend()
+        plt.tight_layout()
+        if save_dir:
+            fig.savefig(os.path.join(save_dir, f"line_conc_{timepoint}.png"), dpi=300)
+        if display:
+            plt.show()
+        plt.close(fig)
 
-        else:
-            raise ValueError("mode must be 'time' or 'conc'.")
+    def plot_time_conc_sweep(self, conc_list, save_dir=None, display=True):
+        """
+        For a list of test concentrations, run a time sweep for each.
+        (Assumes each has the same timepoints + a 0 min control.)
+        """
+        for dex_conc in conc_list:
+            print(f"\n=== Time sweep for {dex_conc} nM Dex ===")
+            self.plot_time_sweep(dex_conc, save_dir=save_dir, display=display)
     
 
 import os
