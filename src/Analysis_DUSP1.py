@@ -262,9 +262,17 @@ class DUSP1AnalysisManager:
                 self.h5_files.append(h5py.File(l, self.mode))
     
     def close(self):
-        for h in self.h5_files:
-            h.flush()
-            h.close()
+        for h in getattr(self, 'h5_files', []):
+            try:
+                # only flush if opened with write mode
+                if self.mode and self.mode != 'r':
+                    h.flush()
+            except Exception:
+                pass
+            try:
+                h.close()
+            except Exception:
+                pass
     
     def list_datasets(self):
         if hasattr(self, 'analysis_names'):
@@ -1281,7 +1289,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             # If your cluster DF has centroid x_px,y_px => we can arrow that
             sx = tsrow['x_px'] - dx
             sy = tsrow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='magenta')
+            draw_spot_circle(axs[1], sx, sy, radius=4, color='magenta')
             cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
             axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
 
@@ -1289,7 +1297,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         for _, frow in cell_foci.iterrows():
             sx = frow['x_px'] - dx
             sy = frow['y_px'] - dy
-            draw_spot_arrow(axs[1], sx, sy, offset=-10, color='cyan')
+            draw_spot_circle(axs[1], sx, sy, radius=4, color='cyan')
             foci_size = getattr(frow, 'nb_spots', 1)
             axs[1].text(sx - 12, sy, f'{foci_size}', color='cyan', fontsize=10)
 
@@ -1352,7 +1360,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             rx = tx - x1
             ry = ty - y1
             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_arrow(ax, rx, ry, offset=-10, color='magenta')
+                draw_spot_circle(ax, rx, ry, radius=4, color='magenta')
                 # Optionally annotate TS size:
                 csize = getattr(self.chosen_ts, 'nb_spots', 1)
                 ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
@@ -1364,7 +1372,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
             rx = tx - x1
             ry = ty - y1
             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_arrow(ax, rx, ry, offset=-10, color='cyan')
+                draw_spot_circle(ax, rx, ry, radius=4, color='cyan')
                 # Optionally annotate TS size:
                 csize = getattr(self.chosen_foci, 'nb_spots', 1)
                 ax.text(rx - 12, ry, f"{csize}", color='cyan', fontsize=10)
@@ -1398,8 +1406,8 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
 
         Calculates the percentage of spots removed for each cell.
         Calculates summary stats for each 'h5_idx', 'fov', and 'cell'.
-            -  High: > 80% removed
-            -  Medium: 40% <= removed < 60%
+            -  High: >= 80% removed
+            -  Medium: 40% <= removed < 80%
             -  Low: < 40% removed
 
         Returns:
@@ -1425,8 +1433,8 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
 
         # Categorize removal percentage into High, Medium, Low
         conditions = [
-            (self.cellprops['removal_percentage'] > 80),
-            (self.cellprops['removal_percentage'] >= 40) & (self.cellprops['removal_percentage'] <= 60),
+            (self.cellprops['removal_percentage'] >= 80),
+            (self.cellprops['removal_percentage'] >= 40) & (self.cellprops['removal_percentage'] < 80),
             (self.cellprops['removal_percentage'] < 40)
         ]
         choices = ['High', 'Medium', 'Low']
@@ -1545,7 +1553,6 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
 
         print("All display routines completed.")
 
-from matplotlib.ticker import ScalarFormatter, NullFormatter, LogLocator
 
 def lowercase_columns(*dfs):
     """
@@ -1740,12 +1747,34 @@ class PostProcessingDisplay:
                     if display: plt.show()
                     plt.close(fig)
 
-                # 2) Ridge (joy) plots
+                # 2) Ridge plots of mRNA counts by time
+                print(f"\n→ [DEBUG] Starting ridge plots for conc={conc}, total={total}")
+                print(f"             subset rows = {len(subset)}; replica UIDs = {subset['replica'].unique()}")
+
                 metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
+                for m in metrics:
+                    if m not in subset.columns:
+                        raise ValueError(f"Column '{m}' missing in subset!")
+                    else:
+                        print(f"             will plot metric '{m}' (n={subset[m].notna().sum()})")
+
                 if not total:
-                    # single replicate
-                    rep = subset['replica'].unique()[0]
+                    metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
+
+                    # find the rep that ran this concentration
+                    reps_for_conc = subset.loc[subset['dex_conc']==conc, 'replica'].unique()
+                    if len(reps_for_conc) == 0:
+                        print(f"⚠️ No replicate with conc={conc} found; skipping ridge.")
+                        continue
+                    rep = reps_for_conc[0]
                     df_rep = subset[subset['replica']==rep]
+
+                    print(f"→ plotting ridge for {rep} at {conc} nM")
+
+                    times = sorted(df_rep['time'].unique())
+                    n     = len(times)
+                    xs    = np.linspace(df_rep[m].min(), df_rep[m].max(), 200)
+
                     for m in metrics:
                         times = sorted(df_rep['time'].unique())
                         n = len(times)
@@ -1813,14 +1842,23 @@ class PostProcessingDisplay:
                         plt.close(fig)
 
                 # 3) Line plots vs time
+                print(f"\n→ [DEBUG] Starting line plots for conc={conc}, total={total}")
+                print(f"             subset rows = {len(subset)}; times = {sorted(subset['time'].unique())}")
                 if not total:
-                    rep = subset['replica'].unique()[0]
+                    # pick the correct replicate
+                    reps_for_conc = subset.loc[subset['dex_conc']==conc, 'replica'].unique()
+                    rep = reps_for_conc[0]
                     df_rep = subset[subset['replica']==rep]
+
+                    print(f"→ plotting line for {rep} at {conc} nM")
+
                     stats = (
                         df_rep.groupby('time')
-                              .agg(mean_n=('num_nuc_spots','mean'), sd_n=('num_nuc_spots','std'),
-                                   mean_c=('num_cyto_spots','mean'), sd_c=('num_cyto_spots','std'))
-                              .reset_index()
+                            .agg(mean_n=('num_nuc_spots','mean'),
+                                sd_n  =('num_nuc_spots','std'),
+                                mean_c=('num_cyto_spots','mean'),
+                                sd_c  =('num_cyto_spots','std'))
+                            .reset_index()
                     )
                     fig, ax = plt.subplots(figsize=(8,4))
                     ax.errorbar(stats['time'], stats['mean_n'], yerr=stats['sd_n'], fmt='-o', color='blue', label='Nuc')
