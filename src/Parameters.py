@@ -101,9 +101,8 @@ class Data:
         if name in ['_zarr_path', '_ds', '_loaded']:
             return self.__dict__.get(name, None)
 
-        if self._zarr_path is not None and not self._zarr_path.exists():
-            self._zarr_path.mkdir(parents=True, exist_ok=True)
-            zarr.open(self._zarr_path, mode='w')
+        if not self._loaded:
+            self.dataset
 
         if name in self.dataset.attrs and self.dataset.attrs[name] == 'parquet':
             parquet_path = self._zarr_path / f"{name}.parquet"
@@ -115,8 +114,8 @@ class Data:
 
         if name in self.dataset.keys():
             result = self.dataset[name]
-            if isinstance(result, (zarr.core.Array, np.ndarray)):
-                result = result[...].copy()
+            # if isinstance(result, (zarr.core.Array, np.ndarray)):
+            #     result = result[...].copy()
             return result
 
         else:
@@ -142,30 +141,19 @@ class Data:
             # Use Zarr attributes for JSON-serializable values
             self.dataset.attrs[name] = value
 
-
     def __setitem__(self, key, value):
-        """Handle item assignment for array-like data."""
-        # Lazy-load the dataset if not already loaded
-        self.dataset  # Ensure the dataset is loaded
+        # Ensure the dataset is loaded
+        self.dataset
 
-        # Check if the key is valid (i.e., a tuple of indices)
-        if isinstance(key, tuple):
-            # If the key corresponds to a zarr array (like data.array[p, t])
-            def __setitem__(self, key, value):
-                # Ensure the dataset is loaded
-                self.dataset
-
-                if isinstance(key, tuple) and len(key) > 1:
-                    arr_name = key[0]
-                    arr_index = key[1:]
-                    if arr_name not in self.dataset:
-                        # Optionally create an empty array if needed
-                        pass
-                    self.dataset[arr_name][arr_index] = value
-                else:
-                    raise TypeError(f"Invalid key: {key}. Expected something like data['nuc_masks', p, t].")
+        if isinstance(key, tuple) and len(key) > 1:
+            arr_name = key[0]
+            arr_index = key[1:]
+            if arr_name not in self.dataset:
+                # Optionally create an empty array if needed
+                pass
+            self.dataset[arr_name][arr_index] = value
         else:
-            raise TypeError(f"Invalid key type: {type(key)}. Expected tuple of indices.")
+            raise TypeError(f"Invalid key: {key}. Expected something like data['nuc_masks', p, t].")
 
     def append(self, newValues: dict):
         for k, v in newValues.items():
