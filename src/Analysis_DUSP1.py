@@ -1835,7 +1835,9 @@ class PostProcessingPlotter:
                     fmt='-o', color='blue', label='Nuc')
         ax.errorbar(stats['dex_conc'], stats['mean_c'], yerr=stats['sd_c'],
                     fmt='-o', color='orange', label='Cyto')
-        ax.set_xscale('log')
+        ax.set_xscale('symlog', linthresh=1e-3)
+        ax.set_xticks([0, 1e-2,1e-1,1,10,100,1000,10000])
+        ax.set_xticklabels(['0','0.01','0.1','1','10','100','1000','10000'])
         ax.set_xlabel("Dex_Conc (nM)")
         ax.set_ylabel("Mean ± SD")
         ax.set_title(f"Conc sweep at t={timepoint} min")
@@ -1997,58 +1999,115 @@ class ExperimentPlotter:
 
 
     def _plot_ridge_time(self, df, reps, times, dex, thr, save_dir, display, title_suffix=None):
-        sub = df[(df.dex_conc==dex) | ((df.dex_conc==0)&(df.time==0))].copy()
+        sub     = df[(df.dex_conc==dex) | ((df.dex_conc==0)&(df.time==0))].copy()
         metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
+        H       = 0.9      # fixed ridge height
+        xs_dict = {}       # cache xs per metric
 
         for m in metrics:
-            fig, ax = plt.subplots(figsize=(8, len(times)*1.2))
-            fig.suptitle(f"Pooled — {dex}nM Dex: {m.replace('_',' ').title()}", fontsize=14)
+            # ── 1) SUMMARY TABLE ──────────────────────────────────────
+            summary = (
+                sub
+                .groupby(['replica','time'])[m]
+                .agg(count='count', mean='mean', std='std')
+                .reset_index()
+            )
+            print(f"\nSummary for {m} at {dex} nM:")
+            print(summary.to_string(index=False))
 
-            # get control thresholds
-            vals0 = sub[sub.time==0][m].dropna().values
-            if len(vals0)>=2:
-                cdf0 = np.arange(1,len(vals0)+1)/len(vals0)
-                lo, hi = np.interp(0.5,cdf0,vals0), np.interp(0.95,cdf0,vals0)
-            else:
-                lo, hi = 0,0
-
+            # ── 2) PREPARE GRID & GLOBAL PEAK ─────────────────────────
             xs = np.linspace(sub[m].min(), sub[m].max(), 200)
+            xs_dict[m] = xs
+            global_max = 0.0
 
-            # palette keyed by replica
-            pal = sns.color_palette("rocket_r", n_colors=len(reps))
-            handles = []
+            # include each replica/time
+            for rep in reps:
+                for t in times:
+                    data = sub[(sub.replica==rep)&(sub.time==t)][m].dropna().values
+                    if len(data)>=2:
+                        dens = gaussian_kde(data)(xs)
+                        global_max = max(global_max, dens.max())
+
+            # include the pooled distributions at each time
+            for t in times:
+                data = sub[sub.time==t][m].dropna().values
+                if len(data)>=2:
+                    dens = gaussian_kde(data)(xs)
+                    global_max = max(global_max, dens.max())
+
+            scale = H / global_max if global_max>0 else 1.0
+
+            # ── 3) SET UP FIGURE ──────────────────────────────────────
+            fig, ax = plt.subplots(figsize=(8, len(times)*1.2))
+            title = f"Pooled — {dex} nM Dex: {m.replace('_',' ').title()}"
+            if title_suffix:
+                title += f" — {title_suffix}"
+            fig.suptitle(title, fontsize=14)
+
+            # ── 4) OVERLAY “OVERALL” ──────────────────────────────────
+            overall_handle = None
+            for ti, t in enumerate(times):
+                data = sub[sub.time==t][m].dropna().values
+                if len(data) < 2:
+                    continue
+                kde    = gaussian_kde(data)
+                y_pool = kde(xs) * scale
+                y0     = len(times)-1 - ti
+
+                overall_handle = ax.fill_between(
+                    xs, y0, y0 + y_pool,
+                    color='black', alpha=0.7,
+                    label='Overall' if overall_handle is None else None
+                )
+
+            # ── 5) EACH REPLICA ───────────────────────────────────────
+            pal         = sns.color_palette("rocket_r", n_colors=len(reps))
+            rep_handles = []
             for i, rep in enumerate(reps):
                 color = pal[i]
-                # and build a list of lines (one per rep) to include in legend
-                for ti, t in enumerate(times):
-                    data = sub[(sub.replica==rep)&(sub.time==t)][m].dropna()
-                    if len(data)>=2:
-                        kde = gaussian_kde(data)
-                        y = kde(xs)/kde(xs).max()*0.8
-                    else:
-                        y = np.zeros_like(xs)
-                    y_off = len(times)-1-ti
-                    # plot without label except once per replica
-                    line = ax.plot(xs, y_off+y, color=color, alpha=0.7,
-                                   label=rep if ti==0 else None)
-                    ax.fill_between(xs, y_off, y_off+y, color=color, alpha=0.3)
-                handles.append(line[0])  # capture one handle per replica
+                handle = None
 
-            # add thresholds
+                for ti, t in enumerate(times):
+                    data = sub[(sub.replica==rep)&(sub.time==t)][m].dropna().values
+                    if len(data) < 2:
+                        y = np.zeros_like(xs)
+                    else:
+                        kde = gaussian_kde(data)
+                        y   = kde(xs) * scale
+
+                    y0 = len(times)-1 - ti
+                    if ti==0:
+                        handle, = ax.plot(
+                            xs, y0 + y,
+                            color=color, alpha=0.8,
+                            label=rep
+                        )
+                    else:
+                        ax.plot(xs, y0 + y, color=color, alpha=0.8)
+                    ax.fill_between(xs, y0, y0 + y, color=color, alpha=0.1)
+
+                rep_handles.append(handle)
+
+            # ── 6) CDF THRESHOLDS ─────────────────────────────────────
+            lo, hi = thr[m]
             ax.axvline(lo, color='red', linestyle='--', linewidth=1)
             ax.axvline(hi, color='red', linestyle='-',  linewidth=1)
 
-            ax.set_yticks([len(times)-1-i for i in range(len(times))])
+            # ── 7) AXES & LEGEND ──────────────────────────────────────
+            ax.set_yticks([len(times)-1 - i for i in range(len(times))])
             ax.set_yticklabels([f"{t} min" for t in times])
             ax.set_xlabel("mRNA Count")
-            # finally draw the replica legend to the right
-            ax.legend(handles=handles, title="Replica",
-                      bbox_to_anchor=(1.02, 1), loc='upper left')
-            plt.tight_layout(rect=[0,0,1,0.95])
 
+            handles = [overall_handle] + rep_handles
+            labels  = ['Overall'] + reps
+            ax.legend(handles=handles, labels=labels,
+                      title="Distribution",
+                      bbox_to_anchor=(1.02,1), loc='upper left')
+
+            plt.tight_layout(rect=[0,0,1,0.95])
             if save_dir:
-                fig.savefig(os.path.join(save_dir, f"ridge_time_reps_{dex}nM_{m}.png"),
-                            dpi=300, bbox_inches='tight')
+                fn = f"ridge_time_reps_{dex}nM_{m}.png"
+                fig.savefig(os.path.join(save_dir, fn), dpi=300, bbox_inches='tight')
             if display:
                 plt.show()
             plt.close(fig)
@@ -2186,47 +2245,123 @@ class ExperimentPlotter:
 
 
     def _plot_ridge_conc(self, df, reps, concs, time_pt, thr, save_dir, display, title_suffix=None):
-        sub = df[(df.time==time_pt)|((df.dex_conc==0)&(df.time==0))].copy()
-        pal = dict(zip(reps, sns.color_palette("rocket_r", len(reps))))
-        rows = [0]+[c for c in concs if c>0]
-        n = len(rows)
+        sub   = df[(df.time==time_pt) | ((df.dex_conc==0)&(df.time==0))].copy()
+        rows  = [0] + [c for c in concs if c>0]
+        n     = len(rows)
+        metrics = ['num_nuc_spots','num_cyto_spots','num_spots']
+        H     = 0.8
+        xs_dict = {}
 
-        for m in ['num_nuc_spots','num_cyto_spots','num_spots']:
-            xs = np.linspace(sub[m].min(), sub[m].max(),200)
-            fig, ax = plt.subplots(figsize=(8,n*1.2))
-            ttl = m.replace('_',' ').title()
+        for m in metrics:
+            # ── 1) SUMMARY TABLE ──────────────────────────────────
+            summary = (
+                sub
+                .groupby(['replica','dex_conc'])[m]
+                .agg(count='count', mean='mean', std='std')
+                .reset_index()
+            )
+            print(f"\nSummary for {m} at t={time_pt} min:")
+            print(summary.to_string(index=False))
+
+            # ── 2) GRID + GLOBAL MAX ──────────────────────────────
+            xs = np.linspace(sub[m].min(), sub[m].max(), 200)
+            xs_dict[m] = xs
+            global_max = 0.0
+
+            # each rep/conc
+            for rep in reps:
+                for c in rows:
+                    data = sub[(sub.replica==rep)&(sub.dex_conc==c)][m].dropna().values
+                    if len(data)>=2:
+                        dens = gaussian_kde(data)(xs)
+                        global_max = max(global_max, dens.max())
+
+            # pooled per conc
+            for c in rows:
+                data = sub[sub.dex_conc==c][m].dropna().values
+                if len(data)>=2:
+                    dens = gaussian_kde(data)(xs)
+                    global_max = max(global_max, dens.max())
+
+            scale = H / global_max if global_max>0 else 1.0
+
+            # ── 3) SETUP FIGURE ────────────────────────────────────
+            fig, ax = plt.subplots(figsize=(8, n*1.2))
+            ttl   = m.replace('_',' ').title()
+            title = f"Pooled — {time_pt} min: {ttl}"
             if title_suffix:
-                ttl = f"{title_suffix}: {ttl}"
-            fig.suptitle(ttl)
+                title = f"{title_suffix} — {title}"
+            fig.suptitle(title, fontsize=14)
 
-            for i,c in enumerate(rows):
-                y0 = n-1-i
-                for rep in reps:
-                    data = sub[(sub.dex_conc==c)&(sub.replica==rep)][m].dropna()
-                    if len(data)>1:
-                        kde=gaussian_kde(data); y=kde(xs)
-                        y=y/y.max()*0.8
-                        ax.plot(xs, y+y0, color=pal[rep], alpha=0.6)
-                        ax.fill_between(xs, y0, y+y0, color=pal[rep], alpha=0.4)
-                ax.hlines(y0, xs[0], xs[-1], color='k', lw=0.5, alpha=0.3)
+            # ── 4) OVERLAY “OVERALL” ───────────────────────────────
+            overall_handle = None
+            for i, c in enumerate(rows):
+                data = sub[sub.dex_conc==c][m].dropna().values
+                if len(data)<2:
+                    continue
+                kde    = gaussian_kde(data)
+                y_pool = kde(xs) * scale
+                y0     = n-1 - i
 
-            lo,hi = thr[m]
-            ax.axvline(lo, linestyle='--', color='red')
-            ax.axvline(hi, linestyle='-',  color='red')
-            ax.set_yticks([n-1-i for i in range(n)])
+                overall_handle = ax.fill_between(
+                    xs, y0, y0 + y_pool,
+                    color='black', alpha=0.7,
+                    label='Overall' if overall_handle is None else None
+                )
+
+            # ── 5) PER-REPLICA ─────────────────────────────────────
+            pal = dict(zip(reps, sns.color_palette("rocket_r", len(reps))))
+            rep_handles = []
+            for rep in reps:
+                handle = None
+                for i, c in enumerate(rows):
+                    data = sub[(sub.replica==rep)&(sub.dex_conc==c)][m].dropna().values
+                    if len(data)<2:
+                        y = np.zeros_like(xs)
+                    else:
+                        kde = gaussian_kde(data)
+                        y   = kde(xs) * scale
+                    y0 = n-1 - i
+
+                    if handle is None:
+                        handle, = ax.plot(
+                            xs, y0 + y,
+                            color=pal[rep], alpha=0.8,
+                            label=rep
+                        )
+                    else:
+                        ax.plot(xs, y0 + y, color=pal[rep], alpha=0.8)
+                    ax.fill_between(xs, y0, y0 + y, color=pal[rep], alpha=0.1)
+
+                rep_handles.append(handle)
+
+            # ── 6) CDF LINES & AXES ─────────────────────────────────
+            lo, hi = thr[m]
+            ax.axvline(lo, linestyle='--', color='red', linewidth=1)
+            ax.axvline(hi, linestyle='-',  color='red', linewidth=1)
+
+            ax.set_yticks([n-1 - i for i in range(n)])
             ax.set_yticklabels([f"{c} nM" for c in rows])
             ax.set_xlabel("mRNA Count")
+
+            # ── 7) LEGEND ───────────────────────────────────────────
+            handles = [overall_handle] + rep_handles
+            labels  = ['Overall'] + reps
+            ax.legend(handles=handles, labels=labels,
+                      title="Distribution",
+                      bbox_to_anchor=(1.02,1), loc='upper left')
+
             plt.tight_layout(rect=[0,0,1,0.95])
             if save_dir:
-                fn = f"ridge_conc_{time_pt}min_{m}.png" if not title_suffix else \
-                     f"ridge_conc_{title_suffix.replace(' ','_')}_{m}.png"
-                fig.savefig(os.path.join(save_dir, fn), dpi=300)
-            if display: plt.show()
+                fn = f"ridge_conc_{time_pt}min_{m}.png"
+                fig.savefig(os.path.join(save_dir, fn), dpi=300, bbox_inches='tight')
+            if display:
+                plt.show()
             plt.close(fig)
 
     def _plot_line_conc(self, df, reps, concs, time_pt, save_dir, display, title_suffix=None):
         # subset to this time point + control
-        sub = df[(df['time']==time_pt) | ((df['dex_conc']==0)&(df['time']==0))].copy()
+        sub = df[(df['time'] == time_pt) | ((df['dex_conc'] == 0) & (df['time'] == 0))].copy()
 
         # panels = nuclear, cytoplasmic, total
         fig, axes = plt.subplots(1, 3, figsize=(16, 4), sharex=True)
@@ -2236,20 +2371,24 @@ class ExperimentPlotter:
             ('num_spots',       'black',  'Total'),
         ]
 
+        # compute a tiny positive x for the 0-conc control
+        nonz = [c for c in concs if c > 0]
+        eps  = (min(nonz) * 1e-2) if nonz else 1e-3
+
         for ax, (m, color, label) in zip(axes, panels):
-            # 1) replicate‐means
+            # 1) replicate-means
             rm = (
                 sub
                 .groupby(['replica','dex_conc'])[m]
                 .mean()
-                .reset_index(name='mean')   # now has column 'mean'
+                .reset_index(name='mean')
             )
 
-            # 2) summarize those means (mean of means ± std of means)
+            # 2) summarize replicate-means
             sm = (
                 rm
                 .groupby('dex_conc')['mean']
-                .agg(['mean','std'])                   # default names
+                .agg(['mean','std'])
                 .rename(columns={'mean':'mean_m','std':'sd_m'})
                 .reindex(concs, fill_value=0)
             )
@@ -2263,27 +2402,35 @@ class ExperimentPlotter:
                 .reindex(concs, fill_value=0)
             )
 
-            # 4) plot replicate means + error bars
+            # map 0 → eps for plotting
+            x_sm = [eps if c==0 else c for c in sm.index]
+            x_ov = [eps if c==0 else c for c in ov.index]
+
+            # 4) plot replicate-means line + error bars
             ax.errorbar(
-                sm.index, sm['mean_m'], yerr=sm['sd_m'],
+                x_sm, sm['mean_m'], yerr=sm['sd_m'],
                 fmt='-o', color=color, capsize=5,
                 label='Replicate means ± SD'
             )
 
-            # 5) overall shading + dashed line + diamonds
+            # 5) overall shaded band + dashed line + diamonds
             ax.fill_between(
-                ov.index,
+                x_ov,
                 ov['mean_o'] - ov['sd_o'],
                 ov['mean_o'] + ov['sd_o'],
                 color=color, alpha=0.2
             )
             ax.plot(
-                ov.index, ov['mean_o'],
+                x_ov, ov['mean_o'],
                 '--D', color=color,
                 label='Overall mean ± SD'
             )
 
-            ax.set_xscale('log')                   # conc‐sweep SHOULD be log
+            # log scale + force ticks at [eps, ...positive concs...]
+            ax.set_xscale('log')
+            ax.set_xticks([eps] + nonz)
+            ax.set_xticklabels(['0'] + [str(c) for c in nonz])
+
             ax.set_xlabel("Dex_Conc (nM)")
             ax.set_ylabel("Mean ± SD")
             ax.set_title(label)
@@ -2296,6 +2443,7 @@ class ExperimentPlotter:
         fig.suptitle(ttl, y=1.02, fontsize=16, weight='bold')
         plt.tight_layout()
 
+        # save & show
         if save_dir:
             fn = f"line_conc_{time_pt}min.png" if not title_suffix else \
                  f"line_conc_{title_suffix.replace(' ','_')}.png"
