@@ -1916,34 +1916,57 @@ class ExperimentPlotter:
                 thr[m] = (0,0)
 
         if time_sweep:
-            dex = concs[0]
-            self._plot_time_sweep(df, replicas, all_times, dex, thr, save_dir, display)
-            self._plot_ridge_time( df, replicas, all_times, dex, thr, save_dir, display)
-            self._plot_line_time(  df, replicas, all_times, dex,           save_dir, display)
+            dex    = concs[0]
+            suffix = f"{dex}nM_time-sweep"
+            self._plot_time_sweep(df, replicas, all_times, dex, thr,
+                                  save_dir, display,
+                                  title_suffix=suffix)
+            self._plot_ridge_time(df, replicas, all_times, dex, thr,
+                                  save_dir, display,
+                                  title_suffix=suffix)
+            self._plot_line_time(df, replicas, all_times, dex,
+                                 save_dir, display,
+                                 title_suffix=suffix)
 
         elif conc_sweep:
-            t0 = times[0]
-            self._plot_conc_sweep(df, replicas, all_concs, t0, thr, save_dir, display)
-            self._plot_ridge_conc( df, replicas, all_concs, t0, thr, save_dir, display)
-            self._plot_line_conc(  df, replicas, all_concs, t0,           save_dir, display)
+            t0     = times[0]
+            suffix = f"{t0}min_concentration-sweep"
+            self._plot_conc_sweep(df, replicas, all_concs, t0, thr,
+                                  save_dir, display,
+                                  title_suffix=suffix)
+            self._plot_ridge_conc(df, replicas, all_concs, t0, thr,
+                                  save_dir, display,
+                                  title_suffix=suffix)
+            self._plot_line_conc(df, replicas, all_concs, t0,
+                                 save_dir, display,
+                                 title_suffix=suffix)
 
         else:  # both‐varying
+            base   = "time-concentration-sweep"
             # time‐panels for each conc
             for dex in concs:
-                self._plot_time_sweep(df, replicas, all_times, dex, thr, save_dir, display,
-                                      title_suffix=f"{dex} nM Dex")
-                self._plot_ridge_time(df, replicas, all_times, dex, thr, save_dir, display,
-                                      title_suffix=f"{dex} nM Dex")
-                self._plot_line_time(df, replicas, all_times, dex, save_dir, display,
-                                      title_suffix=f"{dex} nM Dex")
+                suffix = f"{dex}nM_{base}"
+                self._plot_time_sweep(df, replicas, all_times, dex, thr,
+                                      save_dir, display,
+                                      title_suffix=suffix)
+                self._plot_ridge_time(df, replicas, all_times, dex, thr,
+                                      save_dir, display,
+                                      title_suffix=suffix)
+                self._plot_line_time(df, replicas, all_times, dex,
+                                     save_dir, display,
+                                     title_suffix=suffix)
             # conc‐panels for each time
             for t0 in times:
-                self._plot_conc_sweep(df, replicas, all_concs, t0, thr, save_dir, display,
-                                      title_suffix=f"t={t0} min")
-                self._plot_ridge_conc(df, replicas, all_concs, t0, thr, save_dir, display,
-                                      title_suffix=f"t={t0} min")
-                self._plot_line_conc(df, replicas, all_concs, t0, save_dir, display,
-                                      title_suffix=f"t={t0} min")
+                suffix = f"{t0}min_{base}"
+                self._plot_conc_sweep(df, replicas, all_concs, t0, thr,
+                                      save_dir, display,
+                                      title_suffix=suffix)
+                self._plot_ridge_conc(df, replicas, all_concs, t0, thr,
+                                      save_dir, display,
+                                      title_suffix=suffix)
+                self._plot_line_conc(df, replicas, all_concs, t0,
+                                     save_dir, display,
+                                     title_suffix=suffix)
 
 
     def _plot_time_sweep(self, df, reps, times, dex, thr, save_dir, display, title_suffix=None):
