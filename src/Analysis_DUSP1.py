@@ -40,10 +40,22 @@ from skimage.measure import find_contours
 from tqdm import tqdm
 import joblib
 from sklearn.ensemble import RandomForestClassifier
+import time
 
 #############################
 # DUSP1AnalysisManager Class
 #############################
+
+# Utility function to safely open HDF5 files with retries
+def safe_open_h5(file_path, retries=3, delay=1.0):
+    for attempt in range(1, retries + 1):
+        try:
+            return h5py.File(file_path, 'r')
+        except OSError as e:
+            print(f"[Retry {attempt}] Failed to open {file_path}: {e}")
+            time.sleep(delay)
+    raise RuntimeError(f"Failed to open file after {retries} retries: {file_path}")
+
 class DUSP1AnalysisManager:
     """
     Analysis manager for DUSP1 experiments.
@@ -137,61 +149,75 @@ class DUSP1AnalysisManager:
     def select_datasets(self, dataset_name, dtype=None):
         """
         Safely loads datasets from each HDF5 file and merges them.
-        
+
         Parameters:
             dataset_name (str): The key of the dataset to load.
             dtype (str): 'dataframe' to load as a pandas DataFrame, 'array' to load as an array.
-        
+
         Returns:
             pd.DataFrame if dtype=='dataframe'; otherwise, list of arrays.
         """
-        self.open()
         if not hasattr(self, 'analysis_names'):
             print('ERROR: No analysis selected. Please check your setup.')
             return []
+
         is_df = False
         is_array = False
         list_df = []
         list_arrays = []
+
         for i, file_path in enumerate(self.location):
             if not os.path.exists(file_path):
                 print(f"ERROR: File does not exist: {file_path}")
                 sys.exit(1)
+
             print(f"Opening file: {file_path}")
+            f = None
             try:
-                with h5py.File(file_path, 'r') as f:
-                    dataset_key = f"{self.analysis_names[i]}/{dataset_name}"
-                    if dataset_key not in f:
-                        print(f"WARNING: Dataset '{dataset_name}' not found in {file_path}. Skipping.")
-                        continue
-                    if dtype == 'dataframe':
-                        print(f"Reading DataFrame from: {file_path} -> {dataset_key}")
-                        df = pd.read_hdf(f.filename, dataset_key)
-                        df['h5_idx'] = i
-                        list_df.append(df)
-                        is_df = True
-                    elif dtype == 'array':
-                        print(f"Reading Array from: {file_path} -> {dataset_key}")
-                        array = f[dataset_key][:]
-                        list_arrays.append(array)
-                        is_array = True
-                    else:
-                        raise ValueError(f"Unknown dtype '{dtype}'. Accepted types: 'dataframe', 'array'.")
+                f = safe_open_h5(file_path)
+                dataset_key = f"{self.analysis_names[i]}/{dataset_name}"
+                if dataset_key not in f:
+                    print(f"WARNING: Dataset '{dataset_name}' not found in {file_path}. Skipping.")
+                    continue
+
+                if dtype == 'dataframe':
+                    print(f"Reading DataFrame from: {file_path} -> {dataset_key}")
+                    df = pd.read_hdf(f.filename, dataset_key).copy()
+                    df['h5_idx'] = i
+                    list_df.append(df)
+                    is_df = True
+
+                elif dtype == 'array':
+                    print(f"Reading Array from: {file_path} -> {dataset_key}")
+                    array = f[dataset_key][:]
+                    list_arrays.append(array)
+                    is_array = True
+
+                else:
+                    raise ValueError(f"Unknown dtype '{dtype}'. Accepted types: 'dataframe', 'array'.")
+
             except OSError as e:
                 print(f"\nCRITICAL ERROR: Unable to read {file_path}")
                 print(f"HDF5 Error: {e}")
                 traceback.print_exc()
                 sys.exit(1)
+
+            finally:
+                if f is not None:
+                    try:
+                        f.close()
+                    except Exception as close_err:
+                        print(f"WARNING: Error closing file {file_path}: {close_err}")
+
         if is_df:
             print(f"Successfully loaded {len(list_df)} DataFrames. Merging...")
-            self.close()
             return pd.concat(list_df, axis=0, ignore_index=True)
+
         if is_array:
             print(f"Successfully loaded {len(list_arrays)} arrays.")
-            self.close()
             return list_arrays
+
         print(f"ERROR: No valid data found for dataset: {dataset_name}.")
-        self.close()
         sys.exit(1)
 
     def save_to_csv(self, df, csv_path):
@@ -965,17 +991,18 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         else:
             self.unique_cell_id = None
         # Ensure the analysis manager is initialized.
+    
     def get_images_and_masks(self, h5_idx=None, fov=None):
         """
         Lazy load images and masks from a specific HDF5 file and FOV.
-        
+
         Parameters:
         - h5_idx: index of the HDF5 file in self.h5_file_paths. If None, a random one is chosen.
         - fov: field-of-view index within the file. If None, a random FOV is chosen.
-        
+
         Returns:
         - images: NumPy array for the specified FOV.
-                    Expected shape: (3, 27, 936, 640)
+                Expected shape: (3, 27, 936, 640)
         - masks: NumPy array for the specified FOV.
                 Expected shape: (3, 27, 936, 640)
         - h5_idx: the index of the HDF5 file used.
@@ -984,18 +1011,29 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         if h5_idx is None:
             h5_idx = random.choice(range(len(self.h5_file_paths)))
         file_path = self.h5_file_paths[h5_idx]
-        with h5py.File(file_path, 'r') as h5_file:
+
+        h5_file = None
+        try:
+            h5_file = safe_open_h5(file_path)  # Retry-safe wrapper
             num_fov = h5_file['raw_images'].shape[0]
             if fov is None:
                 fov = random.choice(range(num_fov))
-            # Get the FOV slice; this might return an extra dimension.
+
             images = np.array(h5_file['raw_images'][fov])
             masks = np.array(h5_file['masks'][fov])
-            # Remove the extra FOV dimension if present.
+
             if images.shape[0] == 1:
                 images = np.squeeze(images, axis=0)
             if masks.shape[0] == 1:
                 masks = np.squeeze(masks, axis=0)
+
+        finally:
+            if h5_file is not None:
+                try:
+                    h5_file.close()
+                except Exception as close_err:
+                    print(f"WARNING: Error closing file {file_path}: {close_err}")
+
         return images, masks, h5_idx, fov
 
     def display_gating_overlay(self):
