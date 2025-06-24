@@ -41,6 +41,7 @@ from tqdm import tqdm
 import joblib
 from sklearn.ensemble import RandomForestClassifier
 import time
+from typing import List, Optional, Union
 
 #############################
 # DUSP1AnalysisManager Class
@@ -493,11 +494,17 @@ class DUSP1Measurement:
         spots: pd.DataFrame,
         clusters: pd.DataFrame,
         cellprops: pd.DataFrame,
-        model: Union[str, RandomForestClassifier] = None
+        model: Union[str, RandomForestClassifier] = None,
+        is_tpl: bool = False,
+        tpl_time_list: List[int] = None,
+        dex_rel2_tpl_time: List[int] = None,
     ):
         self.spots = spots.copy()
         self.clusters = clusters.copy()
         self.cellprops = cellprops.copy()
+        self.is_tpl = is_tpl
+        self.tpl_time_list = tpl_time_list
+        self.dex_rel2_tpl_time = dex_rel2_tpl_time
 
         # Optional Random Forest classifier:
         # - If you pass in an estimator, just grab it
@@ -531,7 +538,7 @@ class DUSP1Measurement:
         For each spot:
           - weighted_pass: Boolean flag using a weighted cutoff (for snr between 2 and 5).
           - absolute_pass: Boolean flag if snr >= snr_threshold.
-          - MG_SNR: Computed as (signal - cell_intensity_mean-0) / cell_intensity_std-0.
+          - MG_SNR: Computed as (signal - nuc or cyto_intensity_mean-0) / nuc or cyto_intensity_std-0.
           
         At the cell level, the following are aggregated:
           - weighted_count: Count of spots passing the weighted filter.
@@ -663,7 +670,43 @@ class DUSP1Measurement:
             'h5_idx': h5_idx.values,
             'touching_border': touching_border.values
         })
-        
+        # ── Now tack on the TPL columns if requested ───────────────────────────────
+        if self.is_tpl:
+            # 1) decide how to get time_tpl:
+            if 'time_TPL' in self.cellprops.columns:
+                # pull directly from cellprops
+                tpl_ser = (
+                    self.cellprops
+                        .set_index('unique_cell_id')['time_TPL']
+                        .reindex(results['unique_cell_id'])
+                )
+            else:
+                # fallback: match via the three lists you provided
+                if not (self.tpl_time_list and self.tpl_dex_list and self.tpl_time_tpl_list):
+                    raise ValueError(
+                        "When no cellprops['time_TPL'], you must pass tpl_time_list, "
+                        "tpl_dex_list, and tpl_time_tpl_list to __init__"
+                    )
+                # build a lookup DataFrame
+                tpl_map = pd.DataFrame({
+                    'time':   self.tpl_time_list,
+                    'dex':    self.tpl_dex_list,
+                    'time_tpl': self.tpl_time_tpl_list
+                }).drop_duplicates()
+                # merge on (time, dex)
+                merged = (
+                    results[['unique_cell_id', 'time', 'dex_conc']]
+                        .merge(tpl_map, left_on=['time','dex_conc'],
+                                        right_on=['time','dex'],
+                                        how='left')
+                )
+                tpl_ser = merged['time_tpl'].values
+
+            # 2) assign it and build your five flags
+            results['time_tpl'] = tpl_ser
+            for idx, t in enumerate((0, 20, 75, 150, 180), start=1):
+                results[f'tryptCond{idx}'] = (results['time_tpl'] == t).astype(int)
+
         return results
     
     def save_results(self, results: pd.DataFrame, csv_path: str):
@@ -698,8 +741,9 @@ class DUSP1Measurement:
                                 .apply(self.second_largest).reindex(cell_ids, fill_value=0)
         num_spots_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
 
-        # Metadata and morphometrics
-        results = pd.DataFrame({
+        # Nuclear/cytoplasmic area and intensity in mRNA channel # TODO
+
+        data = {
             'unique_cell_id': cell_ids,
             'num_spots': num_spots.values,
             'num_nuc_spots': num_nuc_spots.values,
@@ -717,9 +761,26 @@ class DUSP1Measurement:
             'replica': self.cellprops['replica'].values,
             'fov': self.cellprops['fov'].values,
             'nas_location': self.cellprops['NAS_location'].values,
-            'h5_idx': self.cellprops['h5_idx'].values
-        })
+            'h5_idx': self.cellprops['h5_idx'].values,
+            'touching_border': self.cellprops['touching_border'].values
+        }
 
+        # Only for TPL experiments, inject the extra columns
+        if self.is_tpl:
+            # 1) pull the TPL-addition time from your cellprops column
+            time_tpl = (
+                self.cellprops
+                    .set_index('unique_cell_id')['time_TPL']
+                    .reindex(cell_ids)
+            )
+            data['time_tpl'] = time_tpl.values
+
+            # 2) build the five condition flags
+            for idx, t in enumerate((0, 20, 75, 150, 180), start=1):
+                data[f'tryptCond{idx}'] = (time_tpl.values == t).astype(int)
+
+        # Assemble and return
+        results = pd.DataFrame(data)
         return results        
 
 #############################
@@ -727,10 +788,15 @@ class DUSP1Measurement:
 #############################
 
 class DUSP1_filtering:
-    def __init__(self, method: str = 'MG', abs_threshold: float = 4.0, mg_threshold: float = 3.0):
+    def __init__(self, 
+                method: str = 'MG',
+                abs_threshold: float = 4.0,
+                mg_threshold: float = 3.0,
+                is_tpl: bool = False):
         self.method = method.lower()
         self.abs_threshold = abs_threshold
         self.mg_threshold = mg_threshold
+        self.is_tpl = is_tpl
 
     def apply(self, results: pd.DataFrame) -> pd.DataFrame:
         filtered = results.loc[results['touching_border'] == False].copy()
@@ -879,11 +945,26 @@ class DUSP1_filtering:
         measurer = DUSP1Measurement(
             spots=filtered_spots,
             clusters=filtered_clusters,
-            cellprops=filtered_cellprops
+            cellprops=filtered_cellprops,
+            is_tpl=self.is_tpl,
         )
         SSITcellresults = measurer.summarize_filtered_cells()
 
+        # 5. Inject TPL columns into SSITcellresults if requested
+        if self.is_tpl:
+            # pull the TPL-addition time from filtered_cellprops
+            tpl_times = (
+                filtered_cellprops
+                    .set_index('unique_cell_id')['time_TPL']
+                    .reindex(SSITcellresults['unique_cell_id'])
+            )
+            SSITcellresults['time_tpl'] = tpl_times.values
+            # build the five flags
+            for idx, t in enumerate((0, 20, 75, 150, 180), start=1):
+                SSITcellresults[f'tryptCond{idx}'] = (tpl_times.values == t).astype(int)
+
         return filtered_spots, filtered_clusters, filtered_cellprops, SSITcellresults, removed_spots
+
     
 #############################
 # DisplayManager Class
@@ -1616,11 +1697,12 @@ class PostProcessingPlotter:
       - plot_conc_sweep(timepoint, save_dir=None, display=True)
       - plot_time_conc_sweep(conc_list, save_dir=None, display=True)
     """
-    def __init__(self, clusters_df, cellprops_df, ssit_df):
+    def __init__(self, clusters_df, cellprops_df, ssit_df, is_tpl: bool):
         # rename to lowercase for consistency
         self.clusters = clusters_df.rename(columns=str.lower).copy()
         self.cellprops = cellprops_df.rename(columns=str.lower).copy()
         self.ssit = ssit_df.rename(columns=str.lower).copy()
+        self.is_tpl = is_tpl
         # metrics to plot
         self.metrics = ['num_nuc_spots', 'num_cyto_spots', 'num_spots']
         # set global style
@@ -1747,6 +1829,18 @@ class PostProcessingPlotter:
                     fmt='-o', color='blue', label='Nuc')
         ax.errorbar(stats['time'], stats['mean_c'], yerr=stats['sd_c'],
                     fmt='-o', color='orange', label='Cyto')
+
+        # annotate TPL addition times
+        if self.is_tpl and 'time_tpl' in self.ssit.columns:
+            # unique TPL addition times for this dex_conc
+            tpls = self.ssit[
+                (self.ssit['dex_conc']==dex_conc) &
+                self.ssit['time_tpl'].notnull()
+            ]['time_tpl'].unique()
+            for idx, t in enumerate(sorted(tpls)):
+                ax.axvline(t, linestyle='--', color='red', alpha=0.5,
+                           label='TPL addition' if idx==0 else None)
+
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("Mean ± SD")
         ax.set_title(f"Time sweep — {dex_conc} nM Dex")
