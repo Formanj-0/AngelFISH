@@ -1007,23 +1007,10 @@ def adjust_contrast(image, lower=2, upper=98):
         return exposure.rescale_intensity(image, in_range=(p_low, p_high), out_range=(0, 1))
     return image
 
-def overlay_mask(ax, image, mask, mask_cmap='rocket', alpha=0.3):
-    """Overlay a mask on an image."""
-    ax.imshow(image, cmap='gray')
-    ax.imshow(mask, cmap=mask_cmap, alpha=alpha)
-
 def draw_spot_circle(ax, x, y, radius=4, color='gold', linewidth=2):
     """Draw a circle around a spot."""
     circle = plt.Circle((x, y), radius, edgecolor=color, facecolor='none', linewidth=linewidth)
-    ax.add_patch(circle)
-
-def draw_spot_arrow(ax, x, y, offset=-5, color='magenta'):
-    """
-    Draws a small arrow from (x + offset, y) to (x, y).
-    By default offset is negative => arrow from left to right.
-    """
-    ax.arrow(x + offset, y, -offset, 0, head_width=5,
-             color=color, length_includes_head=True)    
+    ax.add_patch(circle)  
 
 class DUSP1DisplayManager(DUSP1AnalysisManager):
     def __init__(self, analysis_manager, cell_level_results=None,
@@ -1139,7 +1126,7 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         img = np.max(images[1], axis=0)  # images[0] has shape (27, 936, 640) -> (936, 640)
         mask = np.max(masks[1], axis=0)
 
-        # (Optional) Rescale intensity if needed.
+        # Rescale intensity.
         p1, p99 = np.percentile(img, (1, 99))
         img = exposure.rescale_intensity(img, in_range=(p1, p99), out_range=(0, 1))
 
@@ -2608,20 +2595,7 @@ class ExperimentPlotter:
         plt.close(fig)
         
 
-#############################
-# SpotCropSampler Class
-#############################
-import os
-import random
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import h5py
-from skimage import exposure
-from tqdm import tqdm
-from contextlib import contextmanager
 
-class SpotCropSampler:
     def __init__(
         self,
         spots_df,
