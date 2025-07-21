@@ -1,13 +1,15 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1                # Request 1 GPU
-#SBATCH --partition=coe_gpu         # Use the GPU partition
-#SBATCH --job-name=GR_test          # Job name
-#SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --output=job_output.log     # Redirect output to a file
-#SBATCH --error=job_error.log       # Redirect errors to a file
+#SBATCH --job-name=ERon           # Job name
+#SBATCH --ntasks=4                 # Adjust number of tasks if appropriate
+#SBATCH --partition=gpu            # Specify partition (if necessary)
+#SBATCH --output=job_output.log    # Redirect output to a file
+#SBATCH --error=job_error.log      # Redirect errors to a file
 
-# module purge
+# Clean up and set up environment
+module reset
 module load gnu13/13.2.0
+module load cuda/11.2  
 
 echo "Starting my job..."
 
@@ -38,7 +40,7 @@ total_time=$(( (end_time - start_time) / 60 ))
 echo "Total time to complete the job: $total_time minutes"
 
 # ########### TO EXECUTE RUN IN TERMINAL #########################
-# run as: sbatch runner_pipeline.sh /dev/null 2>&1 & disown
+# run as: sbatch runner_pipeline_cashew.sh /dev/null 2>&1 & disown
 
 exit 0
 

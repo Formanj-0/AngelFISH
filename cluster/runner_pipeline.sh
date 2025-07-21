@@ -1,60 +1,52 @@
 #!/bin/bash
-#SBATCH --gres=gpu:1                # Request 1 GPU
-#SBATCH --exclude=gpu1              # Exclude node gpu1
-#SBATCH --partition=all             # Use the GPU partition
-#SBATCH --job-name=Image_Processing # Job name
-#SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --output=job_output_%j.log  # Redirect output to a file with job ID
-#SBATCH --error=job_error_%j.log    # Redirect errors to a file with job ID
-#SBATCH --no-requeue
-#SBATCH --exclusive                 # Limit to one job per node
+# runner_pipeline.sh
 
-# module purge
-module load gnu9/9.4.0
-module load cuda/10.2
+#SBATCH --gres=gpu:1                 # Request 1 GPU if available
+#SBATCH --partition=all              # Use all partitions
+#SBATCH --job-name=ERon              # Job name
+#SBATCH --ntasks=64                  # Number of tasks
+#SBATCH --output=job_output_%j.log   # STDOUT → this file
+#SBATCH --error=job_error_%j.log     # STDERR → this file
+#SBATCH --requeue
 
-echo "Starting my job..."
+module reset
+module load gnu13/13.2.0
 
-# Start timing the process
+# Set CUDA paths (harmless if CUDA not installed)
+export PATH=/usr/local/cuda-12.4/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH
+
+echo "Checking for GPU..."
+if command -v nvidia-smi &> /dev/null && nvidia-smi -L &> /dev/null; then
+    echo "-> GPU detected!"
+    export DEVICE="cuda"
+else
+    echo "-> No GPU available; falling back to CPU."
+    export DEVICE="cpu"
+fi
+echo "Using DEVICE=$DEVICE"
+echo "Starting job..."
+
 start_time=$(date +%s)
 
 kwarg_location=$1
-path_to_executable="${PWD%/*}/src/pipeline_executable.py"
+path_to_executable="${PWD%/*}/src/pipeline_executable2.py"
 
-# ########### PYTHON PROGRAM #############################
-# Ensure output directory exists
+# Ensure output dir exists
 mkdir -p "${PWD}/output"
+output_file="${PWD}/output/output__$(basename "${kwarg_location}")"
 
-# Correct output file name
-output_names="${PWD}/output/output_${SLURM_JOB_ID}_$(basename ${kwarg_location})"
-
-# Activate the environment and run the script
+# Activate your virtualenv
 source ../.venv/bin/activate
-python "$path_to_executable" "$kwarg_location" >> "$output_names" 2>&1 &
-wait
 
+# Run in foreground, passing through our device choice
+python "$path_to_executable" \
+    "$kwarg_location" \
+    --device "$DEVICE" \
+    >> "$output_file" 2>&1
 
-# End timing the process
 end_time=$(date +%s)
 total_time=$(( (end_time - start_time) / 60 ))
-
-# Print the time to complete the process
-echo "Total time to complete the job: $total_time minutes"
-
-# ########### TO EXECUTE RUN IN TERMINAL #########################
-# run as: sbatch runner_pipeline.sh /dev/null 2>&1 & disown
+echo "Total time: $total_time minutes"
 
 exit 0
-
-# ########### TO REMOVE SOME FILES #########################
-
-# To remove files
-# ls *.tif
-# rm -r temp_*
-# rm -r analysis_*
-# rm -r slurm* out* temp_* masks_*
-
-# ########### SLURM COMMANDS #########################
-# scancel [jobid]
-# squeue -u [username]
-# squeue

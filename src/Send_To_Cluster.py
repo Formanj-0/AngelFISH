@@ -37,7 +37,7 @@ def run_on_cluster(remote_path: str, local_file: str, path_to_config_file: str =
 
 
     # Command to execute the batch script
-    sbatch_command = f'sbatch runner_pipeline.sh {remote_picklefile_path} /dev/null 2>&1 & disown'
+    sbatch_command = f'sbatch runner_pipeline.sh {remote_picklefile_path}'
 
     # Execute the command on the cluster
     # Combine commands to change directory and execute the batch script

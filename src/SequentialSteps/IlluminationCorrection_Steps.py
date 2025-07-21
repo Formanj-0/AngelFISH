@@ -23,7 +23,7 @@ class IlluminationCorrection(IndependentStepClass):
         """
         super().__init__()
 
-    def main(self, images, sigma_dict, display_plots=False, imported_profiles=None, **kwargs):
+    def main(self, images, sigma_dict, display_plots=False, illumination_profiles=None, **kwargs):
         """
         Full pipeline to create profiles, correct images, and visualize.
 
@@ -47,10 +47,10 @@ class IlluminationCorrection(IndependentStepClass):
         print(f"Initial chunking of images: {images.chunks}")
 
         # Use or create illumination profiles
-        if imported_profiles is not None:
-            if not isinstance(imported_profiles, np.ndarray):
+        if illumination_profiles is not None:
+            if not isinstance(illumination_profiles, np.ndarray):
                 raise TypeError("Imported profiles must be a NumPy array.")
-            illumination_profiles = imported_profiles
+            # illumination_profiles = imported_profiles
             print("Using imported illumination profiles.")
         else:
             print("Creating new illumination profiles...")

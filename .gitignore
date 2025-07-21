@@ -40,3 +40,7 @@ Desktop.ini
 
 # Temporary or auto-generated folders
 dev/tmp*/
+config_cluster.yml
+config_nas.yml
+cluster/runner_pipeline_cashew.sh
+cluster/runner_pipeline.sh
