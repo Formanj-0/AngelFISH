@@ -312,6 +312,20 @@ class DUSP1AnalysisManager:
         else:
             print('select an analysis')
 
+    def delete_selected_analysis(self, password):
+        if password != 'you_better_know_what_your_deleting':
+            print("you_better_know_what_your_deleting")
+            return
+
+        for obj in list(self.analysis_names):  # Make a copy to avoid modification during iteration
+            parent = obj.parent
+            name = obj.name.split('/')[-1]  # Get the local name within the parent group
+            try:
+                del parent[name]
+                print(f"Deleted '{name}' from {parent.file.filename}")
+            except Exception as e:
+                print(f"Failed to delete '{name}' from {parent.file.filename}: {e}")
+
 #############################
 # SNRAnalysis Class
 #############################
