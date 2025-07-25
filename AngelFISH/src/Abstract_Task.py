@@ -14,17 +14,24 @@ class abstract_luigi_task(sl.Task):
         self.receipt = self.process(self.receipt)
 
 
-
 class abstract_task:
     def __init__(self, receipt, step_name):
         self.receipt = receipt
         self.step_name = step_name
-        
+        self.output_path = os.path.join(receipt['dirs']['status_dir'], f'step_{self.step_name}.txt')
+
+    @property
+    @abstractmethod
+    def task_name(self):
+        pass
+
     def process(self, 
                 new_params:dict = None, 
                 p_range = None, 
-                t_range = None, 
-                use_gui:bool = False):
+                t_range = None):
+        
+        if self.step_name not in self.receipt['step_order']:
+            self.receipt['step_order'].append(self.step_name)
         
         self.data = load_data(self.receipt)
 
@@ -32,12 +39,11 @@ class abstract_task:
             for k, v in new_params.items():
                 self.receipt['steps'][self.step_name][k] = v
 
-        if use_gui:
-            pass  # Implement GUI logic here if needed
-        else:
             for p in p_range if p_range else range(self.data['pp']):
                 for t in t_range if t_range else range(self.data['tt']):
                     self.image_processing(p, t)
+
+        self.receipt['steps'][self.step_name]['task_name'] = self.task_name
 
         return self.receipt
 

@@ -10,6 +10,11 @@ def pycromanager_data_loader(receipt):
     data = {}
 
     local_path = receipt['meta_arguments'].get('local_location', None)
+
+    os.makedirs(receipt['dirs']['analysis_dir'], exist_ok=True)
+    os.makedirs(receipt['dirs']['results_dir'], exist_ok=True)
+    os.makedirs(receipt['dirs']['status_dir'], exist_ok=True)
+
     if local_path and os.path.exists(local_path):
         ds = Dataset(local_path)
 
@@ -21,20 +26,11 @@ def pycromanager_data_loader(receipt):
         metadata = lambda p, t, z=0, c=0: ds.read_metadata(position=p, time=t, channel=c, z=z)
         data['metadata'] = metadata
 
-        analysis_name = receipt['meta_arguments']['analysis_name']
-        analysis_dir = os.path.join(local_path, analysis_name)
-        os.makedirs(analysis_dir, exist_ok=True)
-        data['analysis_dir'] = analysis_dir
 
-        results_dir = os.path.join(analysis_dir, 'results')
-        os.makedirs(analysis_dir, exist_ok=True)
-        data['results_dir'] = results_dir
 
-        status_dir = os.path.join(analysis_dir, 'status')
-        os.makedirs(status_dir, exist_ok=True)
-        data['status_dir'] = status_dir
 
-        for file in os.listdir(results_dir):
+
+        for file in os.listdir(receipt['dirs']['results_dir']):
             key, data = read_data(file)
             data[key] = data
 

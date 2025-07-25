@@ -4,6 +4,7 @@ import os
 import pathlib
 
 class segment(abstract_task):
+    pass
     
 
 

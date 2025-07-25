@@ -1,53 +1,40 @@
 import os
 import pathlib
 from src.NASConnection import NASConnection
+import time
 
 from src import abstract_task, load_data
 
 
 class download_data(abstract_task):
-    @property
     def task_name(self):
         return 'download_data'
     
-    def process(self, 
-            receipt, 
-            step_name,
-            new_params:dict = None, 
-            p_range = None, 
-            t_range = None, 
-            use_gui:bool = False):
+    def process(self):
         
-        data = load_data(receipt)
+        start_time = time.time()
+        
+        self.data = load_data(self.receipt)
 
-        if new_params:
-            for k, v in new_params.items():
-                receipt[step_name][k] = v
+        self.image_processing()
 
-        if use_gui:
-            pass  # Implement GUI logic here if needed
-        else:
-            self.image_processing(None, None, receipt, data)
+        if self.step_name not in self.receipt['step_order']:
+            self.receipt['step_order'].append(self.step_name)
+            
+        with open(self.output_path, "a") as f:
+            f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
 
-        return receipt
+        return self.receipt
 
-    def image_processing(self, p, t, receipt, data):
-        local_location = receipt['meta_arguments'].get('local_location', None)
-        nas_location = receipt['meta_arguments'].get('nas_location', None)
+    def image_processing(self):
+        local_location = self.receipt['meta_arguments'].get('local_location', None)
+        nas_location = self.receipt['meta_arguments'].get('nas_location', None)
 
         connection_config_location = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         connection_config_location = os.path.join(connection_config_location, 'config_nas.yml')
 
-        # save to a single location
-        database_loc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        database_loc = os.path.join(database_loc, 'database')
-
-        if local_location is None:
-            name = os.path.basename(nas_location)
-            local_location = os.path.join(database_loc, name)
-
         # Check if local_location exists
-        if os.path.exists(local_location):
+        if local_location and os.path.exists(local_location):
             print('local file already exist')
         else:
             # Determine if nas_location is a file or folder
@@ -59,7 +46,7 @@ class download_data(abstract_task):
             else:
                 self.download_file_from_NAS(nas_location, os.path.dirname(local_location), connection_config_location)
 
-        receipt['meta_arguments']['local_location'] = local_location
+        self.receipt['meta_arguments']['local_location'] = local_location
 
     def download_folder_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
