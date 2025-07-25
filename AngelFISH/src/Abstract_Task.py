@@ -2,17 +2,7 @@ from abc import ABC, abstractmethod
 import sciluigi as sl
 import os 
 import time
-
-class abstract_luigi_task(sl.Task):
-    in_upstream = sl.Parameter()
-    out_downstream = sl.Parameter()
-
-    def out(self):
-        return(sl.TargetInfo(self, self.out_downstream))
-
-    def run(self):
-        self.receipt = self.process(self.receipt)
-
+import concurrent.futures
 
 class abstract_task:
     def __init__(self, receipt, step_name):
@@ -20,9 +10,9 @@ class abstract_task:
         self.step_name = step_name
         self.output_path = os.path.join(receipt['dirs']['status_dir'], f'step_{self.step_name}.txt')
 
-    @property
+    @classmethod
     @abstractmethod
-    def task_name(self):
+    def task_name(cls):
         pass
 
     @property
@@ -33,7 +23,8 @@ class abstract_task:
     def process(self, 
                 new_params:dict = None, 
                 p_range = None, 
-                t_range = None):
+                t_range = None,
+                run_in_parallel:bool = False):
 
         start_time = time.time() 
 
@@ -41,9 +32,13 @@ class abstract_task:
         if self.step_name not in self.receipt['step_order']:
             self.receipt['step_order'].append(self.step_name)
         
+        # makes sure the is a place for params
         if self.step_name not in self.receipt['steps'].keys():
             self.receipt['steps'][self.step_name] = {}
-        
+
+        # makes sure that the task_name is save (you can have multiple tasks of the same task)
+        self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
+
         # loads data associated with receipt using data_loader
         self.data = load_data(self.receipt)
 
@@ -52,38 +47,55 @@ class abstract_task:
             for k, v in new_params.items():
                 self.receipt['steps'][self.step_name][k] = v
 
-        # check that required params have been check
-        self.check_required_arguments()
+        if self.handle_previous_run():
+            # check that required params have been check
+            self.check_required_arguments()
 
-        # preallocate need memory in parallel manner
-        self.preallocate_memmory()
+            # preallocate need memory in parallel manner
+            self.preallocate_memmory()
 
-        # runs either the specified ranges or all
-        for p in p_range if p_range else range(self.data['pp']):
-            for t in t_range if t_range else range(self.data['tt']):
-                self.image_processing_task(p, t) # runs image processing
+            # run image processing
+            self.iterate_over_data(p_range, t_range, run_in_parallel)
 
-        # makes sure that the task_name is save (you can have multiple tasks in the same )
-        self.receipt['steps'][self.step_name]['task_name'] = self.task_name
-
-        # compress and release memory
-        self.compress_and_release_memory()
+            # compress and release memory
+            self.compress_and_release_memory()
 
         # records completion. This will mark completion for luigi
+        os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
         with open(self.output_path, "a") as f:
             f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
 
         return self.receipt
+    
+    def iterate_over_data(self, p_range, t_range, run_in_parallel):
+        if run_in_parallel:
+            p_values = p_range if p_range else range(self.data['pp'])
+            t_values = t_range if t_range else range(self.data['tt'])
 
+            def process_single(args):
+                p, t = args
+                extracted_args = self.extract_args(p, t)
+                results = self.image_processing_task(**extracted_args)
+                self.write_results(results, p, t)
+
+            with concurrent.futures.ProcessPoolExecutor() as executor:
+                executor.map(process_single, [(p, t) for p in p_values for t in t_values])
+
+        else:
+            # runs either the specified ranges or all
+            for p in p_range if p_range else range(self.data['pp']):
+                for t in t_range if t_range else range(self.data['tt']):
+                    extracted_args = self.extract_args(p,t)
+                    results = self.image_processing_function(**extracted_args) # runs image processing
+                    self.write_results(results, p, t)
+
+    @staticmethod
     @abstractmethod
-    def image_processing_task(self, p, t):
+    def image_processing_function():
         pass
 
-    def get_luigi_task(self, input_task):
-        self.data = load_data(self.receipt)
-        task = abstract_luigi_task(receipt=self.receipt, step_name=self.step_name, input_path=input_task.out, output_path=self.data)
-        task.process = self.process
-        return task
+    def extract_args(self, p, t):
+        pass
 
     def check_required_arguments(self, receipt=None):
         if receipt is None:
@@ -94,12 +106,21 @@ class abstract_task:
                 raise KeyError(f'required key {rk} not found for step {self.step_name}')
 
     # Implement if needed 
+    def write_results(self, results, p, t):
+        pass
+
+    # Implement if needed 
     def preallocate_memmory(self):
         pass
 
     # Implement if needed 
     def compress_and_release_memory(self):
         pass
+
+    # Implement if needed 
+    def handle_previous_run(self):
+        return True
+
 
 def get_data_loader(name):
     if name == 'pycromanager_data_loader':

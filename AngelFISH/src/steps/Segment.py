@@ -28,19 +28,21 @@ from copy import copy
 
 from skimage.segmentation import watershed
 from scipy.ndimage import distance_transform_edt
+import zarr
+import shutil
 
 class segment(abstract_task):
 
-    @property
-    def task_name(self):
+    @classmethod
+    def task_name(cls):
         return 'segment'
 
     @property
     def required_keys(self):
         return ['mask_name', 'channel']
 
-    def image_processing_task(self, p, t):
-        # get the user defined arguments
+    def extract_args(self, p, t):
+                # get the user defined arguments
         given_args = self.receipt['steps'][self.step_name]
 
         # gets the data specific to the call
@@ -50,16 +52,13 @@ class segment(abstract_task):
 
         all_args = {**given_args, **data_to_send}
 
-        # runs the image processing 
-        mask, flows, styles, diams = self.image_processing_function(**all_args)
+        return all_args
 
     def preallocate_memmory(self):
         if hasattr(self, 'temp_dir') and self.temp_dir is not None and os.path.exists(self.temp_dir):
             # temp_dir exists
             pass
         else:
-            self.temp_dir = os.path.join(self.receipt['dirs']['analysis_dir'], f'temp_{self.step_name}')
-            os.makedirs(self.temp_dir, exist_ok=True)
             self.create_temp_mask()
 
     def create_temp_mask(self):
@@ -67,26 +66,26 @@ class segment(abstract_task):
         if not hasattr(self, 'mask_file'):
             # Get mask name from receipt
             mask_name = self.receipt['steps'].get(self.step_name, {}).get('mask_name', 'temp_mask')
-            
+
             # Create mask file path
-            self.mask_file = os.path.join(self.temp_dir, f"{mask_name}.zarr")
-            
+            self.mask_file = os.path.join(self.receipt['dirs']['analysis_dir'], f"{mask_name}.zarr")
+
             # Get shape from images, removing channel dimension
             image_shape = self.data['images'].shape
             mask_shape = image_shape[:2] + image_shape[3:]  # Remove channel dimension
-            
-            # Create a dask array for the mask
-            chunks = 'auto'  # Or specify a chunk size that works for your data
-            
+
+            # Specify chunk size or use 'auto'
+            # chunks = 'auto'
+
             # Check if mask already exists
             if os.path.exists(self.mask_file):
-                # Load existing mask
-                self.mask = da.from_zarr(self.mask_file)
+                # Load existing mask as writable
+                self.mask = zarr.open(self.mask_file, mode='r+')
             else:
-                # Create new mask initialized with zeros
-                self.mask = da.zeros(mask_shape, dtype=np.int32, chunks=chunks)
-                self.mask.to_zarr(self.mask_file)
-                
+                # Create new mask initialized with zeros and make it writable
+                self.mask = zarr.open(self.mask_file, mode='w', shape=mask_shape, dtype=np.int32)
+                self.mask[:] = 0  # Initialize with zeros
+
         return self.mask
 
     @staticmethod
@@ -96,12 +95,14 @@ class segment(abstract_task):
                                   diameter: float = 180, 
                                   invert: bool = False, 
                                   normalize: bool = True, 
-                                  channel_axis: int = 0, 
                                   do_3D:bool=False, 
                                   min_size:float=500,
                                   flow_threshold:float=0, 
                                   cellprob_threshold:float=0, 
                                   **kwargs):
+        # we will always take in an image with this shape struct
+        zz, yy, xx = zyx_image.shape
+
         model_location = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')
         pretrained_model = os.path.join(model_location, pretrained_model_name) if pretrained_model_name else None
 
@@ -112,19 +113,66 @@ class segment(abstract_task):
         model.cp = cp
         model.sz = sz
         channels = [0, 0]
+        channel_axis = 0
+        z_axis = 1
+
+        if not do_3D:
+            zyx_image = np.max(zyx_image, axis=0)
+            zyx_image = np.expand_dims(zyx_image, axis=0)
+            
+
+        zyx_image = np.expand_dims(zyx_image, axis=0) # add fake channel axis
+
         mask, flows, styles, diams = model.eval(zyx_image,
                                     channels=channels, 
                                     diameter=diameter, 
                                     invert=invert, 
                                     normalize=normalize, 
-                                    channel_axis=channel_axis, 
+                                    channel_axis=channel_axis,
+                                    z_axis=z_axis,
                                     do_3D=do_3D,
                                     min_size=min_size, 
                                     flow_threshold=flow_threshold, 
                                     cellprob_threshold=cellprob_threshold)
                                             # net_avg=True
 
+
+        if not do_3D and zz > 1: # expand 2d image to 3d 
+            new_masks = np.zeros((zz, yy, xx))
+            for z in range(zz):
+                new_masks[z, :, :] = mask
+            mask = new_masks
+
         return mask, flows, styles, diams
+
+    def compress_and_release_memory(self):
+        output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
+        if self.receipt['steps'][self.step_name]['mask_name'] in self.data.keys():
+            self.data[self.receipt['steps'][self.step_name]['mask_name']] = self.mask.astype(np.uint16)
+        else:
+            tifffile.imwrite(output_path, self.mask.astype(np.uint16))
+        self.remove_temp_mask()
+
+    def remove_temp_mask(self):
+        """Remove the temporary mask file from disk if it exists."""
+        if hasattr(self, 'mask_file'):
+            if os.path.exists(self.mask_file):
+                try:
+                    shutil.rmtree(self.mask_file)
+                except Exception as e:
+                    print(f"Error removing mask file: {e}")
+            del self.mask_file
+
+    def write_results(self, results, p, t):
+        self.mask[p, t] = results[0]
+
+    def handle_previous_run(self):
+        output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
+        if os.path.exists(output_path):
+            return self.receipt['meta_arguments'].get('load_masks', False)
+        else:
+            return True
+
 
 
 

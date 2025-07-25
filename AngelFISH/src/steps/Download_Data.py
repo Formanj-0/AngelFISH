@@ -7,15 +7,13 @@ from src import abstract_task, load_data
 
 
 class download_data(abstract_task):
-    @property
-    def task_name(self):
+
+    @classmethod
+    def task_name(cls):
         return 'download_data'
     
     def process(self):
-        
         start_time = time.time()
-        
-        self.data = load_data(self.receipt)
 
         self.image_processing()
 
@@ -24,11 +22,12 @@ class download_data(abstract_task):
 
         if self.step_name not in self.receipt['steps'].keys():
             self.receipt['steps'][self.step_name] = {}
-            
+        
+        os.makedirs(self.receipt['dirs']['status_dir'], exist_ok=True)
         with open(self.output_path, "a") as f:
             f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
 
-        self.receipt['steps'][self.step_name]['task_name'] = self.task_name 
+        self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
 
         return self.receipt
 
