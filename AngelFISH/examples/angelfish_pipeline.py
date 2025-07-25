@@ -29,9 +29,9 @@ class AngelFISHLuigiTask(sl.ExternalTask):
 class AngelFISHWorkflow(sl.WorkflowTask):
     receipt_path = luigi.Parameter()
 
-    # def out_doneflag(self):
-    #     receipt = Receipt(path=self.receipt_path)
-    #     return sl.TargetInfo(self, f'{receipt['meta_arguments']['analysis_name']}.txt')
+    def out_doneflag(self):
+        receipt = Receipt(path=self.receipt_path)
+        return sl.TargetInfo(self, f'{receipt['meta_arguments']['analysis_name']}.txt')
 
     def workflow(self):
         receipt = Receipt(path=self.receipt_path)
@@ -62,4 +62,3 @@ class AngelFISHWorkflow(sl.WorkflowTask):
 
         return task_refs
 
-# %%
