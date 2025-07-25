@@ -7,6 +7,7 @@ from src import abstract_task, load_data
 
 
 class download_data(abstract_task):
+    @property
     def task_name(self):
         return 'download_data'
     
@@ -20,9 +21,14 @@ class download_data(abstract_task):
 
         if self.step_name not in self.receipt['step_order']:
             self.receipt['step_order'].append(self.step_name)
+
+        if self.step_name not in self.receipt['steps'].keys():
+            self.receipt['steps'][self.step_name] = {}
             
         with open(self.output_path, "a") as f:
             f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
+
+        self.receipt['steps'][self.step_name]['task_name'] = self.task_name 
 
         return self.receipt
 

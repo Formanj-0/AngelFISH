@@ -7,14 +7,17 @@ import pandas as pd
 
 
 def pycromanager_data_loader(receipt):
-    data = {}
 
-    local_path = receipt['meta_arguments'].get('local_location', None)
+    data = {} # were gonna use this as basically a struct
 
+    # These are the mandatory directories of this 'data structure'
     os.makedirs(receipt['dirs']['analysis_dir'], exist_ok=True)
     os.makedirs(receipt['dirs']['results_dir'], exist_ok=True)
     os.makedirs(receipt['dirs']['status_dir'], exist_ok=True)
 
+
+    # Check if local path and does a bunch with it if it does (if it doesnt exist theres not much to do)
+    local_path = receipt['meta_arguments'].get('local_location', None)
     if local_path and os.path.exists(local_path):
         ds = Dataset(local_path)
 
@@ -25,10 +28,6 @@ def pycromanager_data_loader(receipt):
 
         metadata = lambda p, t, z=0, c=0: ds.read_metadata(position=p, time=t, channel=c, z=z)
         data['metadata'] = metadata
-
-
-
-
 
         for file in os.listdir(receipt['dirs']['results_dir']):
             key, data = read_data(file)
