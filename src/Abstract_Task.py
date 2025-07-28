@@ -3,6 +3,9 @@ import sciluigi as sl
 import os 
 import time
 import concurrent.futures
+import napari
+import numpy as np
+from magicgui import magicgui
 
 class abstract_task:
     def __init__(self, receipt, step_name):
@@ -19,6 +22,12 @@ class abstract_task:
     @abstractmethod
     def required_keys(self):
         pass
+
+    def gui(self):
+        self.data = load_data(self.receipt)
+        self.viewer = napari.view_image(self.data['images'], name="images")
+
+
 
     def process(self, 
                 new_params:dict = None, 
