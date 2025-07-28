@@ -28,6 +28,7 @@ class abstract_task:
 
         start_time = time.time() 
 
+        # These steps wont do anthing if the receipt already has the step
         # adds the step name to step order
         if self.step_name not in self.receipt['step_order']:
             self.receipt['step_order'].append(self.step_name)
@@ -38,6 +39,7 @@ class abstract_task:
 
         # makes sure that the task_name is save (you can have multiple tasks of the same task)
         self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
+
 
         # loads data associated with receipt using data_loader
         self.data = load_data(self.receipt)
