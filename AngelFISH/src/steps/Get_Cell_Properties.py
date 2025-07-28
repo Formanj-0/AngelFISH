@@ -12,6 +12,10 @@ import re
 
 
 class get_cell_properties(abstract_task):
+    @classmethod
+    def task_name(cls):
+        return 'get_cell_properties'
+
     def extract_args(self, p, t):
         given_args = self.receipt['steps'][self.step_name]
 

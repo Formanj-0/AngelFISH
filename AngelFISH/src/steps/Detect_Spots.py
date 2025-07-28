@@ -14,6 +14,10 @@ import re
 
 
 class detect_spots(abstract_task):
+    @classmethod
+    def task_name(cls):
+        return 'detect_spots'
+
     def extract_args(self, p, t):
         given_args = self.receipt['steps'][self.step_name]
 

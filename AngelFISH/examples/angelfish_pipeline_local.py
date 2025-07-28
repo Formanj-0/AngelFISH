@@ -9,12 +9,17 @@ sys.path.append('..')  # adjust if needed
 from src import Receipt
 from src.steps import get_task
 
-# python -m luigi --module angelfish_pipeline AngelFISHWorkflow --receipt-path new_pipeline.json --local-scheduler
+# python -m luigi --module angelfish_pipeline_local AngelFISHWorkflow --receipt-path new_pipeline.json --local-scheduler
+# python -m luigi --module angelfish_pipeline_local AngelFISHWorkflow --receipt-path new_pipeline.json
 
 class AngelFISHLuigiTask(sl.ExternalTask):
     receipt_path = luigi.Parameter()
     step_name = luigi.Parameter()
     output_path = luigi.Parameter()
+
+    @property
+    def task_name(self):
+        return self.step_name
 
     def out_doneflag(self):
         return sl.TargetInfo(self, self.output_path)
@@ -62,3 +67,5 @@ class AngelFISHWorkflow(sl.WorkflowTask):
 
         return task_refs
 
+# if __name__ == '__main__': # this is being mean an I dont wanna fix it rn
+#     sl.run_local(main_task_cls=AngelFISHWorkflow)

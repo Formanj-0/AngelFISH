@@ -40,7 +40,6 @@ class abstract_task:
         # makes sure that the task_name is save (you can have multiple tasks of the same task)
         self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
 
-
         # loads data associated with receipt using data_loader
         self.data = load_data(self.receipt)
 

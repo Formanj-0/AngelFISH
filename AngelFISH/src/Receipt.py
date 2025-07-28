@@ -42,17 +42,6 @@ class Receipt(UserDict):
 
         status_dir = os.path.join(analysis_dir, 'status')
         data['dirs']['status_dir'] = status_dir
-        # # Clear the status dir
-        # if os.path.exists(status_dir) and os.path.isdir(status_dir):
-        #     for filename in os.listdir(status_dir):
-        #         file_path = os.path.join(status_dir, filename)
-        #         try:
-        #             if os.path.isfile(file_path) or os.path.islink(file_path):
-        #                 os.unlink(file_path)
-        #             elif os.path.isdir(file_path):
-        #                 shutil.rmtree(file_path)
-        #         except Exception as e:
-        #             print(f'Failed to delete {file_path}. Reason: {e}')
 
         mask_dir = os.path.join(local_location, 'masks')
         data['dirs']['masks_dir'] = mask_dir

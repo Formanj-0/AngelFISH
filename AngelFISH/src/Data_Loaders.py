@@ -64,6 +64,15 @@ def read_data(file_path):
     return key, data
 
 
+def close_data(data):
+
+    keys_to_delete = [key for key, value in data.items() if isinstance(value, np.memmap)]
+    for key in keys_to_delete:
+        data[key]._mmap.close()
+        del data[key]
+    data.clear()
+
+
 
 
 
