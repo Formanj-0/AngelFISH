@@ -3,37 +3,82 @@ from typing import Union
 from bigfish import stack, detection, multistack, plot
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+
 
 from src import abstract_task, load_data
+import re
 
 
 class detect_spots(abstract_task):
-    def extract_args(self):
-        pass
+    def extract_args(self, p, t):
+        given_args = self.receipt['steps'][self.step_name]
+
+        data_to_send = {}
+        data_to_send['image'] = self.data['images'][p, t].compute()
+        data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
+        nuc_masks = self.data.get('nuc_masks', None)
+        if nuc_masks is not None:
+            data_to_send['nuc_mask'] = nuc_masks[p,t]
+
+        cyto_masks = self.data.get('cyto_masks', None)
+        if cyto_masks is not None:
+            data_to_send['cyto_mask'] = cyto_masks[p,t]
+
+        args = {**data_to_send, **given_args}
+
+        args['fov'] = p
+        args['timepoint'] = t
+
+        return args
 
     def preallocate_memmory(self):
-        self.temp_dir = os.path.join(self.receipt['dirs']['analysis_dir'], self.self.receipt['steps'][self.step_name]['spot_name'])
+        self.temp_dir = os.path.join(self.receipt['dirs']['analysis_dir'], self.receipt['steps'][self.step_name]['spot_name'])
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
         if not hasattr(self, 'thresholds'):
             self.thresholds = {}
 
-        if not hasattr(self, 'cell_csvs'):
-            self.cell_csvs = []
-        if not hasattr(self, 'spot_csvs'):
-            self.spot_csvs = []
-        if not hasattr(self, 'cluster_csvs'):
-            self.cluster_csvs = []
+        # if not hasattr(self, 'cell_csvs'):
+        #     self.cell_csvs = []
+        # if not hasattr(self, 'spot_csvs'):
+        #     self.spot_csvs = []
+        # if not hasattr(self, 'cluster_csvs'):
+        #     self.cluster_csvs = []
 
     @staticmethod
     def image_processing_function(
-        image, FISHChannel,  nucChannel, voxel_size_yx: int, voxel_size_z: int, 
-        spot_yx: int, spot_z: int, timepoint, fov, independent_params: dict, 
-        spot_name: str, nuc_mask:np.array=None, cell_mask:np.array=None, 
+        image, 
+        FISHChannel,  
+        nucChannel,
+        voxel_size_yx: int, 
+        voxel_size_z: int, 
+        spot_yx: int, 
+        spot_z: int, 
+        timepoint, 
+        fov, 
+        spot_name: str, 
+        metadata,
+        nuc_mask:np.array=None, 
+        cell_mask:np.array=None, 
         bigfish_threshold: Union[int, str] = None, 
-        snr_threshold: float = None, snr_ratio: float = None,
-        bigfish_alpha: float = 0.7, bigfish_beta:float = 1, bigfish_gamma:float = 5, 
-        CLUSTER_RADIUS:int = 500, MIN_NUM_SPOT_FOR_CLUSTER:int = 4, use_log_hook:bool = False, 
-        verbose:bool = False, display_plots: bool = False, bigfish_use_pca: bool = False,
-        sub_pixel_fitting: bool = False, bigfish_minDistance:Union[float, list] = None
+        snr_threshold: float = None, 
+        snr_ratio: float = None,
+        bigfish_alpha: float = 0.7, 
+        bigfish_beta:float = 1, 
+        bigfish_gamma:float = 5, 
+        CLUSTER_RADIUS:int = 500, 
+        MIN_NUM_SPOT_FOR_CLUSTER:int = 4, 
+        use_log_hook:bool = False, 
+        verbose:bool = False, 
+        display_plots: bool = False, 
+        bigfish_use_pca: bool = False,
+        sub_pixel_fitting: bool = False, 
+        bigfish_minDistance:Union[float, list] = None,
+        **kwargs
         ):
 
         def _establish_threshold(c, bigfish_threshold, kwargs):
@@ -64,10 +109,26 @@ class detect_spots(abstract_task):
 
                 return threshold
         
-        def get_detected_spots(FISHChannel: int, rna:np.array, voxel_size_yx:float, voxel_size_z:float, spot_yx:float, spot_z:float, alpha:int, beta:int,
-                               gamma:int, CLUSTER_RADIUS:float, MIN_NUM_SPOT_FOR_CLUSTER:int, use_log_hook:bool, 
-                               verbose: bool = False, display_plots: bool = False, sub_pixel_fitting: bool = False, minimum_distance:Union[list, float] = None,
-                               use_pca: bool = False, snr_threshold: float = None, snr_ratio: float = None, bigfish_threshold: Union[int, str] = None,  **kwargs):
+        def get_detected_spots(FISHChannel: int, 
+                               rna:np.array, 
+                               voxel_size_yx:float, 
+                               voxel_size_z:float, 
+                               spot_yx:float, 
+                               spot_z:float, 
+                               alpha:int, 
+                               beta:int,
+                               gamma:int, 
+                               CLUSTER_RADIUS:float, 
+                               MIN_NUM_SPOT_FOR_CLUSTER:int, 
+                               use_log_hook:bool, 
+                               verbose: bool = False, 
+                               display_plots: bool = False, 
+                               sub_pixel_fitting: bool = False, 
+                               minimum_distance:Union[list, float] = None,
+                               use_pca: bool = False, 
+                               snr_threshold: float = None, 
+                               snr_ratio: float = None, 
+                               bigfish_threshold: Union[int, str] = None,  **kwargs):
 
             threshold = _establish_threshold(FISHChannel, bigfish_threshold, kwargs)
 
@@ -249,7 +310,7 @@ class detect_spots(abstract_task):
                 
             return spots_post_clustering, dense_regions, reference_spot, clusters, spots_subpx, individual_thershold
 
-        def standardize_df(df_cellresults, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, independent_params, dim_3D):
+        def standardize_df(df_cellresults, spots_px, spots_subpx, sub_pixel_fitting, clusters, c, timepoint, fov, dim_3D):
             # get the columns
             cols_spots = []
             cols_cluster = []
@@ -433,7 +494,7 @@ class detect_spots(abstract_task):
         for c in range(len(FISHChannel)):
             rna = image[FISHChannel[c], :, :, :]
             rna = rna.squeeze()
-            # rna = rna
+            dim_3D = len(rna.shape) == 3
 
             # detect spots
             print('Detecting Spots')
@@ -452,7 +513,7 @@ class detect_spots(abstract_task):
             spots_px = get_spot_properties(rna, spots_px, voxel_size_yx, voxel_size_z, spot_yx, spot_z, display_plots)
 
             print('Standardizing Data')
-            spots, clusters = standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, independent_params)
+            spots, clusters = standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, dim_3D)
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
             print('Complete Spot Detection')
@@ -460,17 +521,23 @@ class detect_spots(abstract_task):
 
     def write_results(self, results, p, t):
         spot_name = self.receipt['steps'][self.step_name]['spot_name']
-        cell_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_cellresults.csv')
-        spot_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_spotresults.csv')
-        cluster_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_clusterresults.csv')
 
-        results['cellresults'].to_csv(cell_path, index=False)
-        results['spotresults'].to_csv(spot_path, index=False)
-        results['clusterresults'].to_csv(cluster_path, index=False)
+        if results['cellresults'] is not None:
+            cell_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_cellresults.csv')
+            results['cellresults'].to_csv(cell_path, index=False)
+            # self.cell_csvs.append(cell_path)
 
-        self.cell_csvs.append(cell_path)
-        self.spot_csvs.append(spot_path)
-        self.cluster_csvs.append(cluster_path)
+        if results['spotresults'] is not None:
+            spot_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_spotresults.csv')
+            results['spotresults'].to_csv(spot_path, index=False)
+            # self.spot_csvs.append(spot_path)
+
+        if results['clusterresults'] is not None:
+            cluster_path = os.path.join(self.temp_dir, f'p{p}_t{t}_{spot_name}_clusterresults.csv')
+            results['clusterresults'].to_csv(cluster_path, index=False)
+            # self.cluster_csvs.append(cluster_path)
+
+
 
         self.thresholds[f'{p}, {t}'] = results['individual_spotdetection_thresholds']
 
@@ -478,14 +545,46 @@ class detect_spots(abstract_task):
         spot_name = self.receipt['steps'][self.step_name]['spot_name']
         results_dir = self.receipt['dirs']['results_dir']
 
-        final_cell_df = pd.concat([pd.read_csv(f) for f in self.cell_csvs], ignore_index=True)
-        final_spot_df = pd.concat([pd.read_csv(f) for f in self.spot_csvs], ignore_index=True)
-        final_cluster_df = pd.concat([pd.read_csv(f) for f in self.cluster_csvs], ignore_index=True)
+        # List all files in the temp_dir
+        all_files = os.listdir(self.temp_dir)
 
-        final_cell_df.to_csv(os.path.join(results_dir ,f'{spot_name}_cellresults.csv'), index=False)
-        final_spot_df.to_csv(os.path.join(results_dir, f'{spot_name}_spotresults.csv'), index=False)
-        final_cluster_df.to_csv(os.path.join(results_dir, f'{spot_name}_clusterresults.csv'), index=False)
+        # Use regex to find matching files
+        cell_pattern = re.compile(r'.*_cellresults\.csv$')
+        spot_pattern = re.compile(r'.*_spotresults\.csv$')
+        cluster_pattern = re.compile(r'.*_clusterresults\.csv$')
 
+        cell_files = [os.path.join(self.temp_dir, f) for f in all_files if cell_pattern.match(f)]
+        spot_files = [os.path.join(self.temp_dir, f) for f in all_files if spot_pattern.match(f)]
+        cluster_files = [os.path.join(self.temp_dir, f) for f in all_files if cluster_pattern.match(f)]
+
+        final_cell_df = pd.concat([pd.read_csv(f) for f in cell_files], ignore_index=True) if cell_files else None
+        final_spot_df = pd.concat([pd.read_csv(f) for f in spot_files], ignore_index=True) if spot_files else None
+        final_cluster_df = pd.concat([pd.read_csv(f) for f in cluster_files], ignore_index=True) if cluster_files else None
+
+        if final_cell_df is not None:
+            final_cell_df.to_csv(os.path.join(results_dir ,f'{spot_name}_cellresults.csv'), index=False)
+        if final_spot_df is not None:
+            final_spot_df.to_csv(os.path.join(results_dir, f'{spot_name}_spotresults.csv'), index=False)
+        if final_cluster_df is not None:
+            final_cluster_df.to_csv(os.path.join(results_dir, f'{spot_name}_clusterresults.csv'), index=False)
+
+        # Delete all files in the temp_dir
+        for f in all_files:
+            file_path = os.path.join(self.temp_dir, f)
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting file {file_path}: {e}")
+
+        # Delete the temp_dir itself
+        try:
+            os.rmdir(self.temp_dir)
+        except Exception as e:
+            print(f"Error deleting directory {self.temp_dir}: {e}")
+
+    @property
+    def required_keys(self):
+        return ['FISHChannel']
 
 
 
