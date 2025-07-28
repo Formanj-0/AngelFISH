@@ -34,7 +34,7 @@ def load_pycromanager(location, analysis_name):
         data['metadata'] = metadata
 
         for file in os.listdir(os.path.join(location, analysis_name, 'results')):
-            key, returned_data = read_data(os.path.join(location, analysis_name, 'results'), file)
+            key, returned_data = read_data(os.path.join(location, analysis_name, 'results', file))
             data[key] = returned_data
 
         for file in os.listdir(os.path.join(location, 'masks')):
