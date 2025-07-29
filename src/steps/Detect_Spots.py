@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+import napari
+from magicgui import magicgui
+import pathlib
 
 
 from src import abstract_task, load_data
@@ -24,6 +27,10 @@ class detect_spots(abstract_task):
         data_to_send = {}
         data_to_send['image'] = self.data['images'][p, t].compute()
         data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
+        self.voxel_size_yx = self.data['metadata'](p, t)['PixelSizeUm']
+        data_to_send['voxel_size_yx'] = self.voxel_size_yx
+        self.voxel_size_z = np.abs(self.data['metadata'](p, t, z=1)['ZPosition_um_Intended'] - self.data['metadata'](p, t, z=0)['ZPosition_um_Intended'])
+        data_to_send['voxel_size_z'] = self.voxel_size_z
         nuc_masks = self.data.get('nuc_masks', None)
         if nuc_masks is not None:
             data_to_send['nuc_mask'] = nuc_masks[p,t]
@@ -56,32 +63,32 @@ class detect_spots(abstract_task):
     @staticmethod
     def image_processing_function(
         image, 
-        FISHChannel,  
-        nucChannel,
-        voxel_size_yx: int, 
-        voxel_size_z: int, 
-        spot_yx: int, 
-        spot_z: int, 
+        FISHChannel: int,  
+        nucChannel: int,
+        voxel_size_yx: float, 
+        voxel_size_z: float, 
+        spot_yx: float, 
+        spot_z: float, 
         timepoint, 
         fov, 
         spot_name: str, 
         metadata,
         nuc_mask:np.array=None, 
         cell_mask:np.array=None, 
-        bigfish_threshold: Union[int, str] = None, 
+        threshold: Union[int, str] = None, 
         snr_threshold: float = None, 
         snr_ratio: float = None,
-        bigfish_alpha: float = 0.7, 
-        bigfish_beta:float = 1, 
-        bigfish_gamma:float = 5, 
-        CLUSTER_RADIUS:int = 500, 
-        MIN_NUM_SPOT_FOR_CLUSTER:int = 4, 
+        alpha: float = 0.7, 
+        beta:float = 1, 
+        gamma:float = 5, 
+        cluster_radius:int = 500, 
+        min_num_spot_per_cluster:int = 4, 
         use_log_hook:bool = False, 
         verbose:bool = False, 
         display_plots: bool = False, 
-        bigfish_use_pca: bool = False,
+        use_pca: bool = False,
         sub_pixel_fitting: bool = False, 
-        bigfish_minDistance:Union[float, list] = None,
+        minDistance:Union[float, list] = None,
         **kwargs
         ):
 
@@ -503,10 +510,10 @@ class detect_spots(abstract_task):
             # detect spots
             print('Detecting Spots')
             spots_px, dense_regions, reference_spot, clusters, spots_subpx, threshold = get_detected_spots( FISHChannel=c,
-                rna=rna, voxel_size_yx=voxel_size_yx, voxel_size_z=voxel_size_z, spot_yx=spot_yx, spot_z=spot_z, alpha=bigfish_alpha,
-                beta=bigfish_beta, gamma=bigfish_gamma, CLUSTER_RADIUS=CLUSTER_RADIUS, MIN_NUM_SPOT_FOR_CLUSTER=MIN_NUM_SPOT_FOR_CLUSTER, 
-                bigfish_threshold=bigfish_threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
-                minimum_distance=bigfish_minDistance, use_pca=bigfish_use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio)
+                rna=rna, voxel_size_yx=voxel_size_yx, voxel_size_z=voxel_size_z, spot_yx=spot_yx, spot_z=spot_z, alpha=alpha,
+                beta=beta, gamma=gamma, CLUSTER_RADIUS=cluster_radius, MIN_NUM_SPOT_FOR_CLUSTER=min_num_spot_per_cluster, 
+                bigfish_threshold=threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
+                minimum_distance=minDistance, use_pca=use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio)
             
             print('Extracting Cell Results from masks')
             cell_results, spots_px, clusters = extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
@@ -589,6 +596,166 @@ class detect_spots(abstract_task):
     @property
     def required_keys(self):
         return ['FISHChannel']
+
+    def write_args_to_receipt(
+            self,
+            spot_name,
+            FISHChannel,
+            nucChannel,
+            voxel_size_yx,
+            voxel_size_z,
+            spot_yx,
+            spot_z,
+            p,
+            t,
+            threshold,
+            snr_threshold,
+            snr_ratio,
+            alpha,
+            beta,
+            gamma,
+            cluster_radius,
+            min_num_spot_per_cluster,
+            use_log_hook,
+            verbose,
+            display_plots,
+            use_pca,
+            sub_pixel_fitting,
+            minDistance,
+            ):
+        self.receipt['steps'][self.step_name]['spot_name'] = spot_name
+        self.receipt['steps'][self.step_name]['FISHChannel'] = FISHChannel
+        self.receipt['steps'][self.step_name]['nucChannel'] = nucChannel
+        self.receipt['steps'][self.step_name]['voxel_size_yx'] = voxel_size_yx
+        self.receipt['steps'][self.step_name]['voxel_size_z'] = voxel_size_z
+        self.receipt['steps'][self.step_name]['spot_yx'] = spot_yx
+        self.receipt['steps'][self.step_name]['spot_z'] = spot_z
+        self.receipt['steps'][self.step_name]['p'] = p
+        self.receipt['steps'][self.step_name]['t'] = t
+        self.receipt['steps'][self.step_name]['threshold'] = threshold
+        self.receipt['steps'][self.step_name]['snr_threshold'] = snr_threshold
+        self.receipt['steps'][self.step_name]['snr_ratio'] = snr_ratio
+        self.receipt['steps'][self.step_name]['alpha'] = alpha
+        self.receipt['steps'][self.step_name]['beta'] = beta
+        self.receipt['steps'][self.step_name]['gamma'] = gamma
+        self.receipt['steps'][self.step_name]['cluster_radius'] = cluster_radius
+        self.receipt['steps'][self.step_name]['min_num_spot_per_cluster'] = min_num_spot_per_cluster
+        self.receipt['steps'][self.step_name]['use_log_hook'] = use_log_hook
+        self.receipt['steps'][self.step_name]['verbose'] = verbose
+        self.receipt['steps'][self.step_name]['display_plots'] = display_plots
+        self.receipt['steps'][self.step_name]['use_pca'] = use_pca
+        self.receipt['steps'][self.step_name]['sub_pixel_fitting'] = sub_pixel_fitting
+        self.receipt['steps'][self.step_name]['minDistance'] = minDistance
+
+    def run_process(self, p, t):
+        print(p, t)
+        self.iterate_over_data(p_range=[p], t_range=[t], run_in_parallel=False)
+
+    @magicgui(
+            call_button='Run'
+    )
+    def interface(self, 
+                spot_name: str, 
+                FISHChannel: int,  
+                nucChannel: int,
+                spot_yx: int, 
+                spot_z: int, 
+                p:int=0, 
+                t:int=0, 
+                threshold: Union[int, str] = None, 
+                snr_threshold: float = None, 
+                snr_ratio: float = None,
+                alpha: float = 0.7, 
+                beta:float = 1, 
+                gamma:float = 5, 
+                cluster_radius:int = 500, 
+                min_num_spot_per_cluster:int = 4, 
+                use_log_hook:bool = False, 
+                verbose:bool = False, 
+                display_plots: bool = False, 
+                use_pca: bool = False,
+                sub_pixel_fitting: bool = False, 
+                minDistance:float = None,):
+        try:
+            self.write_args_to_receipt(
+                                spot_name,
+                                FISHChannel,
+                                nucChannel,
+                                voxel_size_yx,
+                                voxel_size_z,
+                                spot_yx,
+                                spot_z,
+                                p,
+                                t,
+                                threshold,
+                                snr_threshold,
+                                snr_ratio,
+                                alpha,
+                                beta,
+                                gamma,
+                                cluster_radius,
+                                min_num_spot_per_cluster,
+                                use_log_hook,
+                                verbose,
+                                display_plots,
+                                use_pca,
+                                sub_pixel_fitting,
+                                minDistance
+                                )
+            self.preallocate_memmory()
+            self.run_process(p, t)
+        except Exception as e:
+            print(f"[Error] Exception during segmentation: {e}")
+
+        spot_name = self.receipt['steps'][self.step_name]['spot_name']
+        results_dir = self.receipt['dirs']['results_dir']
+
+        # List all files in the temp_dir
+        all_files = os.listdir(self.temp_dir)
+
+        # Use regex to find matching files
+        cell_pattern = re.compile(r'.*_cellresults\.csv$')
+        spot_pattern = re.compile(r'.*_spotresults\.csv$')
+        cluster_pattern = re.compile(r'.*_clusterresults\.csv$')
+
+        cell_files = [os.path.join(self.temp_dir, f) for f in all_files if cell_pattern.match(f)]
+        spot_files = [os.path.join(self.temp_dir, f) for f in all_files if spot_pattern.match(f)]
+        cluster_files = [os.path.join(self.temp_dir, f) for f in all_files if cluster_pattern.match(f)]
+
+        final_cell_df = pd.concat([pd.read_csv(f) for f in cell_files], ignore_index=True) if cell_files else None
+        final_spot_df = pd.concat([pd.read_csv(f) for f in spot_files], ignore_index=True) if spot_files else None
+        final_cluster_df = pd.concat([pd.read_csv(f) for f in cluster_files], ignore_index=True) if cluster_files else None
+
+        c = self.receipt['steps'][self.step_name]['FISHChannel'] 
+
+        # Display results in napari viewer if available
+        if hasattr(self, "viewer") and self.viewer is not None:
+            # Remove previous layers if they exist
+            for layer_name in ["spots", "clusters"]:
+                if layer_name in self.viewer.layers:
+                    self.viewer.layers.remove(layer_name)
+
+            # Show spots
+            if final_spot_df is not None:
+                coords = final_spot_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
+                self.viewer.add_points(
+                    coords,
+                    name="spots",
+                    size=1,
+                    face_color="red",
+                    edge_color="white",
+                )
+
+            # Show clusters
+            if final_cluster_df is not None:
+                coords = final_cluster_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
+                self.viewer.add_points(
+                    coords,
+                    name="clusters",
+                    size=5,
+                    face_color="blue",
+                    edge_color="white"
+                )
 
 
 
