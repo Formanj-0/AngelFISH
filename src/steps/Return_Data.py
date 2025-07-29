@@ -14,18 +14,6 @@ class return_data(abstract_task):
     def process(self):
         start_time = time.time() 
 
-        # These steps wont do anthing if the receipt already has the step
-        # adds the step name to step order
-        if self.step_name not in self.receipt['step_order']:
-            self.receipt['step_order'].append(self.step_name)
-        
-        # makes sure the is a place for params
-        if self.step_name not in self.receipt['steps'].keys():
-            self.receipt['steps'][self.step_name] = {}
-
-        # makes sure that the task_name is save (you can have multiple tasks of the same task)
-        self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
-
         analysis_name = self.receipt['meta_arguments']['analysis_name']
         analysis_dir = self.receipt['dirs']['analysis_dir']
         masks_dir = self.receipt['dirs']['masks_dir']
