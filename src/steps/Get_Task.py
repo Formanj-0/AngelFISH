@@ -1,6 +1,7 @@
-from src.steps import segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots
+from src.steps import segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots, match_masks
 
-known_tasks = [segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots]
+known_tasks = [segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots,
+               match_masks]
 
 def get_task(task_name):
     for possible_task in known_tasks:
