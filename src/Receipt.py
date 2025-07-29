@@ -51,8 +51,13 @@ class Receipt(UserDict):
 
 
     def save(self, filepath):
+        data_to_save = {}
+        data_to_save['meta_arguments'] = self.data['meta_arguments']
+        data_to_save['steps'] = self.data['steps']
+        data_to_save['step_order'] = self.data['step_order']
+        
         with open(filepath, 'w') as f:
-            json.dump(self.data, f, indent=4)
+            json.dump(data_to_save, f, indent=4)
 
     def update_step(self, step_name, key, value):
         if step_name not in self['steps']:
