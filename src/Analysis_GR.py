@@ -418,7 +418,7 @@ class GR_Confirmation:
         return raw_2d, pseudo_cyto, nuc_mask
 
     def _plot_display_panels(self, h5_idx, fov, raw_2d, pseudo_cyto, nuc_mask, corrected_image, illum_profile, corrected_profile):
-        fig, axs = plt.subplots(2, 4, figsize=(20, 8))
+        fig, axs = plt.subplots(2, 5, figsize=(25, 10))
 
         # Top row: images
         axs[0, 0].imshow(raw_2d, cmap="gray")
@@ -427,45 +427,59 @@ class GR_Confirmation:
 
         axs[0, 1].imshow(illum_profile, cmap="gray")
         cs1 = axs[0, 1].contour(illum_profile, levels=10, colors="white", linewidths=0.5)
+        axs[0, 1].clabel(cs1, inline=True, fontsize=8)
         axs[0, 1].set_title("Illumination Profile")
         axs[0, 1].axis("off")
-        axs[0, 1].clabel(cs1, cs1.levels[:], inline=True, fontsize=8)
 
         axs[0, 2].imshow(corrected_image, cmap="gray")
-        axs[0, 2].imshow(pseudo_cyto, cmap="jet", alpha=0.4)
-        axs[0, 2].set_title("Corrected Image + Pseudo-Cyto")
+        axs[0, 2].set_title("Corrected Image (no mask)")
         axs[0, 2].axis("off")
 
         axs[0, 3].imshow(corrected_profile, cmap="gray")
         cs2 = axs[0, 3].contour(corrected_profile, levels=10, colors="white", linewidths=0.5)
+        axs[0, 3].clabel(cs2, inline=True, fontsize=8)
         axs[0, 3].set_title("Corrected IL Profile")
         axs[0, 3].axis("off")
-        axs[0, 3].clabel(cs2, cs2.levels[:], inline=True, fontsize=8)
+
+        axs[0, 4].imshow(corrected_image, cmap="gray")
+        axs[0, 4].imshow(pseudo_cyto, cmap="jet", alpha=0.4)
+        axs[0, 4].set_title("Corrected Image + Masks")
+        axs[0, 4].axis("off")
 
         # Bottom row: histograms
-        axs[1, 0].hist(raw_2d.ravel(), bins=100, color='orange', alpha=0.8)
-        axs[1, 0].set_title("Raw GR Histogram")
+        bins = 100
+        axs[1, 0].hist(raw_2d.ravel(), bins=bins, color='orange', alpha=0.6, label="Raw")
+        axs[1, 0].hist(corrected_image.ravel(), bins=bins, color='green', alpha=0.6, label="Corrected")
+        axs[1, 0].set_title("Raw vs Corrected Histogram")
         axs[1, 0].set_xlabel("Intensity")
         axs[1, 0].set_ylabel("Pixel Count")
+        axs[1, 0].legend()
 
-        axs[1, 1].hist(corrected_image.ravel(), bins=100, color='green', alpha=0.8)
-        axs[1, 1].set_title("Corrected GR Histogram")
+        cyto_vals_corr = corrected_image[pseudo_cyto > 0]
+        nuc_vals_corr = corrected_image[nuc_mask > 0]
+
+        axs[1, 1].hist(nuc_vals_corr, bins=bins, color='purple', alpha=0.6, label='Nucleus (Corr)')
+        axs[1, 1].hist(cyto_vals_corr, bins=bins, color='orange', alpha=0.6, label='Pseudo-cyto (Corr)')
+        axs[1, 1].set_title("Corrected Intensity by Region")
         axs[1, 1].set_xlabel("Intensity")
         axs[1, 1].set_ylabel("Pixel Count")
+        axs[1, 1].legend()
 
-        cyto_vals = corrected_image[pseudo_cyto > 0]
-        nuc_vals = corrected_image[nuc_mask > 0]
+        cyto_vals_raw = raw_2d[pseudo_cyto > 0]
+        nuc_vals_raw = raw_2d[nuc_mask > 0]
 
-        axs[1, 2].hist(nuc_vals, bins=100, color='purple', alpha=0.6, label='Nucleus')
-        axs[1, 2].hist(cyto_vals, bins=100, color='orange', alpha=0.6, label='Pseudo-cyto')
-        axs[1, 2].set_title("Corrected Intensity by Region")
+        axs[1, 2].hist(nuc_vals_raw, bins=bins, color='purple', alpha=0.6, label='Nucleus (Raw)')
+        axs[1, 2].hist(cyto_vals_raw, bins=bins, color='orange', alpha=0.6, label='Pseudo-cyto (Raw)')
+        axs[1, 2].set_title("Raw Intensity by Region")
         axs[1, 2].set_xlabel("Intensity")
         axs[1, 2].set_ylabel("Pixel Count")
         axs[1, 2].legend()
 
+        # Empty plots
         axs[1, 3].axis("off")
+        axs[1, 4].axis("off")
 
-        fig.suptitle(f"h5_idx={h5_idx}, fov={fov}", fontsize=14)
+        fig.suptitle(f"h5_idx={h5_idx}, fov={fov}", fontsize=16)
         plt.tight_layout()
         plt.show()
 
@@ -486,6 +500,10 @@ class GR_Confirmation:
             corrected_profile = self.corrected_IL_profile[GR_Channel]
             if hasattr(corrected_profile, 'compute'):
                 corrected_profile = corrected_profile.compute()
+
+            # Normalize corrected profile to range [0, 1]
+            if np.max(corrected_profile) > 0:
+                corrected_profile = corrected_profile / np.max(corrected_profile)
 
             self._plot_display_panels(
                 h5_idx, fov, raw_2d, pseudo_cyto, nuc_mask, corrected_2d, illum_profile, corrected_profile

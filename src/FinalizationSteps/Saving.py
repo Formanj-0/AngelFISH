@@ -222,43 +222,51 @@ class Save_Parameters(Saving):
 
 
 class Save_Images(Saving):
-    def main(self, **kwargs):
+    def main(self, data_container=None, **kwargs):
         params = kwargs
 
         h5_file = params['h5_file']
         Analysis_name = params['name']
         local_dataset_location = params['local_dataset_location']
-        images = params['images']
         position_indexs = params['position_indexs']
+
+        # Use corrected images from data container if available, otherwise fallback
+        if data_container is not None:
+            images = data_container.load_temp_data().get('images', params.get('images'))
+        else:
+            images = params['images']
 
         close_h5_files()
 
         os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-        # get todays date
         today = datetime.today()
         date = today.strftime("%Y-%m-%d")
 
-        # save the images to the h5 file
         for i, locaction in enumerate(local_dataset_location):
-            # if h5_file[i]:
-            #     h5_file[i].close()
             with h5py.File(locaction, 'r+') as h5:
-                h5 = h5py.File(locaction, 'r+')
                 group_name = f'Analysis_{Analysis_name}_{date}'
                 if group_name in h5:
                     group = h5[group_name]
                 else:
                     group = h5.create_group(group_name)
 
-                # if dataset is already made, delete it
+                # Overwrite existing dataset if present
                 if 'images' in group:
                     del group['images']
 
-                # save the images to the h5 file
-                group.create_dataset('images', data=images[position_indexs[i-1] if i > 0 else 0:position_indexs[i]])
+                # Save illumination-corrected images
+                start_idx = position_indexs[i - 1] if i > 0 else 0
+                end_idx = position_indexs[i]
+                print(f"Saving corrected images for positions {start_idx} to {end_idx} into {locaction}")
+                chunk_size = (1,) + images.shape[1:]  # Optional: define chunking
+                group.create_dataset(
+                    'images',
+                    data=images[start_idx:end_idx],
+                    chunks=chunk_size,
+                    compression="gzip"
+                )
 
                 h5.flush()
-                h5.close()
 
 
 class Save_Masks(Saving):
