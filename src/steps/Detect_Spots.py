@@ -27,9 +27,9 @@ class detect_spots(abstract_task):
         data_to_send = {}
         data_to_send['image'] = self.data['images'][p, t].compute()
         data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
-        self.voxel_size_yx = self.data['metadata'](p, t)['PixelSizeUm']
+        self.voxel_size_yx = self.data['metadata'](p, t)['PixelSizeUm'] * 1000
         data_to_send['voxel_size_yx'] = self.voxel_size_yx
-        self.voxel_size_z = np.abs(self.data['metadata'](p, t, z=1)['ZPosition_um_Intended'] - self.data['metadata'](p, t, z=0)['ZPosition_um_Intended'])
+        self.voxel_size_z = np.abs(self.data['metadata'](p, t, z=1)['ZPosition_um_Intended'] - self.data['metadata'](p, t, z=0)['ZPosition_um_Intended']) * 1000
         data_to_send['voxel_size_z'] = self.voxel_size_z
         nuc_masks = self.data.get('nuc_masks', None)
         if nuc_masks is not None:
@@ -602,8 +602,6 @@ class detect_spots(abstract_task):
             spot_name,
             FISHChannel,
             nucChannel,
-            voxel_size_yx,
-            voxel_size_z,
             spot_yx,
             spot_z,
             p,
@@ -626,8 +624,6 @@ class detect_spots(abstract_task):
         self.receipt['steps'][self.step_name]['spot_name'] = spot_name
         self.receipt['steps'][self.step_name]['FISHChannel'] = FISHChannel
         self.receipt['steps'][self.step_name]['nucChannel'] = nucChannel
-        self.receipt['steps'][self.step_name]['voxel_size_yx'] = voxel_size_yx
-        self.receipt['steps'][self.step_name]['voxel_size_z'] = voxel_size_z
         self.receipt['steps'][self.step_name]['spot_yx'] = spot_yx
         self.receipt['steps'][self.step_name]['spot_z'] = spot_z
         self.receipt['steps'][self.step_name]['p'] = p
@@ -658,8 +654,8 @@ class detect_spots(abstract_task):
                 spot_name: str, 
                 FISHChannel: int,  
                 nucChannel: int,
-                spot_yx: int, 
-                spot_z: int, 
+                spot_yx: float, 
+                spot_z: float, 
                 p:int=0, 
                 t:int=0, 
                 threshold: Union[int, str] = None, 
@@ -681,8 +677,6 @@ class detect_spots(abstract_task):
                                 spot_name,
                                 FISHChannel,
                                 nucChannel,
-                                voxel_size_yx,
-                                voxel_size_z,
                                 spot_yx,
                                 spot_z,
                                 p,
@@ -705,10 +699,7 @@ class detect_spots(abstract_task):
             self.preallocate_memmory()
             self.run_process(p, t)
         except Exception as e:
-            print(f"[Error] Exception during segmentation: {e}")
-
-        spot_name = self.receipt['steps'][self.step_name]['spot_name']
-        results_dir = self.receipt['dirs']['results_dir']
+            print(f"[Error] Exception during spot detection: {e}")
 
         # List all files in the temp_dir
         all_files = os.listdir(self.temp_dir)
@@ -728,34 +719,67 @@ class detect_spots(abstract_task):
 
         c = self.receipt['steps'][self.step_name]['FISHChannel'] 
 
-        # Display results in napari viewer if available
-        if hasattr(self, "viewer") and self.viewer is not None:
-            # Remove previous layers if they exist
-            for layer_name in ["spots", "clusters"]:
-                if layer_name in self.viewer.layers:
-                    self.viewer.layers.remove(layer_name)
+        # if self.data.get('cyto_masks', None) is not None and not 'cyto_masks' in self.viewer.layers:
+        #     print('cyto_masks')
+        #     mask = np.array(self.data['cyto_masks'])
+        #     temp = np.zeros_like(self.data['images'])
+        #     cyto_key = next((k for k in self.receipt['steps'].keys() if 'cyto' in k), None) # this is dirty but should work
+        #     print(cyto_key)
+        #     temp[:, :, self.receipt['steps'][cyto_key]['channel'], :, :, :] = mask
+        #     self.viewer.add_labels(
+        #         temp,
+        #         name='cyto_masks',
+        #         axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+        #         scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
+        #     )
 
-            # Show spots
-            if final_spot_df is not None:
-                coords = final_spot_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
-                self.viewer.add_points(
-                    coords,
-                    name="spots",
-                    size=1,
-                    face_color="red",
-                    edge_color="white",
-                )
+        # print('did it fail while adding')
+        # if self.data.get('nuc_masks', None) is not None and not 'nuc_masks' in self.viewer.layers:
+        #     print('nuc_masks')
+        #     mask = np.array(self.data['nuc_masks'])
+        #     temp = np.zeros_like(self.data['images'])
+        #     nuc_key = next((k for k in self.receipt['steps'].keys() if 'nuc' in k), None)
+        #     print(nuc_key)
+        #     temp[:, :, self.receipt['steps'][nuc_key]['channel'], :, :, :] = mask
+        #     self.viewer.add_labels(
+        #         temp,
+        #         name='nuc_masks',
+        #         axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+        #         scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
+        #     )
+        # print('here?')
 
-            # Show clusters
-            if final_cluster_df is not None:
-                coords = final_cluster_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
-                self.viewer.add_points(
-                    coords,
-                    name="clusters",
-                    size=5,
-                    face_color="blue",
-                    edge_color="white"
-                )
+        for layer_name in ["spots", "clusters"]:
+            if layer_name in self.viewer.layers:
+                self.viewer.layers.remove(layer_name)
+
+        # Show spots
+        if final_spot_df is not None:
+            coords = final_spot_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
+            self.viewer.add_points(
+                coords,
+                name="spots",
+                size=5,
+                face_color="red",
+                scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
+            )
+            self.viewer.layers['spots'].refresh()
+        else:
+            print('no spots found')
+
+        # Show clusters
+        if final_cluster_df is not None:
+            coords = final_cluster_df[["fov", "timepoint", "FISH_Channel", "z_px", "y_px", "x_px"]].values
+            self.viewer.add_points(
+                coords,
+                name="clusters",
+                size=10,
+                face_color="blue",
+                scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
+            )
+            self.viewer.layers['clusters'].refresh()
+        else:
+            print('no clusters found')
 
 
 
