@@ -145,7 +145,7 @@ class IlluminationCorrection(IndependentStepClass):
 
         if original_profile is not None:
             print("Normalizing corrected profiles to match original profile scale...")
-            # smoothed_profiles *= original_profile.max(axis=(1, 2), keepdims=True) / smoothed_profiles.max(axis=(1, 2), keepdims=True)
+            smoothed_profiles *= original_profile.max(axis=(1, 2), keepdims=True) / smoothed_profiles.max(axis=(1, 2), keepdims=True)
 
         print("Smoothing complete. Returning illumination profiles.")
         return smoothed_profiles
