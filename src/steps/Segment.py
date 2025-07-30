@@ -22,6 +22,8 @@ import tifffile
 import pandas as pd
 from scipy import ndimage as ndi
 from copy import copy
+from magicgui import magicgui
+import pathlib
 
 # from src import SequentialStepsClass
 # from src.Parameters import Parameters
@@ -30,6 +32,7 @@ from skimage.segmentation import watershed
 from scipy.ndimage import distance_transform_edt
 import zarr
 import shutil
+import napari
 
 class segment(abstract_task):
 
@@ -83,14 +86,14 @@ class segment(abstract_task):
                 self.mask = zarr.open(self.mask_file, mode='r+')
             else:
                 # Create new mask initialized with zeros and make it writable
-                self.mask = zarr.open(self.mask_file, mode='w', shape=mask_shape, dtype=np.int32)
+                self.mask = zarr.open(self.mask_file, mode='a', shape=mask_shape, dtype=np.int32)
                 self.mask[:] = 0  # Initialize with zeros
 
         return self.mask
 
     @staticmethod
     def image_processing_function(zyx_image, 
-                                  pretrained_model_name: str | bool = False,  
+                                  pretrained_model_name: str = None,  
                                   cellpose_model_type:str='cyto3', 
                                   diameter: float = 180, 
                                   invert: bool = False, 
@@ -100,6 +103,7 @@ class segment(abstract_task):
                                   flow_threshold:float=0, 
                                   cellprob_threshold:float=0, 
                                   **kwargs):
+        print('running image processing')
         # we will always take in an image with this shape struct
         zz, yy, xx = zyx_image.shape
 
@@ -173,19 +177,156 @@ class segment(abstract_task):
         else:
             return True
 
+    def write_args_to_receipt(self,
+                            mask_name,
+                            channel,
+                            pretrained_model_name,
+                            cellpose_model_type,
+                            diameter,
+                            invert,
+                            normalize,
+                            do_3D,
+                            min_size,
+                            flow_threshold,
+                            cellprob_threshold,):
+        self.receipt['steps'][self.step_name]['mask_name'] = mask_name
+        self.receipt['steps'][self.step_name]['channel'] = channel
+        self.receipt['steps'][self.step_name]['pretrained_model_name'] = pretrained_model_name
+        self.receipt['steps'][self.step_name]['cellpose_model_type'] = cellpose_model_type
+        self.receipt['steps'][self.step_name]['diameter'] = diameter
+        self.receipt['steps'][self.step_name]['invert'] = invert
+        self.receipt['steps'][self.step_name]['normalize'] = normalize
+        self.receipt['steps'][self.step_name]['do_3D'] = do_3D
+        self.receipt['steps'][self.step_name]['min_size'] = min_size
+        self.receipt['steps'][self.step_name]['flow_threshold'] = flow_threshold
+        self.receipt['steps'][self.step_name]['cellprob_threshold'] = cellprob_threshold
+
+    def run_process(self, p, t):
+        print(p, t)
+        self.iterate_over_data(p_range=[p], t_range=[t], run_in_parallel=False)
+
+    @magicgui(
+            call_button='Run',
+            pretrained_model_name={"choices": 
+                                   [fname
+                                    for fname in os.listdir(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models'))
+                                    if os.path.isfile(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models'), fname)) and '.' not in fname
+                                    ]}
+    )
+    def interface(self, 
+                p:int=0, t:int=0, 
+                mask_name:str='default_name',
+                channel:int=0, 
+                pretrained_model_name: pathlib.Path = None,  
+                cellpose_model_type:str='cyto3', 
+                diameter: float = 180, 
+                invert: bool = False, 
+                normalize: bool = True, 
+                do_3D:bool=False, 
+                min_size:float=500,
+                flow_threshold:float=0, 
+                cellprob_threshold:float=0):
+        try:
+            self.write_args_to_receipt(
+                mask_name,
+                channel,
+                str(pretrained_model_name) if pretrained_model_name else None,
+                cellpose_model_type,
+                diameter,
+                invert,
+                normalize,
+                do_3D,
+                min_size,
+                flow_threshold,
+                cellprob_threshold
+            )
+            self.preallocate_memmory()
+            self.run_process(p, t)
+        except Exception as e:
+            print(f"[Error] Exception during segmentation: {e}")
+
+        def add_dummy_channels(mask):
+            """
+            Expand a 5D mask (p, t, z, y, x) into 6D (p, t, c, z, y, x) with zeros in extra channels.
+            """
+            mask = np.array(mask)
+            temp = np.zeros_like(self.data['images'])
+            temp[:, :, self.receipt['steps'][self.step_name]['channel'], :, :, :] = mask
+            return temp
+
+        mask_layer_name = self.receipt['steps'][self.step_name]['mask_name']
+
+        temp_mask = add_dummy_channels(self.mask)
+
+        if mask_layer_name in self.viewer.layers:
+            self.viewer.layers[mask_layer_name].data = temp_mask
+        else:
+            self.viewer.add_labels(
+                temp_mask,
+                name=mask_layer_name,
+                axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+                scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
+            )
+        self.viewer.layers[mask_layer_name].refresh()
 
 
 
+import time
+
+class match_masks(abstract_task):
+    @classmethod
+    def task_name(cls):
+        return 'segment'
+    
+    @property
+    def required_keys(self):
+        return None
 
 
+    def process(self, 
+            new_params:dict = None, 
+            p_range = None, 
+            t_range = None,
+            run_in_parallel:bool = False):
+        start_time = time.time() 
+
+        # loads data associated with receipt using data_loader
+        self.data = load_data(self.receipt)
+
+        # change parameters at run time
+        if new_params:
+            for k, v in new_params.items():
+                self.receipt['steps'][self.step_name][k] = v
+
+        nuc_mask_name = self.receipt['steps'][self.step_name].get('nuc_mask_name', 'nuc_masks')
+        cyto_mask_name = self.receipt['steps'][self.step_name].get('cyto_mask_name', 'cyto_masks')
+        single_nuc = self.receipt['steps'][self.step_name].get('single_nuc', True)
+        cell_alone = self.receipt['steps'][self.step_name].get('single_nuc', False)
+
+        nuc_masks = self.data[nuc_mask_name]
+        cyto_masks = self.data[cyto_mask_name]
 
 
+        for p in range(nuc_masks.shape[0]):
+            for t in range(nuc_masks.shape[1]):
+                nuc_masks[p, t], cyto_masks[p, t] = multistack.match_nuc_cell(
+                                                            nuc_masks[p, t], 
+                                                            cyto_masks[p, t], 
+                                                            single_nuc,
+                                                            cell_alone
+                                                            )
+        
+        self.receipt['steps'][self.step_name]['nuc_mask_name'] = nuc_mask_name
+        self.receipt['steps'][self.step_name]['cyto_mask_name'] = cyto_mask_name
+        self.receipt['steps'][self.step_name]['single_nuc'] = single_nuc
+        self.receipt['steps'][self.step_name]['cell_alone'] = cell_alone
 
+        # records completion. This will mark completion for luigi
+        os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
+        with open(self.output_path, "a") as f:
+            f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
 
-
-
-
-
+        return self.receipt
 
 
 

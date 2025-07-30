@@ -7,11 +7,10 @@ import pandas as pd
 
 
 def pycromanager_data_loader(receipt):
+
     # These are the mandatory directories of this 'data structure'
-    os.makedirs(receipt['dirs']['analysis_dir'], exist_ok=True)
-    os.makedirs(receipt['dirs']['results_dir'], exist_ok=True)
-    os.makedirs(receipt['dirs']['status_dir'], exist_ok=True)
-    os.makedirs(receipt['dirs']['masks_dir'], exist_ok=True)
+    for k in receipt['dirs'].keys():
+        os.makedirs(receipt['dirs'][k], exist_ok=True)
 
     # Check if local path and does a bunch with it if it does (if it doesnt exist theres not much to do)
     local_path = receipt['meta_arguments'].get('local_location', None)

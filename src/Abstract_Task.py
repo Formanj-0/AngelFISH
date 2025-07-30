@@ -3,12 +3,28 @@ import sciluigi as sl
 import os 
 import time
 import concurrent.futures
+import napari
+import numpy as np
+from magicgui import magicgui
+from qtpy.QtCore import QObject
 
 class abstract_task:
     def __init__(self, receipt, step_name):
         self.receipt = receipt
         self.step_name = step_name
         self.output_path = os.path.join(receipt['dirs']['status_dir'], f'step_{self.step_name}.txt')
+
+        # These steps wont do anthing if the receipt already has the step
+        # adds the step name to step order
+        if self.step_name not in self.receipt['step_order']:
+            self.receipt['step_order'].append(self.step_name)
+        
+        # makes sure the is a place for params
+        if self.step_name not in self.receipt['steps'].keys():
+            self.receipt['steps'][self.step_name] = {}
+
+        # makes sure that the task_name is save (you can have multiple tasks of the same task)
+        self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
 
     @classmethod
     @abstractmethod
@@ -20,12 +36,7 @@ class abstract_task:
     def required_keys(self):
         pass
 
-    def process(self, 
-                new_params:dict = None, 
-                p_range = None, 
-                t_range = None,
-                run_in_parallel:bool = False):
-
+    def gui(self):
         start_time = time.time() 
 
         # These steps wont do anthing if the receipt already has the step
@@ -39,6 +50,49 @@ class abstract_task:
 
         # makes sure that the task_name is save (you can have multiple tasks of the same task)
         self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
+
+        # loads data associated with receipt using data_loader
+        self.data = load_data(self.receipt)
+
+        self.viewer = napari.Viewer()
+        self.voxel_size_yx = self.data['metadata'](0, 0)['PixelSizeUm']
+        self.voxel_size_z = np.abs(self.data['metadata'](0, 0, z=1)['ZPosition_um_Intended'] - self.data['metadata'](0, 0, z=0)['ZPosition_um_Intended'])
+        self.viewer.add_image(self.data['images'], name="images", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+                              scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1])
+
+        self.viewer.window.add_dock_widget(self.interface, area='right')
+
+        def on_destroyed(obj=None):
+            print('cleaning up')
+            self.compress_and_release_memory()
+            with open(self.output_path, "a") as f:
+                f.write(f"{self.step_name} completed in {time.time() - start_time:.2f} seconds\n")
+
+        self.viewer.window._qt_window.destroyed.connect(on_destroyed)
+
+        return self.receipt
+
+    def write_args_to_receipt(self):
+        pass
+
+    def run_process(self):
+        pass
+
+    @magicgui(
+            call_button='Run'
+    )
+    def interface(self):
+        self.write_args_to_receipt()
+        self.preallocate_memmory()
+        self.run_process()
+
+    def process(self, 
+                new_params:dict = None, 
+                p_range = None, 
+                t_range = None,
+                run_in_parallel:bool = False):
+
+        start_time = time.time() 
 
         # loads data associated with receipt using data_loader
         self.data = load_data(self.receipt)
@@ -69,10 +123,10 @@ class abstract_task:
         return self.receipt
     
     def iterate_over_data(self, p_range, t_range, run_in_parallel):
-        if run_in_parallel:
-            p_values = p_range if p_range else range(self.data['pp'])
-            t_values = t_range if t_range else range(self.data['tt'])
+        p_values = p_range if p_range is not None else range(self.data['pp'])
+        t_values = t_range if t_range is not None else range(self.data['tt'])
 
+        if run_in_parallel:
             def process_single(args):
                 p, t = args
                 extracted_args = self.extract_args(p, t)
@@ -84,8 +138,8 @@ class abstract_task:
 
         else:
             # runs either the specified ranges or all
-            for p in p_range if p_range else range(self.data['pp']):
-                for t in t_range if t_range else range(self.data['tt']):
+            for p in p_values:
+                for t in t_values:
                     extracted_args = self.extract_args(p,t)
                     results = self.image_processing_function(**extracted_args) # runs image processing
                     self.write_results(results, p, t)
