@@ -46,6 +46,10 @@ class Receipt(UserDict):
         mask_dir = os.path.join(local_location, 'masks')
         data['dirs']['masks_dir'] = mask_dir
 
+        fig_dir = os.path.join(analysis_dir, 'figures')
+        data['dirs']['fig_dir'] = fig_dir
+
+
         super().__init__(data)
 
 
