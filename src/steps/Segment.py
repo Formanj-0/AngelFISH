@@ -206,7 +206,12 @@ class segment(abstract_task):
         self.iterate_over_data(p_range=[p], t_range=[t], run_in_parallel=False)
 
     @magicgui(
-            call_button='Run'
+            call_button='Run',
+            pretrained_model_name={"choices": 
+                                   [fname
+                                    for fname in os.listdir(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models'))
+                                    if os.path.isfile(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'models'), fname)) and '.' not in fname
+                                    ]}
     )
     def interface(self, 
                 p:int=0, t:int=0, 
