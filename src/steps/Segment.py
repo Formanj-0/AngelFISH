@@ -276,12 +276,14 @@ import time
 class match_masks(abstract_task):
     @classmethod
     def task_name(cls):
-        return 'segment'
+        return 'match_masks'
     
     @property
     def required_keys(self):
         return None
 
+    def handle_previous_run(self):
+        return True
 
     def process(self, 
             new_params:dict = None, 
