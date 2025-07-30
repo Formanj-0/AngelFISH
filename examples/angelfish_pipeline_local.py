@@ -3,8 +3,14 @@ import sys
 import os
 import luigi
 import sciluigi as sl
-
-sys.path.append('..')  # adjust if needed
+import logging
+sys.path.append('..')
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger('napari').setLevel(logging.WARNING)
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('in_n_out').setLevel(logging.WARNING)
+logging.getLogger('numcodecs').setLevel(logging.WARNING)
+logging.getLogger('numba').setLevel(logging.WARNING)
 
 from src import Receipt
 from src.steps import get_task
