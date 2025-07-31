@@ -3,8 +3,22 @@ import sys
 import os
 import luigi
 import sciluigi as sl
+import subprocess
+import logging
 
 sys.path.append('..')  # adjust if needed
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger('SMB').setLevel(logging.WARNING)
+logging.getLogger('napari').setLevel(logging.WARNING)
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('in_n_out').setLevel(logging.WARNING)
+logging.getLogger('numcodecs').setLevel(logging.WARNING)
+logging.getLogger('numba').setLevel(logging.WARNING)
+logging.getLogger('luigi').setLevel(logging.WARNING)
+logging.getLogger('numexpr').setLevel(logging.WARNING)
+logging.getLogger('luigi-interface').setLevel(logging.WARNING)
+logging.getLogger('sciluigi-interface').setLevel(logging.WARNING)
+logging.getLogger('cellpose').setLevel(logging.WARNING)
 
 from src import Receipt
 from src.steps import get_task
@@ -12,7 +26,7 @@ from src.steps import get_task
 # python -m luigi --module angelfish_pipeline_local AngelFISHWorkflow --receipt-path new_pipeline.json --local-scheduler
 # python -m luigi --module angelfish_pipeline_local AngelFISHWorkflow --receipt-path new_pipeline.json
 
-class AngelFISHLuigiTask(sl.SlurmTask):
+class AngelFISHLuigiTask(sl.ExternalTask):
     receipt_path = luigi.Parameter()
     step_name = luigi.Parameter()
     output_path = luigi.Parameter()
@@ -28,7 +42,10 @@ class AngelFISHLuigiTask(sl.SlurmTask):
         receipt = Receipt(path=self.receipt_path)
         task_class = get_task(receipt['steps'][self.step_name]['task_name'])
         task = task_class(receipt, self.step_name)
-        task.process()  # this creates the .txt file
+
+        # Option 1: Use subprocess to call the SLURM wrapper script remotely
+        command = f"sbatch run_step.sh {self.receipt_path} {self.step_name}"
+        subprocess.run(['ssh', 'user@remote-hpc', command], check=True)
 
 
 class AngelFISHWorkflow(sl.WorkflowTask):
@@ -51,16 +68,8 @@ class AngelFISHWorkflow(sl.WorkflowTask):
                 AngelFISHLuigiTask,
                 receipt_path=self.receipt_path,
                 step_name=step_name,
-                output_path=path,
-                slurminfo=sl.SlurmInfo(
-                        runmode=sl.RUNMODE_HPC,
-                        project='formanj',
-                        partition='all',
-                        cores='1',
-                        time='1:00:00',
-                        jobname=step_name,
-                        threads='1')
-                        )
+                output_path=path
+            )
 
             # Add dependency chain
             if previous_task is not None:
