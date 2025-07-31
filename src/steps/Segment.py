@@ -110,25 +110,20 @@ class segment(abstract_task):
         model_location = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')
         pretrained_model = os.path.join(model_location, pretrained_model_name) if pretrained_model_name else None
 
-        cp = models.CellposeModel(model_type=cellpose_model_type, gpu=True, pretrained_model=pretrained_model)
-        sz = models.SizeModel(cp)
+        model  = models.CellposeModel(gpu=True, pretrained_model=pretrained_model)
 
-        model = models.Cellpose(gpu=True)
-        model.cp = cp
-        model.sz = sz
-        channels = [0, 0]
         channel_axis = 0
         z_axis = 1
 
         if not do_3D:
             zyx_image = np.max(zyx_image, axis=0)
-            zyx_image = np.expand_dims(zyx_image, axis=0)
+            # zyx_image = np.expand_dims(zyx_image, axis=0)
+            z_axis = None
             
 
         zyx_image = np.expand_dims(zyx_image, axis=0) # add fake channel axis
 
-        mask, flows, styles, diams = model.eval(zyx_image,
-                                    channels=channels, 
+        mask, flows, styles = model.eval(zyx_image,
                                     diameter=diameter, 
                                     invert=invert, 
                                     normalize=normalize, 
@@ -138,7 +133,6 @@ class segment(abstract_task):
                                     min_size=min_size, 
                                     flow_threshold=flow_threshold, 
                                     cellprob_threshold=cellprob_threshold)
-                                            # net_avg=True
 
 
         if not do_3D and zz > 1: # expand 2d image to 3d 
@@ -147,7 +141,7 @@ class segment(abstract_task):
                 new_masks[z, :, :] = mask
             mask = new_masks
 
-        return mask, flows, styles, diams
+        return mask, flows, styles
 
     def compress_and_release_memory(self):
         output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
@@ -218,7 +212,6 @@ class segment(abstract_task):
                 mask_name:str='default_name',
                 channel:int=0, 
                 pretrained_model_name: pathlib.Path = None,  
-                cellpose_model_type:str='cyto3', 
                 diameter: float = 180, 
                 invert: bool = False, 
                 normalize: bool = True, 
@@ -231,7 +224,6 @@ class segment(abstract_task):
                 mask_name,
                 channel,
                 str(pretrained_model_name) if pretrained_model_name else None,
-                cellpose_model_type,
                 diameter,
                 invert,
                 normalize,
