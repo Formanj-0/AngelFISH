@@ -13,8 +13,30 @@
 module load gnu9/9.4.0
 module load cuda/10.2
 
-# Change directory to repo if needed
-# cd /path/to/your/repo
+echo "Starting my job..."
+start_time=$(date +%s)
+
+# Ensure output directory exists
+# mkdir -p "${PWD}/output"
+
+# # Correct output file name
+# output_names="${PWD}/output/output_${SLURM_JOB_ID}_$(basename ${fileLocation})"
+
+# Activate the environment and run the script
+source ../.venv/bin/activate
+export QT_QPA_PLATFORM=offscreen
 
 # Run step
-python run_single_step.py "$1" "$2"
+python run_single_step.py "$1" "$2" &
+
+wait
+
+# End timing the process
+end_time=$(date +%s)
+total_time=$(((end_time - start_time) / 60 ))
+
+# Print the time to complete the process
+echo "Total time to complete the job: $total_time minutes"
+
+exit 0
+
