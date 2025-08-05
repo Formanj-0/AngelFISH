@@ -45,7 +45,8 @@ class return_data(abstract_task):
 
 
 
-
+class copy_results(abstract_task):
+    pass
 
 
 
