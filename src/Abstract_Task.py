@@ -9,6 +9,36 @@ from magicgui import magicgui
 from qtpy.QtCore import QObject
 
 class abstract_task:
+    """
+    The purpose of this class is to allow for create a general outline of 
+    a single step. In doing so this class give a general outline and a few 
+    methods that hopefully will allow you to quickly implement new steps
+
+    YOU DO NOT NEED TO FOLLOW THIS EXACTLY ABSTRACT TASK
+    YOU DO NEED A FEW THINGS TO OCCUR THO:
+    1) every step needs to update the receipt
+        - parameters under [steps][step name] (include task name)
+        - order as append to [step order]
+    2) every step must write results to disk in a interprable way, 
+    laid out by the dataloader
+    3) it must write a status file, for luigi so that it knows that this task is done
+
+    Other then these 3 limitation all others can be changed and should work downstream
+
+    If you have a weird data structure you need to implement a data loader for this to work.
+    For instance if you have a single tif file, I would recommend splitting all the tiffs into their own 
+    dir. This must be done for many reasons but mainly, that the goal of this repo is to allow multiple round
+    of image processing to be preformed on the same images. So it only makes sense to isolate the tif so that
+    they are alone, or treat them as one dataset all together. Make this destinction in the dateloader.
+
+    There are some default directories created by the image processor, these can be found in receipts class.
+    This implies that the local location is a directory and not an single image. This goes back to the belief that we 
+    want multiple rounds of processing on the same data. 
+
+    Finally, if you want pipelines that depend on other pipelines there are ways to do this. They will be complicated.
+    Luigi allows for the creation of tree like dependencies. Additionally, you could build dataloader that take in 
+    a directory of datasets. You could also make steps with parameters that specify results from other datasets.
+    """
     def __init__(self, receipt, step_name):
         self.receipt = receipt
         self.step_name = step_name
