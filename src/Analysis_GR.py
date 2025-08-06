@@ -273,6 +273,17 @@ class AnalysisManager:
             self.raw_images.append(da.from_array(self.h5_files[-1]['raw_images']))
             self.masks.append(da.from_array(self.h5_files[-1]['masks']))
         return self.raw_images, self.masks
+    
+    def get_corrected_images_and_masks(self):
+        self.corrected_images = []
+        self.masks = []
+
+        for l, an in zip(self.location, self.analysis_names):
+            # with h5py.File(l, 'r') as h:
+            self.h5_files.append(h5py.File(l))
+            self.corrected_images.append(da.from_array(self.h5_files[-1][an]['images']))
+            self.masks.append(da.from_array(self.h5_files[-1]['masks']))
+        return self.corrected_images, self.masks
 
     def _handle_duplicates(self):
         # Stub for duplicate handling.
@@ -361,13 +372,15 @@ class GR_Confirmation:
         self.am = am
         self.seed = seed
         self.cellprops = None
-        self.images = None
+        self.raw_images = None
         self.illumination_profiles = None
         self.corrected_IL_profile = None
+        self.corrected_images = None
 
     def get_data(self):
         self.cellprops = self.am.select_datasets('cell_properties', 'dataframe')
-        self.images, _ = self.am.get_images_and_masks()
+        self.raw_images, _ = self.am.get_images_and_masks()
+        self.corrected_images, _ = self.am.get_corrected_images_and_masks()
 
         try:
             self.illumination_profiles = self.am.select_datasets('illumination_profiles', 'array')[0]
@@ -490,7 +503,7 @@ class GR_Confirmation:
         for h5_idx, fov in pairs:
             file_path = self.am.location[h5_idx]
             raw_2d, pseudo_cyto, nuc_mask = self._load_and_project_raw_and_mask(file_path, fov)
-            corrected_stack = self.images[h5_idx][fov, 0, GR_Channel]
+            corrected_stack = self.corrected_images[h5_idx][fov, 0, GR_Channel]
             corrected_2d = corrected_stack.max(axis=0).compute()
 
             illum_profile = self.illumination_profiles[GR_Channel]
