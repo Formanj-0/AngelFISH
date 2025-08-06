@@ -175,7 +175,6 @@ class segment(abstract_task):
                             mask_name,
                             channel,
                             pretrained_model_name,
-                            cellpose_model_type,
                             diameter,
                             invert,
                             normalize,
@@ -186,7 +185,6 @@ class segment(abstract_task):
         self.receipt['steps'][self.step_name]['mask_name'] = mask_name
         self.receipt['steps'][self.step_name]['channel'] = channel
         self.receipt['steps'][self.step_name]['pretrained_model_name'] = pretrained_model_name
-        self.receipt['steps'][self.step_name]['cellpose_model_type'] = cellpose_model_type
         self.receipt['steps'][self.step_name]['diameter'] = diameter
         self.receipt['steps'][self.step_name]['invert'] = invert
         self.receipt['steps'][self.step_name]['normalize'] = normalize
