@@ -44,3 +44,4 @@ config_nas.yml
 config_nas.yml
 config_cluster.yml
 /examples/audit
+/database
