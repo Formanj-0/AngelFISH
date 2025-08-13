@@ -25,6 +25,7 @@ class detect_spots(abstract_task):
         given_args = self.receipt['steps'][self.step_name]
 
         data_to_send = {}
+        data_to_send['fig_dir'] = self.receipt['dirs']['fig_dir']
         data_to_send['image'] = self.data['images'][p, t].compute()
         data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
         self.voxel_size_yx = self.data['metadata'](p, t)['PixelSizeUm'] * 1000
@@ -254,22 +255,16 @@ class detect_spots(abstract_task):
                 print(f'Number of spots after SNR filtering: {canidate_spots.shape[0]}')
 
             # decompose dense regions
-            try: # TODO fix this try 
-                spots_post_decomposition, dense_regions, reference_spot = detection.decompose_dense(
-                                                    image=rna.astype(np.uint16), 
-                                                    spots=canidate_spots, 
-                                                    voxel_size=voxel_size_nm, 
-                                                    spot_radius=spot_size_nm if not use_log_hook else spot_radius_px,
-                                                    alpha=alpha,
-                                                    beta=beta,
-                                                    gamma=gamma)
-            except RuntimeError:
-                spots_post_decomposition = canidate_spots
-                dense_regions = None
-                reference_spot = None
+            spots_post_decomposition, dense_regions, reference_spot = detection.decompose_dense(
+                                                image=rna.astype(np.uint16), 
+                                                spots=canidate_spots, 
+                                                voxel_size=voxel_size_nm, 
+                                                spot_radius=spot_size_nm if not use_log_hook else spot_radius_px,
+                                                alpha=alpha,
+                                                beta=beta,
+                                                gamma=gamma)
 
-            # TODO: define ts by some other metric for ts
-            #         
+    
             spots_post_clustering, clusters = detection.detect_clusters(
                                                             spots=spots_post_decomposition, 
                                                             voxel_size=voxel_size_nm, 
@@ -302,10 +297,14 @@ class detect_spots(abstract_task):
                     voxel_size=voxel_size_nm if not use_log_hook else None, 
                     spot_radius=spot_size_nm if not use_log_hook else None,
                     log_kernel_size=spot_radius_px if use_log_hook else None,
-                    minimum_distance=spot_radius_px if use_log_hook else None)
-                plot.plot_reference_spot(reference_spot, rescale=True)            
+                    minimum_distance=spot_radius_px if use_log_hook else None, 
+                    path_output=os.path.join(kwargs['fig_dir'], f'fov{fov}_tp{timepoint}_ch{FISHChannel}-elbow.png'))
+                plot.plot_reference_spot(reference_spot, 
+                                         rescale=True, 
+                                         path_output=os.path.join(kwargs['fig_dir'], f'fov{fov}_tp{timepoint}_ch{FISHChannel}-ref_spot.png'))            
                 plot.plot_detection(rna if len(rna.shape) == 2 else np.max(rna, axis=0),
-                                        canidate_spots, contrast=True)
+                                        canidate_spots, 
+                                        contrast=True)
                             
                 plot.plot_detection(rna if len(rna.shape) == 2 else np.max(rna, axis=0),
                                         spots_post_decomposition, contrast=True)
@@ -317,7 +316,8 @@ class detect_spots(abstract_task):
                                         color=["red", "blue"],
                                         linewidth=[1, 2], 
                                         fill=[False, True], 
-                                        contrast=True)
+                                        contrast=True,
+                                        path_output=os.path.join(kwargs['fig_dir'], f'fov{fov}_tp{timepoint}_ch{FISHChannel}-detections.png'))
                 
             return spots_post_clustering, dense_regions, reference_spot, clusters, spots_subpx, individual_thershold
 
@@ -459,7 +459,8 @@ class detect_spots(abstract_task):
                             ndim=3, cell_coord=cell_coord, nuc_coord=nuc_coord,
                             rna_coord=rna_coord, foci_coord=foci_coord, other_coord=ts_coord,
                             image=image_contrasted, cell_mask=cell_mask, nuc_mask=nuc_mask, rescale=True, contrast=True,
-                            title="Cell {0}".format(i))
+                            title="Cell {0}".format(i),
+                            path_output=os.path.join(kwargs['fig_dir'], f'fov{fov}_tp{timepoint}_ch{FISHChannel}_cell_{i}.png'))
 
                 df = multistack.summarize_extraction_results(fov_results, ndim=3)
                 df['fov'] = [fov]*len(df)
@@ -513,7 +514,7 @@ class detect_spots(abstract_task):
                 rna=rna, voxel_size_yx=voxel_size_yx, voxel_size_z=voxel_size_z, spot_yx=spot_yx, spot_z=spot_z, alpha=alpha,
                 beta=beta, gamma=gamma, CLUSTER_RADIUS=cluster_radius, MIN_NUM_SPOT_FOR_CLUSTER=min_num_spot_per_cluster, 
                 bigfish_threshold=threshold, use_log_hook=use_log_hook, verbose=verbose, display_plots=display_plots, sub_pixel_fitting=sub_pixel_fitting,
-                minimum_distance=minDistance, use_pca=use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio)
+                minimum_distance=minDistance, use_pca=use_pca, snr_threshold=snr_threshold, snr_ratio=snr_ratio, **kwargs)
             
             print('Extracting Cell Results from masks')
             cell_results, spots_px, clusters = extract_cell_level_results(image, spots_px, clusters, nucChannel, FISHChannel[c], 
