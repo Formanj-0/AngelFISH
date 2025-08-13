@@ -107,7 +107,7 @@ class segment(abstract_task):
         # we will always take in an image with this shape struct
         zz, yy, xx = zyx_image.shape
 
-        model_location = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')
+        model_location = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'models')
         pretrained_model = os.path.join(model_location, pretrained_model_name) if pretrained_model_name else None
 
         model  = models.CellposeModel(gpu=True, pretrained_model=pretrained_model)
