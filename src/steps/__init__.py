@@ -7,5 +7,6 @@ from .Return_Data import return_data
 from .Filter_CSV import filter_csv
 from .Export_Images import main as export_images
 from .Reconcile_Data import main as reconcile_data
+from .Get_Sharpness import calculate_sharpness
 
 from .Get_Task import get_task
