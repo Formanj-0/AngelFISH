@@ -38,6 +38,12 @@ class download_data(abstract_task):
         connection_config_location = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         connection_config_location = os.path.join(connection_config_location, 'config_nas.yml')
 
+        if local_location is None:
+            database_loc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            database_loc = os.path.join(database_loc, 'database')
+            name = os.path.basename(nas_location)
+            local_location = os.path.join(database_loc, name)
+
         # Check if local_location exists
         if local_location and os.path.exists(local_location):
             print('local file already exist')
