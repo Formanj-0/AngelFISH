@@ -42,7 +42,7 @@ class get_cell_properties(abstract_task):
         os.makedirs(self.temp_dir, exist_ok=True)
 
     @staticmethod
-    def image_processing_function(image, fov, timepoint, cell_mask=None, nuc_mask=None, middle_zs:int = 3,
+    def image_processing_function(image, fov, timepoint, cell_mask=None, nuc_mask=None, middle_zs:int = None,
              props_to_measure= ['label', 'bbox', 'area', 'centroid', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std'], **kwargs):
         
         if middle_zs is not None and isinstance(middle_zs, int) and image.ndim >= 3:
