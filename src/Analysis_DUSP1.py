@@ -1026,29 +1026,715 @@ def draw_spot_circle(ax, x, y, radius=4, color='gold', linewidth=2):
     circle = plt.Circle((x, y), radius, edgecolor=color, facecolor='none', linewidth=linewidth)
     ax.add_patch(circle)  
 
-class DUSP1DisplayManager(DUSP1AnalysisManager):
-    def __init__(self, analysis_manager, cell_level_results=None,
-                 spots=None, clusters=None, cellprops=None, removed_spots= None,
-                 h5_idx=None, fov=None, unique_cell_id=None):
-        """
-        Initialize the display manager.
+# class DUSP1DisplayManager(DUSP1AnalysisManager):
+#     def __init__(self, analysis_manager, cell_level_results=None,
+#                  spots=None, clusters=None, cellprops=None, removed_spots= None,
+#                  h5_idx=None, fov=None, unique_cell_id=None):
+#         """
+#         Initialize the display manager.
         
-        Parameters:
-          - analysis_manager: instance of DUSP1AnalysisManager.
-          - cell_level_results: DataFrame with cell-level measurements.
-          - spots: DataFrame with spot-level data.
-          - clusters: DataFrame with cluster-level data.
-          - cellprops: DataFrame with cell property data.
-          - removed_spots: DataFrame with removed spots.
-          - h5_idx: (Optional)index of the HDF5 file to load for display.
-          - fov: (Optional) field-of-view index within the HDF5 file for display.
-          - unique_cell_id: (Optional) unique cell ID within the FOV for display.
+#         Parameters:
+#           - analysis_manager: instance of DUSP1AnalysisManager.
+#           - cell_level_results: DataFrame with cell-level measurements.
+#           - spots: DataFrame with spot-level data.
+#           - clusters: DataFrame with cluster-level data.
+#           - cellprops: DataFrame with cell property data.
+#           - removed_spots: DataFrame with removed spots.
+#           - h5_idx: (Optional)index of the HDF5 file to load for display.
+#           - fov: (Optional) field-of-view index within the HDF5 file for display.
+#           - unique_cell_id: (Optional) unique cell ID within the FOV for display.
 
           
-        Note: This class does not load all images/masks into memory.
-              Instead, it only loads the specific FOV on demand.
+#         Note: This class does not load all images/masks into memory.
+#               Instead, it only loads the specific FOV on demand.
+#         """
+#         self.h5_file_paths = analysis_manager.location
+#         self.cellprops = (analysis_manager.select_datasets("cell_properties", dtype="dataframe")
+#                           if cellprops is None else cellprops)
+#         self.spots = (analysis_manager.select_datasets("spotresults", dtype="dataframe")
+#                       if spots is None else spots)
+#         self.clusters_df = (analysis_manager.select_datasets("clusterresults", dtype="dataframe")
+#                             if clusters is None else clusters)
+#         self.cell_level_results = cell_level_results
+#         self.removed_spots = removed_spots
+
+#         # Set default values for h5_idx, fov, and unique_cell_id.
+#         # If not provided, they will be set to None.
+#         if h5_idx is not None:
+#             self.h5_idx = h5_idx
+#         else:
+#             self.h5_idx = None
+#         if fov is not None:
+#                 self.fov = fov
+#         else:
+#             self.fov = None
+#         if unique_cell_id is not None:
+#             self.unique_cell_id = unique_cell_id
+#         else:
+#             self.unique_cell_id = None
+#         # Ensure the analysis manager is initialized.
+    
+#     def get_images_and_masks(self, h5_idx=None, fov=None):
+#         """
+#         Lazy load images and masks from a specific HDF5 file and FOV.
+
+#         Parameters:
+#         - h5_idx: index of the HDF5 file in self.h5_file_paths. If None, a random one is chosen.
+#         - fov: field-of-view index within the file. If None, a random FOV is chosen.
+
+#         Returns:
+#         - images: NumPy array for the specified FOV.
+#                 Expected shape: (3, 27, 936, 640)
+#         - masks: NumPy array for the specified FOV.
+#                 Expected shape: (3, 27, 936, 640)
+#         - h5_idx: the index of the HDF5 file used.
+#         - fov: the FOV index used.
+#         """
+#         if h5_idx is None:
+#             h5_idx = random.choice(range(len(self.h5_file_paths)))
+#         file_path = self.h5_file_paths[h5_idx]
+
+#         h5_file = None
+#         try:
+#             h5_file = safe_open_h5(file_path)  # Retry-safe wrapper
+#             num_fov = h5_file['raw_images'].shape[0]
+#             if fov is None:
+#                 fov = random.choice(range(num_fov))
+
+#             images = np.array(h5_file['raw_images'][fov])
+#             masks = np.array(h5_file['masks'][fov])
+
+#             if images.shape[0] == 1:
+#                 images = np.squeeze(images, axis=0)
+#             if masks.shape[0] == 1:
+#                 masks = np.squeeze(masks, axis=0)
+
+#         finally:
+#             if h5_file is not None:
+#                 try:
+#                     h5_file.close()
+#                 except Exception as close_err:
+#                     print(f"WARNING: Error closing file {file_path}: {close_err}")
+
+#         return images, masks, h5_idx, fov
+
+#     def display_gating_overlay(self):
+#         """
+#         Display a full-FOV image with segmentation mask overlay.
+#         """
+#         Cyto_Channel = 1
+
+#         # Select a random h5_idx from the spots DataFrame.
+#         idx = np.random.choice(len(self.spots))
+#         spot_row = self.spots.iloc[idx]
+#         h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
+#         self.h5_idx = h5_idx
+#         self.fov = fov
+#         print(f"Selected H5 Index: {h5_idx}")
+#         print(f"Nas Location: {nas_location}")
+#         print(f"FOV: {fov}")
+
+#         # Load images and masks using lazy loading.
+#         images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
+#         # For gating, choose a color channel (here, channel 0) and perform max projection over the z axis.
+#         img = np.max(images[1], axis=0)  # images[0] has shape (27, 936, 640) -> (936, 640)
+#         mask = np.max(masks[1], axis=0)
+
+#         # Rescale intensity.
+#         p1, p99 = np.percentile(img, (1, 99))
+#         img = exposure.rescale_intensity(img, in_range=(p1, p99), out_range=(0, 1))
+
+#         # Filter DataFrames based on h5_idx, fov, and NAS location.
+#         spots_frame = self.spots[
+#             (self.spots['h5_idx'] == h5_idx) &
+#             (self.spots['fov'] == fov) &
+#             (self.spots['NAS_location'] == nas_location)
+#         ]
+#         cellprops_frame = self.cellprops[
+#             (self.cellprops['h5_idx'] == h5_idx) &
+#             (self.cellprops['fov'] == fov) &
+#             (self.cellprops['NAS_location'] == nas_location)
+#         ]
+#         clusters_frame = self.clusters_df[
+#             (self.clusters_df['h5_idx'] == h5_idx) &
+#             (self.clusters_df['fov'] == fov) &
+#             (self.clusters_df['NAS_location'] == nas_location)
+#         ]
+
+#         print(f"Spots DataFrame: {spots_frame.shape}")
+#         print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
+#         print(f"Clusters DataFrame: {clusters_frame.shape}")
+
+#         # Identify kept cell labels from cellprops and those present in the mask.
+#         cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
+#         cell_labels_in_mask = set(np.unique(mask))
+#         cell_labels_in_mask.discard(0)
+
+#         kept_colors = list(mcolors.TABLEAU_COLORS.values())
+#         removed_color = 'red'
+
+#         fig, ax = plt.subplots(figsize=(10, 10))
+#         # Display the cyto channel from the image (if needed, you can adjust which channel to display)
+#         ax.imshow(img, cmap='gray')
+
+#         # Plot kept cell outlines.
+#         color_map = {cell_label: kept_colors[i % len(kept_colors)]
+#                     for i, cell_label in enumerate(cell_labels_in_df)}
+
+#         for cell_label in cell_labels_in_df:
+#             cell_mask = (mask == cell_label)
+#             # Find contours in the 2D mask.
+#             contours = find_contours(cell_mask, 0.5)
+#             if contours:
+#                 largest_contour = max(contours, key=lambda x: x.shape[0])
+#                 ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+#                         linewidth=2, color=color_map[cell_label],
+#                         label=f'Cell {cell_label}')
+
+#         # Plot discarded cell outlines.
+#         cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
+#         for cell_label in cell_labels_not_in_df:
+#             cell_mask = (mask == cell_label)
+#             contours = find_contours(cell_mask, 0.5)
+#             if contours:
+#                 largest_contour = max(contours, key=lambda x: x.shape[0])
+#                 ax.plot(largest_contour[:, 1], largest_contour[:, 0],
+#                         color=removed_color, linewidth=2, linestyle='dashed',
+#                         label=f'Removed: Cell {cell_label}')
+
+#         plt.legend()
+#         plt.show()
+#         return self.h5_idx, self.fov, nas_location
+
+#     def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
+#         """
+#         Zoom on bounding box, compute percentile-based contrast,
+#         then overlay:
+#           - gold circles for all 'regular' spots
+#           - chosen_spot in blue circle
+#           - TS in magenta arrows (with cluster size)
+#           - foci in cyan arrows
+#         """
+#         self.h5_idx = self.h5_idx
+#         self.fov = self.fov
+#         spotChannel = 0
+#         cytoChannel = 1
+#         nucChannel = 2
+
+#         valid_cells = self.cellprops[
+#             (self.cellprops['h5_idx'] == self.h5_idx) &
+#             (self.cellprops['fov'] == self.fov) &
+#             (self.cellprops['unique_cell_id'] != 0)
+#         ]['unique_cell_id'].unique()
+
+#         if len(valid_cells) == 0:
+#             print(f"No valid cells in FOV={self.fov}. Aborting.")
+#             return
+
+#         # Step 3: Find cells with TS (is_nuc == 1)
+#         cells_with_TS = self.clusters_df[
+#             (self.clusters_df['h5_idx'] == self.h5_idx) &
+#             (self.clusters_df['fov'] == self.fov) &
+#             (self.clusters_df['is_nuc'] == 1)
+#         ]['unique_cell_id'].unique()
+
+#         # Step 4: Find cells with Foci (is_nuc == -1)
+#         cells_with_Foci = self.clusters_df[
+#             (self.clusters_df['h5_idx'] == self.h5_idx) &
+#             (self.clusters_df['fov'] == self.fov) &
+#             (self.clusters_df['is_nuc'] == 0)
+#         ]['unique_cell_id'].unique()
+
+#         # Step 5: Find cells with Spot
+#         cells_with_Spot = self.spots[
+#             (self.spots['h5_idx'] == self.h5_idx) &
+#             (self.spots['fov'] == self.fov)
+#         ]['unique_cell_id'].unique()
+
+#         # Step 6: Apply selection logic
+#         # Priority: TS + Foci + Spot > TS + Spot > Spot > Any valid cell
+#         cells_with_TS_Foci_Spot = np.intersect1d(np.intersect1d(cells_with_TS, cells_with_Foci), cells_with_Spot)
+#         cells_with_TS_Spot = np.intersect1d(cells_with_TS, cells_with_Spot)
+#         cells_with_Spot_only = cells_with_Spot
+
+#         if len(cells_with_TS_Foci_Spot) > 0:
+#             self.cell_label = np.random.choice(cells_with_TS_Foci_Spot)
+#             print(f"Chose unique_cell_id={self.cell_label} with TS, Foci, and Spot (FOV={self.fov}).")
+#         elif len(cells_with_TS_Spot) > 0:
+#             self.cell_label = np.random.choice(cells_with_TS_Spot)
+#             print(f"Chose unique_cell_id={self.cell_label} with TS and Spot (FOV={self.fov}).")
+#         elif len(cells_with_Spot_only) > 0:
+#             self.cell_label = np.random.choice(cells_with_Spot_only)
+#             print(f"Chose unique_cell_id={self.cell_label} with Spot only (FOV={self.fov}).")
+#         else:
+#             # Final fallback: pick any valid cell
+#             self.cell_label = np.random.choice(valid_cells)
+#             print(f"No cell with TS, Foci, or Spot => picked random unique_cell_id={self.cell_label} (FOV={self.fov}).")        
+
+#         cdf = self.cellprops[
+#             (self.cellprops['h5_idx'] == self.h5_idx) &
+#             (self.cellprops['fov'] == self.fov) &
+#             (self.cellprops['unique_cell_id'] == self.cell_label)
+#         ]
+#         if cdf.empty:
+#             print("Cell not found. Aborting cell zoom.")
+#             self.chosen_spot = None
+#             self.chosen_ts   = None
+#             self.chosen_foci = None
+#             return None
+
+#         row_min = int(cdf['cell_bbox-0'].iloc[0])
+#         col_min = int(cdf['cell_bbox-1'].iloc[0])
+#         row_max = int(cdf['cell_bbox-2'].iloc[0])
+#         col_max = int(cdf['cell_bbox-3'].iloc[0])
+
+#         # Load images and masks using lazy loading.
+#         images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
+
+#         # Spot channel -> 3D -> convert to 2D by max-projection
+#         img_spot_3d = images[spotChannel, :, :, :]
+#         img_spot_2d = np.max(img_spot_3d, axis=0)
+
+#         crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
+#         crop_spot = crop_spot_dask.compute() if hasattr(crop_spot_dask, "compute") else crop_spot_dask
+
+#         if crop_spot.size > 0:
+#             p1, p99 = np.percentile(crop_spot, (1, 99))
+#             crop_spot_stretched = exposure.rescale_intensity(
+#                 crop_spot, in_range=(p1, p99), out_range=(0, 1)
+#             )
+#         else:
+#             crop_spot_stretched = crop_spot
+
+#         # Masks -> also slice
+#         mask_nuc_3d = masks[nucChannel, :, :, :]
+#         mask_cyto_3d = masks[cytoChannel, :, :, :]
+#         mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
+#         mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+
+#         crop_nucmask = mask_nuc_2d[row_min:row_max, col_min:col_max]
+#         crop_cytomask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+
+#         # All spots in this cell
+#         cell_spots = self.spots[
+#             (self.spots['h5_idx'] == self.h5_idx) &
+#             (self.spots['fov'] == self.fov) &
+#             (self.spots['unique_cell_id'] == self.cell_label)
+#         ]
+
+#         # Transcription sites in this cell
+#         cell_TS = self.clusters_df[
+#             (self.clusters_df['h5_idx'] == self.h5_idx) &
+#             (self.clusters_df['fov'] == self.fov) &
+#             (self.clusters_df['unique_cell_id'] == self.cell_label) &
+#             (self.clusters_df['is_nuc'] == 1)
+#         ]
+
+#         # Foci in this cell
+#         cell_foci = self.clusters_df[
+#             (self.clusters_df['h5_idx'] == self.h5_idx) &
+#             (self.clusters_df['fov'] == self.fov) &
+#             (self.clusters_df['unique_cell_id'] == self.cell_label) &
+#             (self.clusters_df['is_nuc'] == 0)
+#         ]
+
+#         if cell_TS.empty:
+#             print('No TS in this cell')
+
+#         if cell_foci.empty:
+#             print('No Foci in this cell')
+
+#         if cell_spots.empty:
+#             print("No spots in this cell.")
+#             self.chosen_spot = None
+#             self.chosen_ts   = None
+#             self.chosen_foci = None
+#         else:
+#             # Pick a TS if it exists, for reference in the next steps
+#             if not cell_TS.empty:
+#                 # For example, pick one TS (largest)
+#                 self.chosen_ts = cell_TS.iloc[0]
+#             else:
+#                 self.chosen_ts = None
+            
+#             # Pick a foci if it exists, for reference in the next steps
+#             if not cell_foci.empty:
+#                 # For example, pick one foci
+#                 self.chosen_foci = cell_foci.sample(1).iloc[0]
+#             else:
+#                 self.chosen_foci = None
+#             # We want a spot that is NOT in any TS cluster
+#             if not cell_TS.empty:
+#                 ts_cluster_ids = cell_TS['cluster_index'].unique()
+#                 non_ts_spots = cell_spots[~cell_spots['cluster_index'].isin(ts_cluster_ids)]
+#                 if non_ts_spots.empty:
+#                     # If *all* spots are in TS, fallback = just pick any
+#                     chosen_spot = cell_spots.sample(1).iloc[0]
+#                 else:
+#                     chosen_spot = non_ts_spots.sample(1).iloc[0]
+#             else:
+#                 # No TS => pick any spot
+#                 chosen_spot = cell_spots.sample(1).iloc[0]
+
+#             self.chosen_spot = chosen_spot
+
+#         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+#         # Left: raw channel + mask overlay
+#         axs[0].imshow(crop_spot_stretched, cmap='gray')
+#         axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
+#         axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
+#         axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
+
+#         # Right: contrast-stretched
+#         axs[1].imshow(crop_spot_stretched, cmap='gray')
+#         axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
+#         axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
+#         axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
+
+#         dx, dy = col_min, row_min
+
+#         # Draw all spots in gold circles
+#         for _, spot in cell_spots.iterrows():
+#             sx = spot['x_px'] - dx
+#             sy = spot['y_px'] - dy
+#             # if it's the chosen spot => color in blue
+#             if self.chosen_spot is not None and (spot['x_px'] == self.chosen_spot['x_px']) and (spot['y_px'] == self.chosen_spot['y_px']):
+#                 draw_spot_circle(axs[1], sx, sy, radius=4, color='blue')
+#             else:
+#                 draw_spot_circle(axs[1], sx, sy, radius=4, color='gold')
+
+#         # Mark TS in magenta arrows
+#         for _, tsrow in cell_TS.iterrows():
+#             # If your cluster DF has centroid x_px,y_px => we can arrow that
+#             sx = tsrow['x_px'] - dx
+#             sy = tsrow['y_px'] - dy
+#             draw_spot_circle(axs[1], sx, sy, radius=4, color='magenta')
+#             cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
+#             axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
+
+#         # Mark foci in cyan arrows
+#         for _, frow in cell_foci.iterrows():
+#             sx = frow['x_px'] - dx
+#             sy = frow['y_px'] - dy
+#             draw_spot_circle(axs[1], sx, sy, radius=4, color='cyan')
+#             foci_size = getattr(frow, 'nb_spots', 1)
+#             axs[1].text(sx - 12, sy, f'{foci_size}', color='cyan', fontsize=10)
+
+#         for ax in axs:
+#             ax.axis("off")
+#         plt.tight_layout()
+#         plt.show()
+
+#         return self.chosen_spot, self.chosen_ts, self.chosen_foci
+
+#     def _display_zoom_on_one_spot(self, spotChannel):
+#         """
+#         Further zoom on the same chosen_spot. Also mark the chosen TS (magenta arrow).
+#         """
+#         if self.chosen_spot is None:
+#             print("No chosen_spot available for further zoom.")
+#             return
+
+#         spotChannel = 0
+#         self.h5_idx = self.h5_idx
+#         self.fov = self.fov
+#         self.chosen_spot = self.chosen_spot
+
+#         chosen_spot = self.chosen_spot
+#         sx = int(chosen_spot['x_px'])
+#         sy = int(chosen_spot['y_px'])
+
+#         pad = 15
+#         x1 = max(sx - pad, 0)
+#         x2 = sx + pad
+#         y1 = max(sy - pad, 0)
+#         y2 = sy + pad
+
+#         # Load images and masks using lazy loading.
+#         images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
+
+#         img_spot_3d = images[spotChannel, :, :, :]
+#         img_spot_2d = np.max(img_spot_3d, axis=0)
+
+#         sub_img_dask = img_spot_2d[y1:y2, x1:x2]
+#         sub_img = sub_img_dask.compute() if hasattr(sub_img_dask, "compute") else sub_img_dask
+
+#         if sub_img.size > 0:
+#             p1, p99 = np.percentile(sub_img, (1, 99))
+#             sub_img_stretched = exposure.rescale_intensity(sub_img, in_range=(p1, p99), out_range=(0, 1))
+#         else:
+#             sub_img_stretched = sub_img
+
+#         fig, ax = plt.subplots(figsize=(5, 5))
+#         ax.imshow(sub_img_stretched, cmap='gray')
+#         ax.set_title(f"Spot zoom (cell {self.cell_label})")
+
+#         # Mark chosen spot in blue
+#         draw_spot_circle(ax, pad, pad, radius=4, color='blue')
+
+#         # If we have a chosen_ts, draw arrow for it if it's in our patch
+#         if self.chosen_ts is not None:
+#             tx = int(self.chosen_ts['x_px'])
+#             ty = int(self.chosen_ts['y_px'])
+#             rx = tx - x1
+#             ry = ty - y1
+#             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
+#                 draw_spot_circle(ax, rx, ry, radius=4, color='magenta')
+#                 # Optionally annotate TS size:
+#                 csize = getattr(self.chosen_ts, 'nb_spots', 1)
+#                 ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
+
+#         # If we have a chosen_foci, draw arrow for it if it's in our patch
+#         if self.chosen_foci is not None:
+#             tx = int(self.chosen_foci['x_px'])
+#             ty = int(self.chosen_foci['y_px'])
+#             rx = tx - x1
+#             ry = ty - y1
+#             if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
+#                 draw_spot_circle(ax, rx, ry, radius=4, color='cyan')
+#                 # Optionally annotate TS size:
+#                 csize = getattr(self.chosen_foci, 'nb_spots', 1)
+#                 ax.text(rx - 12, ry, f"{csize}", color='cyan', fontsize=10)
+
+#         # Mark other spots in gold if they are inside the patch
+#         cell_spots = self.spots[
+#             (self.spots['h5_idx'] == self.h5_idx) &
+#             (self.spots['fov'] == self.fov) &
+#             (self.spots['unique_cell_id'] == self.cell_label)
+#         ]
+#         for _, srow in cell_spots.iterrows():
+#             rx = srow['x_px'] - x1
+#             ry = srow['y_px'] - y1
+#             if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
+#                 continue
+#             # Avoid drawing chosen_spot in gold
+#             if (srow['x_px'] == chosen_spot['x_px']) and (srow['y_px'] == chosen_spot['y_px']):
+#                 continue
+#             draw_spot_circle(ax, rx, ry, radius=3, color='gold')
+
+#         ax.axis("off")
+#         plt.tight_layout()
+#         plt.show()
+
+#     def calculate_removal_percentage(self):
+#         """
+#         input 
+#         - spots DataFrame with kept spots
+#         - removed_spots DataFrame with removed spots
+#         - cellprops DataFrame with cell properties
+
+#         Calculates the percentage of spots removed for each cell.
+#         Calculates summary stats for each 'h5_idx', 'fov', and 'cell'.
+#             -  High: >= 80% removed
+#             -  Medium: 40% <= removed < 80%
+#             -  Low: < 40% removed
+
+#         Returns:
+#             - cellprops DataFrame with removal percentage and summary stats for each cell.
+#         """
+#         if self.removed_spots is None:
+#             print("No removed spots DataFrame provided.")
+#             return
+
+#         # Calculate the number of spots in each cell
+#         num_spots_per_cell = self.spots.groupby('unique_cell_id').size().reset_index(name='num_spots')
+
+#         # Merge with removed spots to get the number of removed spots per cell
+#         removed_spots_per_cell = self.removed_spots.groupby('unique_cell_id').size().reset_index(name='num_removed_spots')
+#         merged_df = pd.merge(num_spots_per_cell, removed_spots_per_cell, on='unique_cell_id', how='left')
+#         merged_df['num_removed_spots'] = merged_df['num_removed_spots'].fillna(0)
+
+#         # Calculate removal percentage
+#         merged_df['removal_percentage'] = (merged_df['num_removed_spots'] / merged_df['num_spots']) * 100
+
+#         # Add summary stats to the cellprops DataFrame
+#         self.cellprops = pd.merge(self.cellprops, merged_df[['unique_cell_id', 'removal_percentage']], on='unique_cell_id', how='left')
+
+#         # Categorize removal percentage into High, Medium, Low
+#         conditions = [
+#             (self.cellprops['removal_percentage'] >= 80),
+#             (self.cellprops['removal_percentage'] >= 40) & (self.cellprops['removal_percentage'] < 80),
+#             (self.cellprops['removal_percentage'] < 40)
+#         ]
+#         choices = ['High', 'Medium', 'Low']
+#         self.cellprops['summary_stats'] = np.select(conditions, choices, default='Unknown')
+
+#         return self.cellprops
+    
+#     def display_representative_cells(self):
+#         """
+#         For each HDF5 index (h5_idx), display up to three representative cells – one for each removal category
+#         (preferably High, Medium, and Low). For each cell, the following will be displayed:
+#         1. A zoomed-in view of the cell (via _display_zoom_on_cell), with a title that includes additional info
+#             in the format: "conc_time_FOV{fov}_ID{unique_cell_id}".
+#         2. A zoomed-in view of one representative spot from that cell (via _display_zoom_on_one_spot),
+#             showing detected (gold) spots (and TS in magenta, foci in cyan).
+        
+#         If a cell's metadata lacks a 'conc' or 'time' field, "NA" is shown.
+#         """
+#         if self.cellprops is None:
+#             print("No cell properties DataFrame provided.")
+#             return
+
+#         # Update cellprops with removal percentage and summary stats.
+#         self.calculate_removal_percentage()
+
+#         # Get unique h5_idx values.
+#         unique_h5_idx = self.cellprops['h5_idx'].unique()
+
+#         # Desired removal categories – you might prioritize High over Low.
+#         desired_categories = ["High", "Medium", "Low"]
+
+#         for h5 in unique_h5_idx:
+#             print(f"\nProcessing h5_idx {h5}")
+#             # Get cell properties for this h5_idx.
+#             cells_this_h5 = self.cellprops[self.cellprops['h5_idx'] == h5]
+#             for cat in desired_categories:
+#                 # Filter for cells in the current removal category.
+#                 cat_cells = cells_this_h5[cells_this_h5['summary_stats'] == cat]
+#                 if cat_cells.empty:
+#                     print(f"No cells with removal category '{cat}' in h5_idx {h5}.")
+#                     continue
+
+#                 # Select one representative cell at random.
+#                 rep_cell = cat_cells.sample(1).iloc[0]
+#                 print(f"Selected cell with removal '{cat}' from h5_idx {h5}.")
+
+#                 # Set instance variables so that the zoom functions use the same FOV.
+#                 self.h5_idx = rep_cell['h5_idx']
+#                 self.fov = rep_cell['fov']
+#                 # Here, we use the 'unique_cell_id' from the cellprops.
+#                 self.cell_label = rep_cell['unique_cell_id']
+
+#                 # Compose a title in the format "conc_time_FOV{fov}_ID{unique_cell_id}".
+#                 conc = rep_cell.get('Dex_Conc', "NA")
+#                 time_val = rep_cell.get('time', "NA")
+#                 title_str = f"{conc}_{time_val}_FOV{rep_cell['fov']}_ID{rep_cell['unique_cell_id']}"
+
+#                 # --- Plot 1: Zoomed-in view of the representative cell ---
+#                 print(f"Displaying cell plot: {title_str}")
+#                 # _display_zoom_on_cell() should generate its own figure.
+#                 self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
+#                 plt.gcf().suptitle(title_str)
+#                 plt.show()
+
+#                 # --- Prepare for Plot 2: Select a representative spot from this cell ---
+#                 # Ensure the chosen spot is set by filtering for spots in this cell.
+#                 cell_spots = self.spots[
+#                     (self.spots['h5_idx'] == self.h5_idx) &
+#                     (self.spots['fov'] == self.fov) &
+#                     (self.spots['unique_cell_id'] == self.cell_label)
+#                 ]
+#                 if cell_spots.empty:
+#                     print(f"No spots found for cell {self.cell_label} in FOV {self.fov}.")
+#                     continue
+#                 # Randomly select one spot from the cell and assign it to self.chosen_spot.
+#                 # self.chosen_spot = cell_spots.sample(1).iloc[0]
+#                 self.chosen_spot = self.chosen_spot
+
+#                 # Display TS and Foci for this cell.
+#                 cell_clusters = self.clusters_df[
+#                     (self.clusters_df['h5_idx'] == self.h5_idx) &
+#                     (self.clusters_df['fov'] == self.fov) &
+#                     (self.clusters_df['unique_cell_id'] == self.cell_label)
+#                 ]
+#                 if not cell_clusters.empty:
+#                     # For demonstration, pick one TS if available.
+#                     ts_candidates = cell_clusters[cell_clusters['is_nuc'] == 1]
+#                     self.chosen_ts = ts_candidates.sample(1).iloc[0] if not ts_candidates.empty else None
+#                     # Pick one foci if available.
+#                     foci_candidates = cell_clusters[cell_clusters['is_nuc'] == 0]
+#                     self.chosen_foci = foci_candidates.sample(1).iloc[0] if not foci_candidates.empty else None
+#                 else:
+#                     self.chosen_ts = None
+#                     self.chosen_foci = None
+
+#                 # --- Plot 2: Zoom in on a representative spot in that cell ---
+#                 print(f" Displaying spot zoom for cell ID {rep_cell['unique_cell_id']}.")
+#                 self._display_zoom_on_one_spot(spotChannel=0)
+#         return self.cellprops
+
+#     def main_display(self):
+#         """
+#         Main display function that sequentially runs various display routines.
+#         """
+#         print("Running display_gating_overlay...")
+#         self.display_gating_overlay()
+        
+#         print("Running _display_zoom_on_cell...")
+#         cell = self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
+#         if cell is not None:
+#             print("Running _display_zoom_on_one_spot...")
+#             self._display_zoom_on_one_spot(spotChannel=0)
+        
+#         print("Running display_representative_cells...")
+#         self.display_representative_cells()
+
+#         print("All display routines completed.")
+
+
+class DUSP1DisplayManager(DUSP1AnalysisManager):
+    def __init__(self,
+                 analysis_manager,
+                 cell_level_results=None,
+                 spots=None,
+                 clusters=None,
+                 cellprops=None,
+                 removed_spots=None,
+                 h5_idx=None,
+                 fov=None,
+                 unique_cell_id=None,
+                 spot_channel=0,
+                 cyto_channel=1,
+                 nuc_channel=2,
+                 rng_seed=None,
+                 align_h5_to_manager=True, 
+                 store_original_h5=True):
         """
+        Construct a display helper on top of an already-initialized analysis.
+
+        Purpose
+        -------
+        - Provide **read-only, on-demand** access to images/masks for specific FOVs.
+        - Centralize state for display routines (current h5_idx/fov/cell, chosen TS/foci/spot).
+        - Keep memory + file IO safe: **no preloading of entire HDF5 files**.
+
+        Inputs
+        ------
+        analysis_manager : DUSP1AnalysisManager
+            The analysis object you already used to select datasets.
+            Used here ONLY to read table paths and (if needed) fetch DataFrames.
+        cell_level_results : pd.DataFrame | None
+            Optional cell-level metrics (not required for displays).
+        spots, clusters, cellprops, removed_spots : pd.DataFrame | None
+            If None, they are loaded via:
+              - "spotresults", "clusterresults", "cell_properties" from `analysis_manager`.
+            Assumes **consistent upstream dtypes** for keys (h5_idx, fov, unique_cell_id, etc.).
+        h5_idx, fov, unique_cell_id : int | None
+            Optional initial selection context for displays.
+        spot_channel, cyto_channel, nuc_channel : int
+            Channel indices used throughout displays for consistency.
+        rng_seed : int | None
+            Seed for deterministic sampling when selecting example FOVs/cells.
+
+        Behavior & Assumptions
+        ----------------------
+        - **No dtype coercion** is performed here; we trust upstream processing.
+        - No persistent HDF5 handles are kept; callers must use helpers that open/close safely.
+        - This class stores **current selection state** and **picked rows** (TS/foci/spot)
+          so downstream zoom/crop functions can reuse them in the same context.
+
+        Side Effects
+        ------------
+        - Sets properties like `self.h5_idx`, `self.fov`, `self.cell_label`, etc.
+        - Initializes placeholders: `chosen_spot`, `chosen_ts`, `chosen_foci`,
+          `regular_nuc_spot`, `regular_cyto_spot` to `None`.
+        """
+
+        # ---- dataset locations / tables (lazy-loaded via analysis_manager if not provided) ----
         self.h5_file_paths = analysis_manager.location
+
         self.cellprops = (analysis_manager.select_datasets("cell_properties", dtype="dataframe")
                           if cellprops is None else cellprops)
         self.spots = (analysis_manager.select_datasets("spotresults", dtype="dataframe")
@@ -1058,56 +1744,216 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
         self.cell_level_results = cell_level_results
         self.removed_spots = removed_spots
 
-        # Set default values for h5_idx, fov, and unique_cell_id.
-        # If not provided, they will be set to None.
-        if h5_idx is not None:
-            self.h5_idx = h5_idx
-        else:
-            self.h5_idx = None
-        if fov is not None:
-                self.fov = fov
-        else:
-            self.fov = None
-        if unique_cell_id is not None:
-            self.unique_cell_id = unique_cell_id
-        else:
-            self.unique_cell_id = None
-        # Ensure the analysis manager is initialized.
-    
+        # ---- channel configuration (used consistently across displays) ----
+        self.SPOT_CH = int(spot_channel)
+        self.CYTO_CH = int(cyto_channel)
+        self.NUC_CH  = int(nuc_channel)
+
+        # ---- current selection context (may be overridden per call) ----
+        self.h5_idx = int(h5_idx) if h5_idx is not None else None
+        self.fov = int(fov) if fov is not None else None
+        self.unique_cell_id = int(unique_cell_id) if unique_cell_id is not None else None
+
+        # ---- placeholders for selections made by display routines ----
+        self.cell_label = None
+        self.chosen_spot = None
+        self.chosen_ts = None
+        self.chosen_foci = None
+        self.regular_nuc_spot = None   # non-TS/foci spot inside nucleus
+        self.regular_cyto_spot = None  # non-TS/foci spot inside cytoplasm
+
+        # ---- reproducible sampling RNG ----
+        self.rng = np.random.default_rng(rng_seed)
+
+        # ---- flags for HDF5 alignment and storage behavior ----
+        self.align_h5_to_manager = bool(align_h5_to_manager)
+        self.store_original_h5   = bool(store_original_h5)
+
+        # ---- convenience flags (used by some display paths) ----
+        self.has_nb_spots_in_clusters = (self.clusters_df is not None) and ('nb_spots' in self.clusters_df.columns)
+        
+        # ---- detect NAS columns ----
+        self.has_NAS = any([
+            (df is not None and 'NAS_location' in df.columns)
+            for df in (self.spots, self.cellprops, self.clusters_df)
+        ])
+
+        # ---- align DataFrame h5_idx to the manager's file order (fixes mismatch) ----
+        if self.align_h5_to_manager:
+            self._align_h5_indices_to_manager_inplace(keep_original=self.store_original_h5, verbose=True)
+
+    def _safe_slug(self, s, maxlen=80):
+        import os, re
+        if s is None:
+            return ""
+        s = str(s)
+        s = s.replace(os.sep, "_").replace("/", "_").replace("\\", "_").replace(":", "-")
+        s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+        if len(s) > maxlen:
+            s = s[-maxlen:]
+        return s
+
+    def _basename(self, s):
+        try:
+            return os.path.basename(str(s)).lower()
+        except Exception:
+            return None
+
+    def _align_h5_indices_to_manager_inplace(self, keep_original=True, verbose=True):
+        """
+        Remap h5_idx in self.spots / self.clusters_df / self.cellprops so that they
+        match the index order of self.h5_file_paths. Uses NAS_location basename as identity.
+        """
+        mgr_bases = [self._basename(p) for p in self.h5_file_paths]
+        base_to_new = {b: i for i, b in enumerate(mgr_bases)}
+
+        def infer_old_to_new(df):
+            """
+            For a given DF, return a dict old_idx -> new_idx by majority NAS_location basename.
+            """
+            mapping = {}
+            if df is None or df.empty:
+                return mapping
+            if not {'h5_idx', 'NAS_location'}.issubset(df.columns):
+                return mapping
+
+            for old_idx, g in df.groupby('h5_idx', observed=True):
+                bases = g['NAS_location'].dropna().map(self._basename)
+                if bases.empty:
+                    continue
+                vals, counts = np.unique(bases.values, return_counts=True)
+                picked = vals[np.argmax(counts)]
+                if picked in base_to_new:
+                    mapping[int(old_idx)] = int(base_to_new[picked])
+            return mapping
+
+        # gather votes from all tables
+        votes = {}
+        for df in (self.spots, self.clusters_df, self.cellprops):
+            m = infer_old_to_new(df)
+            for old_idx, new_idx in m.items():
+                votes.setdefault(int(old_idx), []).append(int(new_idx))
+
+        if not votes:
+            if verbose:
+                print("[align] No NAS_location info found; leaving h5_idx unchanged.")
+            self.h5_idx_map = {}
+            return
+
+        # majority vote per old_idx
+        old_to_new = {}
+        for old_idx, arr in votes.items():
+            vals, counts = np.unique(arr, return_counts=True)
+            old_to_new[int(old_idx)] = int(vals[np.argmax(counts)])
+
+        if verbose:
+            print("[align] Remapping h5_idx to match manager order:")
+            for k in sorted(old_to_new):
+                new = old_to_new[k]
+                print(f"    {k} -> {new}  ({mgr_bases[new]})")
+
+        def apply_map(df):
+            if df is None or 'h5_idx' not in getattr(df, 'columns', []):
+                return df
+            if keep_original and 'h5_idx_orig' not in df.columns:
+                df = df.copy()
+                df['h5_idx_orig'] = df['h5_idx']
+            else:
+                df = df.copy()
+            df['h5_idx'] = df['h5_idx'].map(lambda x: old_to_new.get(int(x), int(x))).astype(int)
+            return df
+
+        # apply in place (reassign attributes)
+        self.spots       = apply_map(self.spots)
+        self.clusters_df = apply_map(self.clusters_df)
+        self.cellprops   = apply_map(self.cellprops)
+
+        # stash mapping for debugging
+        self.h5_idx_map = old_to_new
+
+    def _to_int_series(self, s):
+        # Coerce a Series to nullable Int64 (tolerates NaN) for reliable equality
+        import pandas as pd
+        if s is None:
+            return s
+        return pd.to_numeric(s, errors="coerce").astype("Int64")
+
+    def _mask_by_keys(self, df, h5_idx=None, fov=None, unique_cell_id=None, nas=None):
+        # Build a boolean mask with safe integer coercion for key columns
+        import numpy as np
+        if df is None or df.empty:
+            return None
+        m = np.ones(len(df), dtype=bool)
+        if ('h5_idx' in df.columns) and (h5_idx is not None):
+            m &= (self._to_int_series(df['h5_idx']) == int(h5_idx))
+        if ('fov' in df.columns) and (fov is not None):
+            m &= (self._to_int_series(df['fov']) == int(fov))
+        if ('unique_cell_id' in df.columns) and (unique_cell_id is not None):
+            m &= (self._to_int_series(df['unique_cell_id']) == int(unique_cell_id))
+        if (nas is not None) and ('NAS_location' in df.columns):
+            m &= (df['NAS_location'].astype(str) == str(nas))
+        return m
+
     def get_images_and_masks(self, h5_idx=None, fov=None):
         """
-        Lazy load images and masks from a specific HDF5 file and FOV.
+        Lazy-load images and masks for a specific HDF5 file and FOV.
 
-        Parameters:
-        - h5_idx: index of the HDF5 file in self.h5_file_paths. If None, a random one is chosen.
-        - fov: field-of-view index within the file. If None, a random FOV is chosen.
+        Behavior
+        --------
+        - If `h5_idx`/`fov` are None, uses `self.h5_idx`/`self.fov`.
+        - If still None, samples with self.rng from available options.
+        - Returns NumPy arrays for the selected FOV and updates `self.h5_idx/self.fov`.
 
-        Returns:
-        - images: NumPy array for the specified FOV.
-                Expected shape: (3, 27, 936, 640)
-        - masks: NumPy array for the specified FOV.
-                Expected shape: (3, 27, 936, 640)
-        - h5_idx: the index of the HDF5 file used.
-        - fov: the FOV index used.
+        Returns
+        -------
+        images : np.ndarray
+            Shape (C, Z, Y, X) after optional squeeze.
+        masks  : np.ndarray
+            Shape (C, Z, Y, X) after optional squeeze.
+        used_h5_idx : int
+        used_fov    : int
         """
-        if h5_idx is None:
-            h5_idx = random.choice(range(len(self.h5_file_paths)))
-        file_path = self.h5_file_paths[h5_idx]
+        # ---- decide which h5/fov to use ----
+        used_h5_idx = h5_idx if h5_idx is not None else self.h5_idx
+        if used_h5_idx is None:
+            if not self.h5_file_paths or len(self.h5_file_paths) == 0:
+                raise ValueError("No HDF5 file paths available in `self.h5_file_paths`.")
+            used_h5_idx = int(self.rng.integers(0, len(self.h5_file_paths)))
+
+        file_path = self.h5_file_paths[used_h5_idx]
 
         h5_file = None
         try:
-            h5_file = safe_open_h5(file_path)  # Retry-safe wrapper
+            h5_file = safe_open_h5(file_path)  # your retry-safe wrapper
+
+            # basic dataset presence checks
+            if 'raw_images' not in h5_file or 'masks' not in h5_file:
+                raise KeyError(f"Expected groups 'raw_images' and 'masks' in {file_path}.")
+
             num_fov = h5_file['raw_images'].shape[0]
-            if fov is None:
-                fov = random.choice(range(num_fov))
 
-            images = np.array(h5_file['raw_images'][fov])
-            masks = np.array(h5_file['masks'][fov])
+            used_fov = fov if fov is not None else self.fov
+            if used_fov is None:
+                if num_fov <= 0:
+                    raise ValueError(f"No FOVs found in 'raw_images' for file: {file_path}")
+                used_fov = int(self.rng.integers(0, num_fov))
 
-            if images.shape[0] == 1:
+            if not (0 <= used_fov < num_fov):
+                raise IndexError(f"FOV {used_fov} out of range [0, {num_fov-1}] for file: {file_path}")
+
+            # read exactly one FOV and materialize as NumPy arrays
+            images = np.array(h5_file['raw_images'][used_fov])
+            masks  = np.array(h5_file['masks'][used_fov])
+
+            # handle shapes like (1, C, Z, Y, X) -> (C, Z, Y, X)
+            if images.ndim >= 5 and images.shape[0] == 1:
                 images = np.squeeze(images, axis=0)
-            if masks.shape[0] == 1:
+            if masks.ndim >= 5 and masks.shape[0] == 1:
                 masks = np.squeeze(masks, axis=0)
+
+            # minimal sanity check
+            if images.ndim != 4 or masks.ndim != 4:
+                raise ValueError(f"Expected 4D arrays (C,Z,Y,X). Got images {images.shape}, masks {masks.shape}.")
 
         finally:
             if h5_file is not None:
@@ -1116,562 +1962,929 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                 except Exception as close_err:
                     print(f"WARNING: Error closing file {file_path}: {close_err}")
 
-        return images, masks, h5_idx, fov
+        # update current state to what we actually used
+        self.h5_idx = used_h5_idx
+        self.fov = used_fov
 
-    def display_gating_overlay(self):
+        return images, masks, used_h5_idx, used_fov
+    
+    def display_gating_overlay(self,
+                            h5_idx=None,
+                            fov=None,
+                            image_channel=None,
+                            label_mask_channel=None,
+                            show=True,
+                            save=False,
+                            outdir=None,
+                            fname_prefix="gating",
+                            dpi_notebook=120,
+                            dpi_save=600,
+                            with_legend=False,
+                            nas_strategy='from_file',
+                            nas_location_override=None):
         """
-        Display a full-FOV image with segmentation mask overlay.
+        Display a full-FOV image with segmentation overlays, marking:
+        • kept cells  : IDs present in cellprops for this FOV (and NAS if applicable)
+        • removed cells: IDs present in the label mask but NOT in cellprops
+
+        NAS handling
+        -----------
+        The tables are subset to a single NAS_location chosen by:
+        nas_strategy in {'from_file','exact','majority','none'} (default 'from_file').
+        If 'exact', provide nas_location_override.
+
+        Returns
+        -------
+        used_h5_idx : int
+        used_fov    : int
+        nas_location : str | None
         """
-        Cyto_Channel = 1
+        import os
 
-        # Select a random h5_idx from the spots DataFrame.
-        idx = np.random.choice(len(self.spots))
-        spot_row = self.spots.iloc[idx]
-        h5_idx, fov, nas_location = spot_row['h5_idx'], spot_row['fov'], spot_row['NAS_location']
-        self.h5_idx = h5_idx
-        self.fov = fov
-        print(f"Selected H5 Index: {h5_idx}")
-        print(f"Nas Location: {nas_location}")
-        print(f"FOV: {fov}")
+        # ---- resolve channels ----
+        image_channel = self.CYTO_CH if image_channel is None else int(image_channel)
+        label_mask_channel = self.CYTO_CH if label_mask_channel is None else int(label_mask_channel)
 
-        # Load images and masks using lazy loading.
-        images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
-        # For gating, choose a color channel (here, channel 0) and perform max projection over the z axis.
-        img = np.max(images[1], axis=0)  # images[0] has shape (27, 936, 640) -> (936, 640)
-        mask = np.max(masks[1], axis=0)
+        # ---- load data for this FOV (also updates self.h5_idx/self.fov) ----
+        images, masks, used_h5_idx, used_fov = self.get_images_and_masks(h5_idx=h5_idx, fov=fov)
 
-        # Rescale intensity.
-        p1, p99 = np.percentile(img, (1, 99))
-        img = exposure.rescale_intensity(img, in_range=(p1, p99), out_range=(0, 1))
+        # ---- build 2D underlay image and labeled mask ----
+        img_2d = np.max(images[image_channel], axis=0)        # (Y, X)
+        label_2d = np.max(masks[label_mask_channel], axis=0)  # labeled cells
 
-        # Filter DataFrames based on h5_idx, fov, and NAS location.
-        spots_frame = self.spots[
-            (self.spots['h5_idx'] == h5_idx) &
-            (self.spots['fov'] == fov) &
-            (self.spots['NAS_location'] == nas_location)
-        ]
-        cellprops_frame = self.cellprops[
-            (self.cellprops['h5_idx'] == h5_idx) &
-            (self.cellprops['fov'] == fov) &
-            (self.cellprops['NAS_location'] == nas_location)
-        ]
-        clusters_frame = self.clusters_df[
-            (self.clusters_df['h5_idx'] == h5_idx) &
-            (self.clusters_df['fov'] == fov) &
-            (self.clusters_df['NAS_location'] == nas_location)
-        ]
+        # contrast rescale
+        if img_2d.size > 0:
+            p1, p99 = np.percentile(img_2d, (1, 99))
+            img_2d = exposure.rescale_intensity(img_2d, in_range=(p1, p99), out_range=(0, 1))
 
-        print(f"Spots DataFrame: {spots_frame.shape}")
-        print(f"Cell Properties DataFrame: {cellprops_frame.shape}")
-        print(f"Clusters DataFrame: {clusters_frame.shape}")
+        # ---- choose NAS_location per strategy ----
+        nas_location = None
+        if self.has_NAS:
+            nas_location = self._select_nas_location(used_h5_idx, used_fov,
+                                                    strategy=nas_strategy,
+                                                    override=nas_location_override)
 
-        # Identify kept cell labels from cellprops and those present in the mask.
-        cell_labels_in_df = set(cellprops_frame['cell_label'].unique())
-        cell_labels_in_mask = set(np.unique(mask))
-        cell_labels_in_mask.discard(0)
+        # ---- subset metadata to this FOV (and NAS if available) ----
+        def _subset(df):
+            if df is None:
+                return None
+            sub = df[(df['h5_idx'] == used_h5_idx) & (df['fov'] == used_fov)]
+            if (nas_location is not None) and ('NAS_location' in sub.columns):
+                sub = sub[sub['NAS_location'] == nas_location]
+            return sub
 
-        kept_colors = list(mcolors.TABLEAU_COLORS.values())
+        spots_frame     = _subset(self.spots)
+        cellprops_frame = _subset(self.cellprops)
+        _ = _subset(self.clusters_df)  # not used for drawing here, kept for symmetry/logging if needed
+
+        if cellprops_frame is None or cellprops_frame.empty:
+            print(f"[INFO] No cellprops for (h5_idx={used_h5_idx}, fov={used_fov}"
+                f"{', NAS='+nas_location if nas_location else ''}). "
+                "Overlay will show all mask labels as 'removed'.")
+
+        # ---- derive kept vs removed sets ----
+        # prefer 'cell_label' (mask ID), else try 'unique_cell_id'
+        kept_ids = set()
+        if (cellprops_frame is not None) and (not cellprops_frame.empty):
+            if 'cell_label' in cellprops_frame.columns:
+                kept_ids = set(cellprops_frame['cell_label'].dropna().astype(int).unique().tolist())
+            elif 'unique_cell_id' in cellprops_frame.columns:
+                kept_ids = set(cellprops_frame['unique_cell_id'].dropna().astype(int).unique().tolist())
+
+        mask_ids = set(np.unique(label_2d).tolist())
+        mask_ids.discard(0)  # background
+        removed_ids = mask_ids - kept_ids
+
+        # ---- colors ----
+        kept_palette = list(mcolors.TABLEAU_COLORS.values())
         removed_color = 'red'
+        id_to_color = {cid: kept_palette[i % len(kept_palette)] for i, cid in enumerate(sorted(kept_ids))}
 
-        fig, ax = plt.subplots(figsize=(10, 10))
-        # Display the cyto channel from the image (if needed, you can adjust which channel to display)
-        ax.imshow(img, cmap='gray')
+        # ---- plot ----
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=dpi_notebook)
+        ax.imshow(img_2d, cmap='gray')
 
-        # Plot kept cell outlines.
-        color_map = {cell_label: kept_colors[i % len(kept_colors)]
-                    for i, cell_label in enumerate(cell_labels_in_df)}
+        # draw kept contours
+        for cid in sorted(kept_ids):
+            cmask = (label_2d == cid)
+            contours = find_contours(cmask, 0.5)
+            if not contours:
+                continue
+            cnt = max(contours, key=lambda x: x.shape[0])  # largest contour
+            ax.plot(cnt[:, 1], cnt[:, 0], linewidth=2, color=id_to_color[cid],
+                    label=(f'Cell {cid}' if with_legend else None))
 
-        for cell_label in cell_labels_in_df:
-            cell_mask = (mask == cell_label)
-            # Find contours in the 2D mask.
-            contours = find_contours(cell_mask, 0.5)
-            if contours:
-                largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
-                        linewidth=2, color=color_map[cell_label],
-                        label=f'Cell {cell_label}')
+        # draw removed contours (dashed red)
+        for cid in sorted(removed_ids):
+            cmask = (label_2d == cid)
+            contours = find_contours(cmask, 0.5)
+            if not contours:
+                continue
+            cnt = max(contours, key=lambda x: x.shape[0])
+            ax.plot(cnt[:, 1], cnt[:, 0], linewidth=2, linestyle='dashed', color=removed_color,
+                    label=(f'Removed {cid}' if with_legend else None))
 
-        # Plot discarded cell outlines.
-        cell_labels_not_in_df = cell_labels_in_mask - cell_labels_in_df
-        for cell_label in cell_labels_not_in_df:
-            cell_mask = (mask == cell_label)
-            contours = find_contours(cell_mask, 0.5)
-            if contours:
-                largest_contour = max(contours, key=lambda x: x.shape[0])
-                ax.plot(largest_contour[:, 1], largest_contour[:, 0],
-                        color=removed_color, linewidth=2, linestyle='dashed',
-                        label=f'Removed: Cell {cell_label}')
+        title = f"h5_idx={used_h5_idx}, FOV={used_fov}"
+        if nas_location:
+            title += f", NAS={nas_location}"
+        ax.set_title(title)
+        ax.axis('off')
+        if with_legend:
+            ax.legend(fontsize=9, frameon=False, loc='upper right')
 
-        plt.legend()
-        plt.show()
-        return self.h5_idx, self.fov, nas_location
+        # save if requested
+        if save:
+            import os
+            os.makedirs(outdir or "figs", exist_ok=True)
+            nas_tag = ""
+            if self.has_NAS:
+                nas = self._select_nas_location(used_h5_idx, used_fov, strategy='from_file')
+                nas_tag = f"_NAS-{self._safe_slug(nas)}" if nas else ""
+            fname = f"{fname_prefix}_h{used_h5_idx}_f{used_fov}{nas_tag}"
+            fpath = os.path.join(outdir or "figs", f"{fname}.png")
+            fig.savefig(fpath, dpi=dpi_save, bbox_inches='tight', pad_inches=0.02)
+            print(f"[saved] {fpath}")
 
-    def _display_zoom_on_cell(self, spotChannel, cytoChannel, nucChannel):
-        """
-        Zoom on bounding box, compute percentile-based contrast,
-        then overlay:
-          - gold circles for all 'regular' spots
-          - chosen_spot in blue circle
-          - TS in magenta arrows (with cluster size)
-          - foci in cyan arrows
-        """
-        self.h5_idx = self.h5_idx
-        self.fov = self.fov
-        spotChannel = 0
-        cytoChannel = 1
-        nucChannel = 2
-
-        valid_cells = self.cellprops[
-            (self.cellprops['h5_idx'] == self.h5_idx) &
-            (self.cellprops['fov'] == self.fov) &
-            (self.cellprops['unique_cell_id'] != 0)
-        ]['unique_cell_id'].unique()
-
-        if len(valid_cells) == 0:
-            print(f"No valid cells in FOV={self.fov}. Aborting.")
-            return
-
-        # Step 3: Find cells with TS (is_nuc == 1)
-        cells_with_TS = self.clusters_df[
-            (self.clusters_df['h5_idx'] == self.h5_idx) &
-            (self.clusters_df['fov'] == self.fov) &
-            (self.clusters_df['is_nuc'] == 1)
-        ]['unique_cell_id'].unique()
-
-        # Step 4: Find cells with Foci (is_nuc == -1)
-        cells_with_Foci = self.clusters_df[
-            (self.clusters_df['h5_idx'] == self.h5_idx) &
-            (self.clusters_df['fov'] == self.fov) &
-            (self.clusters_df['is_nuc'] == 0)
-        ]['unique_cell_id'].unique()
-
-        # Step 5: Find cells with Spot
-        cells_with_Spot = self.spots[
-            (self.spots['h5_idx'] == self.h5_idx) &
-            (self.spots['fov'] == self.fov)
-        ]['unique_cell_id'].unique()
-
-        # Step 6: Apply selection logic
-        # Priority: TS + Foci + Spot > TS + Spot > Spot > Any valid cell
-        cells_with_TS_Foci_Spot = np.intersect1d(np.intersect1d(cells_with_TS, cells_with_Foci), cells_with_Spot)
-        cells_with_TS_Spot = np.intersect1d(cells_with_TS, cells_with_Spot)
-        cells_with_Spot_only = cells_with_Spot
-
-        if len(cells_with_TS_Foci_Spot) > 0:
-            self.cell_label = np.random.choice(cells_with_TS_Foci_Spot)
-            print(f"Chose unique_cell_id={self.cell_label} with TS, Foci, and Spot (FOV={self.fov}).")
-        elif len(cells_with_TS_Spot) > 0:
-            self.cell_label = np.random.choice(cells_with_TS_Spot)
-            print(f"Chose unique_cell_id={self.cell_label} with TS and Spot (FOV={self.fov}).")
-        elif len(cells_with_Spot_only) > 0:
-            self.cell_label = np.random.choice(cells_with_Spot_only)
-            print(f"Chose unique_cell_id={self.cell_label} with Spot only (FOV={self.fov}).")
+        if show:
+            plt.show()
         else:
-            # Final fallback: pick any valid cell
-            self.cell_label = np.random.choice(valid_cells)
-            print(f"No cell with TS, Foci, or Spot => picked random unique_cell_id={self.cell_label} (FOV={self.fov}).")        
+            plt.close(fig)
 
-        cdf = self.cellprops[
-            (self.cellprops['h5_idx'] == self.h5_idx) &
-            (self.cellprops['fov'] == self.fov) &
-            (self.cellprops['unique_cell_id'] == self.cell_label)
-        ]
+        return used_h5_idx, used_fov, nas_location
+    
+    def _display_zoom_on_cell(self,
+                            unique_cell_id,
+                            spotChannel=None,
+                            cytoChannel=None,
+                            nucChannel=None,
+                            show=True,
+                            save=False,
+                            outdir=None,
+                            fname_prefix="cell",
+                            dpi_notebook=120,
+                            dpi_save=600):
+        if self.h5_idx is None or self.fov is None:
+            raise ValueError("Set self.h5_idx and self.fov (or call display_gating_overlay/get_images_and_masks first).")
+
+        spotChannel = self.SPOT_CH if spotChannel is None else int(spotChannel)
+        cytoChannel = self.CYTO_CH if cytoChannel is None else int(cytoChannel)
+        nucChannel  = self.NUC_CH  if nucChannel  is None else int(nucChannel)
+
+        # --- metadata for this cell ---
+        cell_id = int(unique_cell_id)
+        mask = self._mask_by_keys(self.cellprops, h5_idx=self.h5_idx, fov=self.fov, unique_cell_id=cell_id)
+        cdf = self.cellprops.loc[mask] if mask is not None else self.cellprops.iloc[0:0]
         if cdf.empty:
-            print("Cell not found. Aborting cell zoom.")
-            self.chosen_spot = None
-            self.chosen_ts   = None
-            self.chosen_foci = None
-            return None
+            print(f"[WARN] Cell {cell_id} not found in (h5_idx={self.h5_idx}, fov={self.fov}).")
+            # quick one-line aid: show a few available IDs in this FOV (post-coercion)
+            m2 = self._mask_by_keys(self.cellprops, h5_idx=self.h5_idx, fov=self.fov)
+            if m2 is not None and m2.any():
+                try:
+                    avail = self._to_int_series(self.cellprops.loc[m2, 'unique_cell_id']).dropna().astype(int).unique().tolist()
+                    print(f"       Available unique_cell_id (sample): {sorted(avail)[:12]}{' ...' if len(avail)>12 else ''}")
+                except Exception:
+                    pass
+            self.cell_label = None
+            self.chosen_spot = self.chosen_ts = self.chosen_foci = None
+            self.regular_nuc_spot = self.regular_cyto_spot = None
+            return None, None, None
 
+        self.cell_label = cell_id
+        mask_label_id = int(cdf['cell_label'].iloc[0]) if 'cell_label' in cdf.columns else cell_id
+
+        # bbox (clip to image later)
         row_min = int(cdf['cell_bbox-0'].iloc[0])
         col_min = int(cdf['cell_bbox-1'].iloc[0])
         row_max = int(cdf['cell_bbox-2'].iloc[0])
         col_max = int(cdf['cell_bbox-3'].iloc[0])
 
-        # Load images and masks using lazy loading.
-        images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
+        # --- load images & masks for this FOV ---
+        images, masks, _, _ = self.get_images_and_masks(self.h5_idx, self.fov)
 
-        # Spot channel -> 3D -> convert to 2D by max-projection
-        img_spot_3d = images[spotChannel, :, :, :]
-        img_spot_2d = np.max(img_spot_3d, axis=0)
+        # 2D intensity (max-projection)
+        img2d = np.max(images[spotChannel], axis=0)
 
-        crop_spot_dask = img_spot_2d[row_min:row_max, col_min:col_max]
-        crop_spot = crop_spot_dask.compute() if hasattr(crop_spot_dask, "compute") else crop_spot_dask
+        # clip bbox to image bounds
+        row_min = max(0, row_min); col_min = max(0, col_min)
+        row_max = min(img2d.shape[0], row_max); col_max = min(img2d.shape[1], col_max)
 
-        if crop_spot.size > 0:
-            p1, p99 = np.percentile(crop_spot, (1, 99))
-            crop_spot_stretched = exposure.rescale_intensity(
-                crop_spot, in_range=(p1, p99), out_range=(0, 1)
-            )
+        crop = img2d[row_min:row_max, col_min:col_max]
+        if crop.size > 0:
+            p1, p99 = np.percentile(crop, (1, 99))
+            crop_stretched = exposure.rescale_intensity(crop, in_range=(p1, p99), out_range=(0, 1))
         else:
-            crop_spot_stretched = crop_spot
+            crop_stretched = crop
 
-        # Masks -> also slice
-        mask_nuc_3d = masks[nucChannel, :, :, :]
-        mask_cyto_3d = masks[cytoChannel, :, :, :]
-        mask_nuc_2d = np.max(mask_nuc_3d, axis=0)
-        mask_cyto_2d = np.max(mask_cyto_3d, axis=0)
+        # --- labeled masks -> boolean maps for overlay only ---
+        nuc2d  = np.max(masks[nucChannel],  axis=0)
+        cyto2d = np.max(masks[cytoChannel], axis=0)
 
-        crop_nucmask = mask_nuc_2d[row_min:row_max, col_min:col_max]
-        crop_cytomask = mask_cyto_2d[row_min:row_max, col_min:col_max]
+        # detect whether masks are per-cell labeled; build cell/nucleus binary maps
+        cyto_is_labeled = (mask_label_id in np.unique(cyto2d))
+        nuc_is_labeled  = (mask_label_id in np.unique(nuc2d))
 
-        # All spots in this cell
-        cell_spots = self.spots[
-            (self.spots['h5_idx'] == self.h5_idx) &
-            (self.spots['fov'] == self.fov) &
-            (self.spots['unique_cell_id'] == self.cell_label)
-        ]
+        cell_bin = (cyto2d == mask_label_id) if cyto_is_labeled else (cyto2d > 0)
+        nuc_bin  = (nuc2d  == mask_label_id) if nuc_is_labeled  else ((nuc2d > 0) & cell_bin)
+        cyto_only_bin = cell_bin & (~nuc_bin)  # for overlay (visualization)
 
-        # Transcription sites in this cell
-        cell_TS = self.clusters_df[
-            (self.clusters_df['h5_idx'] == self.h5_idx) &
-            (self.clusters_df['fov'] == self.fov) &
-            (self.clusters_df['unique_cell_id'] == self.cell_label) &
-            (self.clusters_df['is_nuc'] == 1)
-        ]
+        # crops of the boolean masks for overlay
+        crop_nuc = nuc_bin[row_min:row_max, col_min:col_max]
+        crop_cyt = cyto_only_bin[row_min:row_max, col_min:col_max]
 
-        # Foci in this cell
-        cell_foci = self.clusters_df[
-            (self.clusters_df['h5_idx'] == self.h5_idx) &
-            (self.clusters_df['fov'] == self.fov) &
-            (self.clusters_df['unique_cell_id'] == self.cell_label) &
-            (self.clusters_df['is_nuc'] == 0)
-        ]
+        # --- gather detections for this cell ---
+        cell_spots = self.spots[(self.spots['h5_idx'] == self.h5_idx) &
+                                (self.spots['fov'] == self.fov) &
+                                (self.spots['unique_cell_id'] == cell_id)]
+        # deterministic scan order (top-to-bottom, left-to-right)
+        if {'y_px', 'x_px'}.issubset(cell_spots.columns):
+            cell_spots = cell_spots.sort_values(['y_px', 'x_px'], kind='mergesort')
 
-        if cell_TS.empty:
-            print('No TS in this cell')
+        cell_clusters = self.clusters_df[(self.clusters_df['h5_idx'] == self.h5_idx) &
+                                        (self.clusters_df['fov'] == self.fov) &
+                                        (self.clusters_df['unique_cell_id'] == cell_id)]
 
-        if cell_foci.empty:
-            print('No Foci in this cell')
+        ts_df   = cell_clusters[cell_clusters['is_nuc'] == 1]
+        foci_df = cell_clusters[cell_clusters['is_nuc'] == 0]
 
-        if cell_spots.empty:
-            print("No spots in this cell.")
-            self.chosen_spot = None
-            self.chosen_ts   = None
-            self.chosen_foci = None
+        def _pick_largest(df):
+            if df is None or df.empty: return None
+            return df.sort_values('nb_spots', ascending=False).iloc[0] if 'nb_spots' in df.columns else df.iloc[0]
+
+        self.chosen_ts   = _pick_largest(ts_df)
+        self.chosen_foci = _pick_largest(foci_df)
+
+        # cluster IDs to exclude from "regular" spots
+        exclude_ids = set()
+        if not ts_df.empty and 'cluster_index' in ts_df.columns:
+            exclude_ids.update(ts_df['cluster_index'].dropna().unique().tolist())
+        if not foci_df.empty and 'cluster_index' in foci_df.columns:
+            exclude_ids.update(foci_df['cluster_index'].dropna().unique().tolist())
+
+        regular_spots = (cell_spots[~cell_spots['cluster_index'].isin(exclude_ids)]
+                        if 'cluster_index' in cell_spots.columns else cell_spots).copy()
+
+        # --- PICK regular nuc / cyto BY is_nuc FLAG (preferred path) ---
+        self.regular_nuc_spot = None
+        self.regular_cyto_spot = None
+        if 'is_nuc' in regular_spots.columns:
+            rs = regular_spots.copy()
+            # be robust to floats/bools
+            isn = rs['is_nuc'].astype(int)
+            nuc_candidates  = rs[isn == 1]
+            cyto_candidates = rs[isn == 0]
+            if not nuc_candidates.empty:
+                self.regular_nuc_spot = nuc_candidates.iloc[0]
+            if not cyto_candidates.empty:
+                self.regular_cyto_spot = cyto_candidates.iloc[0]
         else:
-            # Pick a TS if it exists, for reference in the next steps
-            if not cell_TS.empty:
-                # For example, pick one TS (largest)
-                self.chosen_ts = cell_TS.iloc[0]
-            else:
-                self.chosen_ts = None
-            
-            # Pick a foci if it exists, for reference in the next steps
-            if not cell_foci.empty:
-                # For example, pick one foci
-                self.chosen_foci = cell_foci.sample(1).iloc[0]
-            else:
-                self.chosen_foci = None
-            # We want a spot that is NOT in any TS cluster
-            if not cell_TS.empty:
-                ts_cluster_ids = cell_TS['cluster_index'].unique()
-                non_ts_spots = cell_spots[~cell_spots['cluster_index'].isin(ts_cluster_ids)]
-                if non_ts_spots.empty:
-                    # If *all* spots are in TS, fallback = just pick any
-                    chosen_spot = cell_spots.sample(1).iloc[0]
-                else:
-                    chosen_spot = non_ts_spots.sample(1).iloc[0]
-            else:
-                # No TS => pick any spot
-                chosen_spot = cell_spots.sample(1).iloc[0]
+            # --- Fallback: geometry by masks if is_nuc is missing ---
+            def _in_bin(bin2d, srow):
+                x = int(round(srow['x_px'])); y = int(round(srow['y_px']))
+                return (0 <= x < bin2d.shape[1]) and (0 <= y < bin2d.shape[0]) and bool(bin2d[y, x])
+            for _, s in regular_spots.iterrows():
+                if (self.regular_nuc_spot is None) and _in_bin(nuc_bin, s):
+                    self.regular_nuc_spot = s; continue
+                if (self.regular_cyto_spot is None) and _in_bin(cyto_only_bin, s):
+                    self.regular_cyto_spot = s
+                if (self.regular_nuc_spot is not None) and (self.regular_cyto_spot is not None):
+                    break
 
-            self.chosen_spot = chosen_spot
+        # backward compatibility with the spot-zoom wrapper
+        self.chosen_spot = self.regular_nuc_spot
 
-        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+        # --- render ---
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5), dpi=(dpi_notebook if show else dpi_save))
+        axs[0].imshow(crop_stretched, cmap='gray')
+        axs[0].imshow(crop_nuc.astype(float), cmap='Blues', alpha=0.30)
+        axs[0].imshow(crop_cyt.astype(float), cmap='Reds',  alpha=0.30)
+        axs[0].set_title(f"Cell {cell_id} — masks")
 
-        # Left: raw channel + mask overlay
-        axs[0].imshow(crop_spot_stretched, cmap='gray')
-        axs[0].imshow(crop_nucmask, cmap='Blues', alpha=0.3)
-        axs[0].imshow(crop_cytomask, cmap='Reds', alpha=0.3)
-        axs[0].set_title(f"Cell {self.cell_label} - Masks overlay")
-
-        # Right: contrast-stretched
-        axs[1].imshow(crop_spot_stretched, cmap='gray')
-        axs[1].imshow(crop_nucmask, cmap='Blues', alpha=0.2)
-        axs[1].imshow(crop_cytomask, cmap='Reds', alpha=0.2)
-        axs[1].set_title(f"Cell {self.cell_label} - Stretched Spot Channel")
+        axs[1].imshow(crop_stretched, cmap='gray')
+        axs[1].imshow(crop_nuc.astype(float), cmap='Blues', alpha=0.20)
+        axs[1].imshow(crop_cyt.astype(float), cmap='Reds',  alpha=0.20)
+        axs[1].set_title(f"Cell {cell_id} — detections")
 
         dx, dy = col_min, row_min
 
-        # Draw all spots in gold circles
-        for _, spot in cell_spots.iterrows():
-            sx = spot['x_px'] - dx
-            sy = spot['y_px'] - dy
-            # if it's the chosen spot => color in blue
-            if self.chosen_spot is not None and (spot['x_px'] == self.chosen_spot['x_px']) and (spot['y_px'] == self.chosen_spot['y_px']):
-                draw_spot_circle(axs[1], sx, sy, radius=4, color='blue')
-            else:
-                draw_spot_circle(axs[1], sx, sy, radius=4, color='gold')
+        # draw all cell spots (gold)
+        for _, s in cell_spots.iterrows():
+            sx = s['x_px'] - dx
+            sy = s['y_px'] - dy
+            draw_spot_circle(axs[1], sx, sy, radius=4, color='gold')
 
-        # Mark TS in magenta arrows
-        for _, tsrow in cell_TS.iterrows():
-            # If your cluster DF has centroid x_px,y_px => we can arrow that
-            sx = tsrow['x_px'] - dx
-            sy = tsrow['y_px'] - dy
+        # TS (magenta) with size annotation if available
+        if self.chosen_ts is not None:
+            sx = self.chosen_ts['x_px'] - dx; sy = self.chosen_ts['y_px'] - dy
             draw_spot_circle(axs[1], sx, sy, radius=4, color='magenta')
-            cluster_size = getattr(tsrow, 'nb_spots', 1)  # fallback
-            axs[1].text(sx - 12, sy, f"{cluster_size}", color='magenta', fontsize=10)
+            if 'nb_spots' in self.chosen_ts.index:
+                axs[1].text(sx - 12, sy, f"{int(self.chosen_ts['nb_spots'])}", color='magenta', fontsize=10)
 
-        # Mark foci in cyan arrows
-        for _, frow in cell_foci.iterrows():
-            sx = frow['x_px'] - dx
-            sy = frow['y_px'] - dy
+        # Foci (cyan)
+        if self.chosen_foci is not None:
+            sx = self.chosen_foci['x_px'] - dx; sy = self.chosen_foci['y_px'] - dy
             draw_spot_circle(axs[1], sx, sy, radius=4, color='cyan')
-            foci_size = getattr(frow, 'nb_spots', 1)
-            axs[1].text(sx - 12, sy, f'{foci_size}', color='cyan', fontsize=10)
+            if 'nb_spots' in self.chosen_foci.index:
+                axs[1].text(sx - 12, sy, f"{int(self.chosen_foci['nb_spots'])}", color='cyan', fontsize=10)
 
-        for ax in axs:
-            ax.axis("off")
+        # highlight the two "regular" picks for clarity (blue=nuc, darkorange=cyto)
+        if self.regular_nuc_spot is not None:
+            sx = self.regular_nuc_spot['x_px'] - dx; sy = self.regular_nuc_spot['y_px'] - dy
+            draw_spot_circle(axs[1], sx, sy, radius=5, color='blue')
+        if self.regular_cyto_spot is not None:
+            sx = self.regular_cyto_spot['x_px'] - dx; sy = self.regular_cyto_spot['y_px'] - dy
+            draw_spot_circle(axs[1], sx, sy, radius=5, color='darkorange')
+
+        for ax in axs: ax.axis('off')
         plt.tight_layout()
-        plt.show()
+
+        # save if requested
+        if save:
+            import os
+            os.makedirs(outdir or "figs", exist_ok=True)
+            nas_tag = ""
+            if self.has_NAS:
+                nas = self._select_nas_location(self.h5_idx, self.fov, strategy='from_file')
+                nas_tag = f"_NAS-{self._safe_slug(nas)}" if nas else ""
+            fname = f"{fname_prefix}_h{self.h5_idx}_f{self.fov}_cell{cell_id}{nas_tag}"
+            fpath = os.path.join(outdir or "figs", f"{fname}.png")
+            fig = axs[0].get_figure()
+            fig.savefig(fpath, dpi=dpi_save, bbox_inches='tight', pad_inches=0.02)
+            print(f"[saved] {fpath}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(axs[0].get_figure())
 
         return self.chosen_spot, self.chosen_ts, self.chosen_foci
 
-    def _display_zoom_on_one_spot(self, spotChannel):
+    def _display_spot_crop(self,
+                        row,
+                        kind,
+                        spotChannel=None,
+                        pad=15,
+                        show=True,
+                        save=False,
+                        outdir=None,
+                        fname_prefix="crop",
+                        dpi_notebook=120,
+                        dpi_save=600,
+                        draw_context=True,
+                        show_removed=False,
+                        removed_color="red"):
         """
-        Further zoom on the same chosen_spot. Also mark the chosen TS (magenta arrow).
+        Crop around a single target (TS, foci, or regular spot) and render a zoom.
+        Avoids duplicate labels by skipping re-draw of the same TS/FOCI in context.
+        Applies NAS-location subsetting when available to keep overlays consistent.
         """
-        if self.chosen_spot is None:
-            print("No chosen_spot available for further zoom.")
-            return
+        import os
+        import pandas as pd
 
-        spotChannel = 0
-        self.h5_idx = self.h5_idx
-        self.fov = self.fov
-        self.chosen_spot = self.chosen_spot
+        if row is None:
+            print("[INFO] _display_spot_crop called with row=None; nothing to draw.")
+            return None
+        if self.h5_idx is None or self.fov is None:
+            raise ValueError("Set self.h5_idx and self.fov before cropping (call display_gating_overlay or get_images_and_masks).")
 
-        chosen_spot = self.chosen_spot
-        sx = int(chosen_spot['x_px'])
-        sy = int(chosen_spot['y_px'])
+        # resolve channel
+        spotChannel = self.SPOT_CH if spotChannel is None else int(spotChannel)
 
-        pad = 15
-        x1 = max(sx - pad, 0)
-        x2 = sx + pad
-        y1 = max(sy - pad, 0)
-        y2 = sy + pad
+        # current NAS (only used for subsetting overlays / filename tag)
+        nas = None
+        if self.has_NAS:
+            try:
+                nas = self._select_nas_location(self.h5_idx, self.fov, strategy='from_file')
+            except Exception:
+                nas = None
 
-        # Load images and masks using lazy loading.
-        images, masks, h5_idx, fov = self.get_images_and_masks(self.h5_idx, self.fov)
+        # helper: robust key-subset (tolerates dtype drift)
+        def _safe_subset(df, h5, fv, uid=None, nas_val=None):
+            if df is None or df.empty:
+                return df.iloc[0:0]
+            m = pd.Series(True, index=df.index)
+            if 'h5_idx' in df.columns:
+                m &= pd.to_numeric(df['h5_idx'], errors='coerce').astype('Int64') == int(h5)
+            if 'fov' in df.columns:
+                m &= pd.to_numeric(df['fov'], errors='coerce').astype('Int64') == int(fv)
+            if (uid is not None) and ('unique_cell_id' in df.columns):
+                m &= pd.to_numeric(df['unique_cell_id'], errors='coerce').astype('Int64') == int(uid)
+            if (nas_val is not None) and ('NAS_location' in df.columns):
+                m &= (df['NAS_location'].astype(str) == str(nas_val))
+            return df.loc[m]
 
-        img_spot_3d = images[spotChannel, :, :, :]
-        img_spot_2d = np.max(img_spot_3d, axis=0)
+        # helper: determine if two rows refer to the same object (for dedup)
+        def _same_object(a, b):
+            try:
+                if ('cluster_index' in a.index and 'cluster_index' in b.index and
+                    pd.notna(a['cluster_index']) and pd.notna(b['cluster_index'])):
+                    return int(a['cluster_index']) == int(b['cluster_index'])
+            except Exception:
+                pass
+            try:
+                return (int(round(a['x_px'])) == int(round(b['x_px'])) and
+                        int(round(a['y_px'])) == int(round(b['y_px'])))
+            except Exception:
+                return False
 
-        sub_img_dask = img_spot_2d[y1:y2, x1:x2]
-        sub_img = sub_img_dask.compute() if hasattr(sub_img_dask, "compute") else sub_img_dask
+        # --- center & bounds ---
+        try:
+            sx = int(round(row['x_px'])); sy = int(round(row['y_px']))
+        except KeyError as e:
+            raise KeyError(f"row is missing coordinate column: {e}")
 
-        if sub_img.size > 0:
-            p1, p99 = np.percentile(sub_img, (1, 99))
-            sub_img_stretched = exposure.rescale_intensity(sub_img, in_range=(p1, p99), out_range=(0, 1))
-        else:
-            sub_img_stretched = sub_img
+        images, masks, _, _ = self.get_images_and_masks(self.h5_idx, self.fov)
+        img2d = np.max(images[spotChannel], axis=0)
 
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(sub_img_stretched, cmap='gray')
-        ax.set_title(f"Spot zoom (cell {self.cell_label})")
+        H, W = img2d.shape
+        x1 = max(sx - pad, 0); x2 = min(sx + pad, W)
+        y1 = max(sy - pad, 0); y2 = min(sy + pad, H)
 
-        # Mark chosen spot in blue
-        draw_spot_circle(ax, pad, pad, radius=4, color='blue')
+        sub = img2d[y1:y2, x1:x2]
+        if sub.size > 0:
+            p1, p99 = np.percentile(sub, (1, 99))
+            sub = exposure.rescale_intensity(sub, in_range=(p1, p99), out_range=(0, 1))
 
-        # If we have a chosen_ts, draw arrow for it if it's in our patch
-        if self.chosen_ts is not None:
-            tx = int(self.chosen_ts['x_px'])
-            ty = int(self.chosen_ts['y_px'])
-            rx = tx - x1
-            ry = ty - y1
-            if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_circle(ax, rx, ry, radius=4, color='magenta')
-                # Optionally annotate TS size:
-                csize = getattr(self.chosen_ts, 'nb_spots', 1)
-                ax.text(rx - 12, ry, f"{csize}", color='magenta', fontsize=10)
+        # --- figure ---
+        fig, ax = plt.subplots(figsize=(5, 5), dpi=(dpi_notebook if show else dpi_save))
+        ax.imshow(sub, cmap='gray')
+        ax.set_title(f"{kind} (cell {self.cell_label if self.cell_label is not None else 'NA'})")
 
-        # If we have a chosen_foci, draw arrow for it if it's in our patch
-        if self.chosen_foci is not None:
-            tx = int(self.chosen_foci['x_px'])
-            ty = int(self.chosen_foci['y_px'])
-            rx = tx - x1
-            ry = ty - y1
-            if (0 <= rx < (x2 - x1)) and (0 <= ry < (y2 - y1)):
-                draw_spot_circle(ax, rx, ry, radius=4, color='cyan')
-                # Optionally annotate TS size:
-                csize = getattr(self.chosen_foci, 'nb_spots', 1)
-                ax.text(rx - 12, ry, f"{csize}", color='cyan', fontsize=10)
+        # color map (CYTO_REG = 'darkorange' for improved contrast vs gold)
+        color_map = {'TS': 'magenta', 'FOCI': 'cyan', 'NUC_REG': 'blue', 'CYTO_REG': 'darkorange', 'SPOT': 'blue'}
+        tcolor = color_map.get(kind, 'white')
 
-        # Mark other spots in gold if they are inside the patch
-        cell_spots = self.spots[
-            (self.spots['h5_idx'] == self.h5_idx) &
-            (self.spots['fov'] == self.fov) &
-            (self.spots['unique_cell_id'] == self.cell_label)
-        ]
-        for _, srow in cell_spots.iterrows():
-            rx = srow['x_px'] - x1
-            ry = srow['y_px'] - y1
-            if (rx < 0 or ry < 0 or rx >= (x2 - x1) or ry >= (y2 - y1)):
-                continue
-            # Avoid drawing chosen_spot in gold
-            if (srow['x_px'] == chosen_spot['x_px']) and (srow['y_px'] == chosen_spot['y_px']):
-                continue
-            draw_spot_circle(ax, rx, ry, radius=3, color='gold')
+        # draw target marker at its actual offset in the crop
+        cx, cy = sx - x1, sy - y1
+        draw_spot_circle(ax, cx, cy, radius=4, color=tcolor)
 
-        ax.axis("off")
+        # a single annotation for TS/FOCI near the target (no duplicate)
+        if kind in ('TS', 'FOCI') and isinstance(row, pd.Series) and ('nb_spots' in row.index) and pd.notna(row['nb_spots']):
+            try:
+                ax.text(cx - 12, cy, f"{int(row['nb_spots'])}", color=tcolor, fontsize=10)
+            except Exception:
+                pass
+
+        # optional context overlays, NAS-aware and key-safe
+        if draw_context and (self.cell_label is not None):
+            cell_spots = _safe_subset(self.spots, self.h5_idx, self.fov, uid=self.cell_label, nas_val=nas)
+            for _, s in cell_spots.iterrows():
+                rx = int(round(s['x_px'])) - x1
+                ry = int(round(s['y_px'])) - y1
+                if 0 <= rx < (x2 - x1) and 0 <= ry < (y2 - y1):
+                    if (int(round(s['x_px'])) == sx) and (int(round(s['y_px'])) == sy):
+                        continue  # skip the target itself
+                    draw_spot_circle(ax, rx, ry, radius=3, color='gold')
+
+            # chosen TS within patch? (skip when the target IS that TS)
+            if self.chosen_ts is not None:
+                tx = int(round(self.chosen_ts['x_px'])); ty = int(round(self.chosen_ts['y_px']))
+                rx, ry = tx - x1, ty - y1
+                if 0 <= rx < (x2 - x1) and 0 <= ry < (y2 - y1):
+                    if not (kind == 'TS' and _same_object(self.chosen_ts, row)):
+                        draw_spot_circle(ax, rx, ry, radius=4, color='magenta')
+                        if 'nb_spots' in self.chosen_ts.index and pd.notna(self.chosen_ts['nb_spots']):
+                            ax.text(rx - 12, ry, f"{int(self.chosen_ts['nb_spots'])}", color='magenta', fontsize=10)
+
+            # chosen foci within patch? (skip when the target IS that FOCI)
+            if self.chosen_foci is not None:
+                tx = int(round(self.chosen_foci['x_px'])); ty = int(round(self.chosen_foci['y_px']))
+                rx, ry = tx - x1, ty - y1
+                if 0 <= rx < (x2 - x1) and 0 <= ry < (y2 - y1):
+                    if not (kind == 'FOCI' and _same_object(self.chosen_foci, row)):
+                        draw_spot_circle(ax, rx, ry, radius=4, color='cyan')
+                        if 'nb_spots' in self.chosen_foci.index and pd.notna(self.chosen_foci['nb_spots']):
+                            ax.text(rx - 12, ry, f"{int(self.chosen_foci['nb_spots'])}", color='cyan', fontsize=10)
+
+        # optional: overlay removed spots (NAS-aware)
+        if show_removed and (self.removed_spots is not None) and (self.cell_label is not None):
+            needed_cols = {'h5_idx', 'fov', 'unique_cell_id', 'x_px', 'y_px'}
+            if needed_cols.issubset(set(self.removed_spots.columns)):
+                rem = _safe_subset(self.removed_spots, self.h5_idx, self.fov, uid=self.cell_label, nas_val=nas)
+                for _, s in rem.iterrows():
+                    rx = int(round(s['x_px'])) - x1
+                    ry = int(round(s['y_px'])) - y1
+                    if 0 <= rx < (x2 - x1) and 0 <= ry < (y2 - y1):
+                        draw_spot_circle(ax, rx, ry, radius=3, color=removed_color)
+
+        ax.axis('off')
         plt.tight_layout()
-        plt.show()
 
-    def calculate_removal_percentage(self):
+        # save if requested
+        if save:
+            os.makedirs(outdir or "figs", exist_ok=True)
+            nas_tag = f"_NAS-{self._safe_slug(nas)}" if nas else ""
+            cell_id_str = self.cell_label if self.cell_label is not None else getattr(row, 'unique_cell_id', 'NA')
+            base = f"{fname_prefix}_h{self.h5_idx}_f{self.fov}_cell{cell_id_str}_{kind.lower()}_x{sx}_y{sy}{nas_tag}"
+            fpath = os.path.join(outdir or "figs", f"{base}.png")
+            fig.savefig(fpath, dpi=dpi_save, bbox_inches='tight', pad_inches=0.02)
+            print(f"[saved] {fpath}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+        return (x1, y1, x2, y2)
+
+    def _display_zoom_on_one_spot(self,
+                                spotChannel=None,
+                                row=None,
+                                kind='SPOT',
+                                pad=15,
+                                show=True,
+                                save=False,
+                                outdir=None,
+                                fname_prefix="crop",
+                                dpi_notebook=120,
+                                dpi_save=600,
+                                draw_context=True,
+                                show_removed=False,
+                                removed_color="red"):
         """
-        input 
-        - spots DataFrame with kept spots
-        - removed_spots DataFrame with removed spots
-        - cellprops DataFrame with cell properties
+        Backward-compatible wrapper around `_display_spot_crop`.
 
-        Calculates the percentage of spots removed for each cell.
-        Calculates summary stats for each 'h5_idx', 'fov', and 'cell'.
-            -  High: >= 80% removed
-            -  Medium: 40% <= removed < 80%
-            -  Low: < 40% removed
+        - If `row` is None, uses `self.chosen_spot` (set by `_display_zoom_on_cell`).
+        - `kind`: 'TS' | 'FOCI' | 'NUC_REG' | 'CYTO_REG' | 'SPOT'
+        - `show_removed=True` overlays removed spots (if available) for this cell.
 
-        Returns:
-            - cellprops DataFrame with removal percentage and summary stats for each cell.
+        Returns the crop bounds (x1, y1, x2, y2).
         """
-        if self.removed_spots is None:
-            print("No removed spots DataFrame provided.")
-            return
+        if row is None:
+            row = self.chosen_spot
+        return self._display_spot_crop(row=row,
+                                    kind=kind,
+                                    spotChannel=spotChannel,
+                                    pad=pad,
+                                    show=show,
+                                    save=save,
+                                    outdir=outdir,
+                                    fname_prefix=fname_prefix,
+                                    dpi_notebook=dpi_notebook,
+                                    dpi_save=dpi_save,
+                                    draw_context=draw_context,
+                                    show_removed=show_removed,
+                                    removed_color=removed_color)
 
-        # Calculate the number of spots in each cell
-        num_spots_per_cell = self.spots.groupby('unique_cell_id').size().reset_index(name='num_spots')
-
-        # Merge with removed spots to get the number of removed spots per cell
-        removed_spots_per_cell = self.removed_spots.groupby('unique_cell_id').size().reset_index(name='num_removed_spots')
-        merged_df = pd.merge(num_spots_per_cell, removed_spots_per_cell, on='unique_cell_id', how='left')
-        merged_df['num_removed_spots'] = merged_df['num_removed_spots'].fillna(0)
-
-        # Calculate removal percentage
-        merged_df['removal_percentage'] = (merged_df['num_removed_spots'] / merged_df['num_spots']) * 100
-
-        # Add summary stats to the cellprops DataFrame
-        self.cellprops = pd.merge(self.cellprops, merged_df[['unique_cell_id', 'removal_percentage']], on='unique_cell_id', how='left')
-
-        # Categorize removal percentage into High, Medium, Low
-        conditions = [
-            (self.cellprops['removal_percentage'] >= 80),
-            (self.cellprops['removal_percentage'] >= 40) & (self.cellprops['removal_percentage'] < 80),
-            (self.cellprops['removal_percentage'] < 40)
-        ]
-        choices = ['High', 'Medium', 'Low']
-        self.cellprops['summary_stats'] = np.select(conditions, choices, default='Unknown')
-
-        return self.cellprops
-    
-    def display_representative_cells(self):
+    def _select_nas_location(self, h5_idx, fov, strategy='from_file', override=None):
         """
-        For each HDF5 index (h5_idx), display up to three representative cells – one for each removal category
-        (preferably High, Medium, and Low). For each cell, the following will be displayed:
-        1. A zoomed-in view of the cell (via _display_zoom_on_cell), with a title that includes additional info
-            in the format: "conc_time_FOV{fov}_ID{unique_cell_id}".
-        2. A zoomed-in view of one representative spot from that cell (via _display_zoom_on_one_spot),
-            showing detected (gold) spots (and TS in magenta, foci in cyan).
-        
-        If a cell's metadata lacks a 'conc' or 'time' field, "NA" is shown.
+        Decide which NAS_location to use for (h5_idx, fov).
+
+        strategy:
+        - 'from_file' : infer from the actual H5 file path used; fallback to 'majority'
+        - 'exact'     : use `override` exactly (if present for this pair), else None
+        - 'majority'  : pick the most frequent NAS_location across tables
+        - 'none'      : don't choose (return None)
         """
-        if self.cellprops is None:
-            print("No cell properties DataFrame provided.")
-            return
+        # collect candidates for this (h5,fov)
+        candidates = []
+        for df in (self.spots, self.cellprops, self.clusters_df):
+            if df is None or 'NAS_location' not in getattr(df, 'columns', []):
+                continue
+            vals = df[(df['h5_idx'] == h5_idx) & (df['fov'] == fov)]['NAS_location'].dropna().astype(str).values
+            if len(vals) > 0:
+                candidates.extend(vals.tolist())
 
-        # Update cellprops with removal percentage and summary stats.
-        self.calculate_removal_percentage()
+        if len(candidates) == 0:
+            return None
 
-        # Get unique h5_idx values.
-        unique_h5_idx = self.cellprops['h5_idx'].unique()
+        uniq = np.unique(candidates)
 
-        # Desired removal categories – you might prioritize High over Low.
-        desired_categories = ["High", "Medium", "Low"]
+        if strategy == 'none':
+            return None
 
-        for h5 in unique_h5_idx:
-            print(f"\nProcessing h5_idx {h5}")
-            # Get cell properties for this h5_idx.
-            cells_this_h5 = self.cellprops[self.cellprops['h5_idx'] == h5]
-            for cat in desired_categories:
-                # Filter for cells in the current removal category.
-                cat_cells = cells_this_h5[cells_this_h5['summary_stats'] == cat]
-                if cat_cells.empty:
-                    print(f"No cells with removal category '{cat}' in h5_idx {h5}.")
+        if strategy == 'exact':
+            return override if (override is not None and override in set(uniq)) else None
+
+        if strategy == 'majority':
+            vals, counts = np.unique(candidates, return_counts=True)
+            return vals[np.argmax(counts)]
+
+        if strategy == 'from_file':
+            # try to match the actual file path string with NAS strings
+            try:
+                fp = str(self.h5_file_paths[h5_idx]).lower()
+                best = None
+                best_len = -1
+                for nas in uniq:
+                    s = str(nas).lower()
+                    if s and s in fp and len(s) > best_len:
+                        best = nas
+                        best_len = len(s)
+                if best is not None:
+                    return best
+            except Exception:
+                pass
+            # fallback: majority
+            vals, counts = np.unique(candidates, return_counts=True)
+            return vals[np.argmax(counts)]
+
+        # default fallback
+        vals, counts = np.unique(candidates, return_counts=True)
+        return vals[np.argmax(counts)]
+
+    def classify_cells_in_fov(self, h5_idx, fov, return_nas=False,
+                            nas_strategy='from_file', nas_location_override=None):
+        """
+        Partition cells in (h5_idx, fov) into:
+            'TS+FOCI', 'TS_only', 'FOCI_only', 'Neither'
+
+        NAS handling matches display_gating_overlay via nas_strategy/override.
+        Uses robust key subsetting to tolerate dtype drift (e.g., after ID prefixing).
+        """
+        import pandas as pd
+        import numpy as np
+
+        nas = self._select_nas_location(h5_idx, fov,
+                                        strategy=nas_strategy,
+                                        override=nas_location_override)
+
+        # robust subsetting
+        def _safe_subset(df):
+            if df is None:
+                return None
+            if df.empty:
+                return df.iloc[0:0]
+            m = pd.Series(True, index=df.index)
+            if 'h5_idx' in df.columns:
+                m &= pd.to_numeric(df['h5_idx'], errors='coerce').astype('Int64') == int(h5_idx)
+            if 'fov' in df.columns:
+                m &= pd.to_numeric(df['fov'], errors='coerce').astype('Int64') == int(fov)
+            if (nas is not None) and ('NAS_location' in df.columns):
+                m &= (df['NAS_location'].astype(str) == str(nas))
+            return df.loc[m]
+
+        cp = _safe_subset(self.cellprops)
+        cl = _safe_subset(self.clusters_df)
+
+        # valid cells from cellprops
+        valid = set()
+        if cp is not None and not cp.empty:
+            if 'unique_cell_id' not in cp.columns:
+                raise KeyError("cellprops must contain 'unique_cell_id'.")
+            uids = pd.to_numeric(cp['unique_cell_id'], errors='coerce').astype('Int64')
+            valid = set(uids.dropna().astype(int).tolist())
+            valid.discard(0)
+
+        # cells with TS and foci from clusters
+        ts_cells = set()
+        foci_cells = set()
+        if cl is not None and not cl.empty:
+            if 'unique_cell_id' not in cl.columns or 'is_nuc' not in cl.columns:
+                raise KeyError("clusters_df must contain 'unique_cell_id' and 'is_nuc'.")
+            uids_cl = pd.to_numeric(cl['unique_cell_id'], errors='coerce').astype('Int64')
+            is_nuc_series = pd.to_numeric(cl['is_nuc'], errors='coerce').astype('Int64')
+
+            ts_cells = set(uids_cl[is_nuc_series == 1].dropna().astype(int).unique().tolist())
+            foci_cells = set(uids_cl[is_nuc_series == 0].dropna().astype(int).unique().tolist())
+
+        # restrict to valid cells
+        ts_cells &= valid
+        foci_cells &= valid
+
+        cats = {
+            'TS+FOCI':   sorted(ts_cells & foci_cells),
+            'TS_only':   sorted(ts_cells - foci_cells),
+            'FOCI_only': sorted(foci_cells - ts_cells),
+            'Neither':   sorted(valid - (ts_cells | foci_cells)),
+        }
+        return (cats, nas) if return_nas else cats   
+
+    def pick_fovs(self, h5_indices=None, fov_list=None, per_h5=1, seed=None):
+        """
+        Decide which FOV(s) to display per h5_idx.
+
+        Parameters
+        ----------
+        h5_indices : list[int] | None
+            If None, inferred from cellprops['h5_idx'] (else spots/clusters as fallback).
+        fov_list : dict[int, list[int]] | list[int] | None
+            - dict: {h5_idx: [fov, ...]} to explicitly choose per file.
+            - list: only valid when exactly one h5_idx is specified; applies that list to it.
+            - None: sample up to `per_h5` FOVs observed in metadata for each h5.
+        per_h5 : int
+            How many FOVs to sample per h5 when fov_list is None.
+        seed : int | None
+            Optional override for sampling seed (defaults to self.rng).
+
+        Returns
+        -------
+        pairs : list[tuple[int, int]]
+            List of (h5_idx, fov) tuples.
+        """
+        rng = np.random.default_rng(seed) if seed is not None else self.rng
+
+        # derive available h5 indices
+        if h5_indices is None:
+            sources = []
+            for df in (self.cellprops, self.spots, self.clusters_df):
+                if df is not None and 'h5_idx' in df.columns:
+                    sources.append(np.unique(df['h5_idx'].dropna().astype(int).values))
+            if len(sources) == 0:
+                raise ValueError("Could not infer h5_indices from any table.")
+            h5_indices = sorted(np.unique(np.concatenate(sources)).tolist())
+        else:
+            h5_indices = [int(h) for h in h5_indices]
+
+        pairs = []
+        for h5 in h5_indices:
+            # explicit mapping provided
+            if isinstance(fov_list, dict) and (h5 in fov_list):
+                for f in fov_list[h5]:
+                    pairs.append((int(h5), int(f)))
+                continue
+
+            # single-list form (only valid if one h5_idx given)
+            if isinstance(fov_list, list):
+                if len(h5_indices) != 1:
+                    raise ValueError("fov_list as a list is only allowed when exactly one h5_idx is provided.")
+                for f in fov_list:
+                    pairs.append((int(h5), int(f)))
+                continue
+
+            # default: sample from available FOVs observed in metadata for this h5
+            fovs_available = []
+            for df in (self.cellprops, self.spots, self.clusters_df):
+                if df is not None and {'h5_idx','fov'}.issubset(df.columns):
+                    fovs_available.append(np.unique(df.loc[df['h5_idx'] == h5, 'fov'].dropna().astype(int).values))
+            if len(fovs_available) == 0:
+                continue
+            fovs_available = sorted(np.unique(np.concatenate(fovs_available)).tolist())
+
+            k = min(int(per_h5), len(fovs_available))
+            if k == 0:
+                continue
+            chosen = rng.choice(fovs_available, size=k, replace=False)
+            for f in chosen:
+                pairs.append((int(h5), int(f)))
+
+        return pairs
+
+    def default_display(self,
+                        h5_indices=None,
+                        fov_list=None,
+                        per_h5=1,
+                        seed=None,
+                        # per-category selection
+                        max_cells_per_category=1,
+                        categories_order=('TS+FOCI', 'TS_only', 'FOCI_only', 'Neither'),
+                        # rendering / saving
+                        show=True,
+                        save=False,
+                        outdir=None,
+                        dpi_notebook=120,
+                        dpi_save=600,
+                        gating_fname_prefix="gating",
+                        cell_fname_prefix="cell",
+                        crop_fname_prefix="crop",
+                        crop_pad=15,
+                        draw_context=True,
+                        show_removed=False,
+                        removed_color="red",
+                        # NAS handling
+                        nas_strategy='from_file',
+                        nas_location_override=None,
+                        # channels (override if needed)
+                        spotChannel=None,
+                        cytoChannel=None,
+                        nucChannel=None,
+                        with_legend=False):
+        """
+        Default end-to-end display for smiFISH mRNA detection figures.
+
+        For each selected (h5_idx, fov):
+        1) Display gating overlay (kept vs removed cells).
+        2) Classify cells into categories and pick up to `max_cells_per_category` per category.
+        3) For each picked cell:
+                - Show cell crop with detections.
+                - Emit spot crops according to category:
+                    TS+FOCI  -> TS, FOCI, NUC_REG, CYTO_REG
+                    TS_only  -> TS, NUC_REG, CYTO_REG
+                    FOCI_only-> FOCI, NUC_REG, CYTO_REG
+                    Neither  -> NUC_REG, CYTO_REG
+
+        Saving
+        ------
+        If `save=True`, all figures are saved **directly into** `outdir` (or 'figs' if None)
+        with filenames that embed the h5/fov/cell identifiers. No per-FOV subfolders.
+        Notebook display uses `dpi_notebook`; saved figures use `dpi_save` for publication.
+        """
+        import os
+        rng = np.random.default_rng(seed) if seed is not None else self.rng
+
+        # flat output directory
+        out_root = outdir or "figs"
+        if save:
+            os.makedirs(out_root, exist_ok=True)
+
+        # choose FOVs to process
+        pairs = self.pick_fovs(h5_indices=h5_indices, fov_list=fov_list, per_h5=per_h5, seed=seed)
+
+        # resolve channels
+        spotChannel = self.SPOT_CH if spotChannel is None else int(spotChannel)
+        cytoChannel = self.CYTO_CH if cytoChannel is None else int(cytoChannel)
+        nucChannel  = self.NUC_CH  if nucChannel  is None else int(nucChannel)
+
+        for (h5, fv) in pairs:
+            save_dir = out_root  # flat saving into the provided outdir
+
+            # 1) gating overlay (also sets self.h5_idx/self.fov)
+            used_h, used_f, nas = self.display_gating_overlay(
+                h5_idx=h5, fov=fv,
+                image_channel=cytoChannel,
+                label_mask_channel=cytoChannel,
+                show=show,
+                save=save,
+                outdir=save_dir,
+                fname_prefix=gating_fname_prefix,
+                dpi_notebook=dpi_notebook,
+                dpi_save=dpi_save,
+                with_legend=with_legend,
+                nas_strategy=nas_strategy,
+                nas_location_override=nas_location_override
+            )
+
+            # 2) classify cells for this FOV (with the same NAS policy)
+            cats, _ = self.classify_cells_in_fov(
+                used_h, used_f, return_nas=True,
+                nas_strategy=nas_strategy,
+                nas_location_override=nas_location_override
+            )
+
+            # ensure consistent category loop order
+            for cat in categories_order:
+                cell_list = cats.get(cat, [])
+                if not cell_list:
                     continue
 
-                # Select one representative cell at random.
-                rep_cell = cat_cells.sample(1).iloc[0]
-                print(f"Selected cell with removal '{cat}' from h5_idx {h5}.")
+                # pick up to N cells from this category (reproducibly)
+                k = min(max_cells_per_category, len(cell_list))
+                chosen_cells = rng.choice(np.array(cell_list, dtype=int), size=k, replace=False)
 
-                # Set instance variables so that the zoom functions use the same FOV.
-                self.h5_idx = rep_cell['h5_idx']
-                self.fov = rep_cell['fov']
-                # Here, we use the 'unique_cell_id' from the cellprops.
-                self.cell_label = rep_cell['unique_cell_id']
+                for cell_id in np.atleast_1d(chosen_cells):
+                    # 3) cell display: sets chosen_ts/foci and regular nuc/cyto picks
+                    self.h5_idx = used_h
+                    self.fov = used_f
+                    self._display_zoom_on_cell(
+                        unique_cell_id=int(cell_id),
+                        spotChannel=spotChannel,
+                        cytoChannel=cytoChannel,
+                        nucChannel=nucChannel,
+                        show=show,
+                        save=save,
+                        outdir=save_dir,
+                        fname_prefix=f"{cell_fname_prefix}_{cat.replace('+','plus')}"
+                                    .replace('/', '-').replace(' ', '')
+                                    .lower(),
+                        dpi_notebook=dpi_notebook,
+                        dpi_save=dpi_save
+                    )
 
-                # Compose a title in the format "conc_time_FOV{fov}_ID{unique_cell_id}".
-                conc = rep_cell.get('Dex_Conc', "NA")
-                time_val = rep_cell.get('time', "NA")
-                title_str = f"{conc}_{time_val}_FOV{rep_cell['fov']}_ID{rep_cell['unique_cell_id']}"
+                    # emit spot crops as required by category
+                    def _maybe_crop(row, kind):
+                        if row is not None:
+                            self._display_zoom_on_one_spot(
+                                spotChannel=spotChannel,
+                                row=row,
+                                kind=kind,
+                                pad=crop_pad,
+                                show=show,
+                                save=save,
+                                outdir=save_dir,
+                                fname_prefix=f"{crop_fname_prefix}_{cat.replace('+','plus')}"
+                                            .replace('/', '-').replace(' ', '')
+                                            .lower(),
+                                dpi_notebook=dpi_notebook,
+                                dpi_save=dpi_save,
+                                draw_context=draw_context,
+                                show_removed=show_removed,
+                                removed_color=removed_color
+                            )
 
-                # --- Plot 1: Zoomed-in view of the representative cell ---
-                print(f"Displaying cell plot: {title_str}")
-                # _display_zoom_on_cell() should generate its own figure.
-                self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
-                plt.gcf().suptitle(title_str)
-                plt.show()
+                    if cat == 'TS+FOCI':
+                        _maybe_crop(self.chosen_ts, 'TS')
+                        _maybe_crop(self.chosen_foci, 'FOCI')
+                        _maybe_crop(self.regular_nuc_spot, 'NUC_REG')
+                        _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
-                # --- Prepare for Plot 2: Select a representative spot from this cell ---
-                # Ensure the chosen spot is set by filtering for spots in this cell.
-                cell_spots = self.spots[
-                    (self.spots['h5_idx'] == self.h5_idx) &
-                    (self.spots['fov'] == self.fov) &
-                    (self.spots['unique_cell_id'] == self.cell_label)
-                ]
-                if cell_spots.empty:
-                    print(f"No spots found for cell {self.cell_label} in FOV {self.fov}.")
-                    continue
-                # Randomly select one spot from the cell and assign it to self.chosen_spot.
-                # self.chosen_spot = cell_spots.sample(1).iloc[0]
-                self.chosen_spot = self.chosen_spot
+                    elif cat == 'TS_only':
+                        _maybe_crop(self.chosen_ts, 'TS')
+                        _maybe_crop(self.regular_nuc_spot, 'NUC_REG')
+                        _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
-                # Display TS and Foci for this cell.
-                cell_clusters = self.clusters_df[
-                    (self.clusters_df['h5_idx'] == self.h5_idx) &
-                    (self.clusters_df['fov'] == self.fov) &
-                    (self.clusters_df['unique_cell_id'] == self.cell_label)
-                ]
-                if not cell_clusters.empty:
-                    # For demonstration, pick one TS if available.
-                    ts_candidates = cell_clusters[cell_clusters['is_nuc'] == 1]
-                    self.chosen_ts = ts_candidates.sample(1).iloc[0] if not ts_candidates.empty else None
-                    # Pick one foci if available.
-                    foci_candidates = cell_clusters[cell_clusters['is_nuc'] == 0]
-                    self.chosen_foci = foci_candidates.sample(1).iloc[0] if not foci_candidates.empty else None
-                else:
-                    self.chosen_ts = None
-                    self.chosen_foci = None
+                    elif cat == 'FOCI_only':
+                        _maybe_crop(self.chosen_foci, 'FOCI')
+                        _maybe_crop(self.regular_nuc_spot, 'NUC_REG')
+                        _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
-                # --- Plot 2: Zoom in on a representative spot in that cell ---
-                print(f" Displaying spot zoom for cell ID {rep_cell['unique_cell_id']}.")
-                self._display_zoom_on_one_spot(spotChannel=0)
-        return self.cellprops
+                    elif cat == 'Neither':
+                        _maybe_crop(self.regular_nuc_spot, 'NUC_REG')
+                        _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
-    def main_display(self):
-        """
-        Main display function that sequentially runs various display routines.
-        """
-        print("Running display_gating_overlay...")
-        self.display_gating_overlay()
-        
-        print("Running _display_zoom_on_cell...")
-        cell = self._display_zoom_on_cell(spotChannel=0, cytoChannel=1, nucChannel=2)
-        if cell is not None:
-            print("Running _display_zoom_on_one_spot...")
-            self._display_zoom_on_one_spot(spotChannel=0)
-        
-        print("Running display_representative_cells...")
-        self.display_representative_cells()
+                    else:
+                        # if a custom category slips in, default to the two regular crops
+                        _maybe_crop(self.regular_nuc_spot, 'NUC_REG')
+                        _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
-        print("All display routines completed.")
 
 
 def lowercase_columns(*dfs):
@@ -1829,7 +3042,7 @@ class PostProcessingPlotter:
         ax.errorbar(stats['time'], stats['mean_n'], yerr=stats['sd_n'],
                     fmt='-o', color='blue', label='Nuc')
         ax.errorbar(stats['time'], stats['mean_c'], yerr=stats['sd_c'],
-                    fmt='-o', color='orange', label='Cyto')
+                    fmt='-o', color='darkorange', label='Cyto')
 
         # annotate TPL addition times
         if self.is_tpl and 'time_tpl' in self.ssit.columns:
@@ -1967,7 +3180,7 @@ class PostProcessingPlotter:
         ax.errorbar(stats['dex_conc'], stats['mean_n'], yerr=stats['sd_n'],
                     fmt='-o', color='blue', label='Nuc')
         ax.errorbar(stats['dex_conc'], stats['mean_c'], yerr=stats['sd_c'],
-                    fmt='-o', color='orange', label='Cyto')
+                    fmt='-o', color='darkorange', label='Cyto')
         ax.set_xscale('symlog', linthresh=1e-3)
         ax.set_xticks([0, 1e-2,1e-1,1,10,100,1000,10000])
         ax.set_xticklabels(['0','0.01','0.1','1','10','100','1000','10000'])
@@ -2277,7 +3490,7 @@ class ExperimentPlotter:
         fig, axes = plt.subplots(1, 3, figsize=(16, 4), sharex=True)
         panels = [
             ('num_nuc_spots',   'blue',   'Nuclear'),
-            ('num_cyto_spots',  'orange', 'Cytoplasmic'),
+            ('num_cyto_spots',  'darkorange', 'Cytoplasmic'),
             ('num_spots',       'black',  'Total'),
         ]
 
@@ -2523,7 +3736,7 @@ class ExperimentPlotter:
         fig, axes = plt.subplots(1, 3, figsize=(16, 4), sharex=True)
         panels = [
             ('num_nuc_spots',   'blue',   'Nuclear'),
-            ('num_cyto_spots',  'orange', 'Cytoplasmic'),
+            ('num_cyto_spots',  'darkorange', 'Cytoplasmic'),
             ('num_spots',       'black',  'Total'),
         ]
 
