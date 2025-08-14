@@ -94,7 +94,6 @@ class segment(abstract_task):
     @staticmethod
     def image_processing_function(zyx_image, 
                                   pretrained_model_name: str = None,  
-                                  cellpose_model_type:str='cyto3', 
                                   diameter: float = 180, 
                                   invert: bool = False, 
                                   normalize: bool = True, 
@@ -293,7 +292,7 @@ class match_masks(abstract_task):
         nuc_mask_name = self.receipt['steps'][self.step_name].get('nuc_mask_name', 'nuc_masks')
         cyto_mask_name = self.receipt['steps'][self.step_name].get('cyto_mask_name', 'cyto_masks')
         single_nuc = self.receipt['steps'][self.step_name].get('single_nuc', True)
-        cell_alone = self.receipt['steps'][self.step_name].get('single_nuc', False)
+        cell_alone = self.receipt['steps'][self.step_name].get('cell_alone', False)
 
         nuc_masks = self.data[nuc_mask_name]
         cyto_masks = self.data[cyto_mask_name]

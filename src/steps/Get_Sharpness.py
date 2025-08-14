@@ -141,7 +141,6 @@ class calculate_sharpness(abstract_task):
             self.sharpnesses[p] = {}
         self.sharpnesses[p][t] = results
 
-
     def compress_and_release_memory(self):
         results_dir = self.receipt['dirs']['results_dir']
         output_path = os.path.join(results_dir, f"sharpnesses.json")

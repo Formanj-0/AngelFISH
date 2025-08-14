@@ -19,7 +19,7 @@ def main(
         receipt['step_order'].append(step_name)
     if step_name not in receipt['steps'].keys():
         receipt['steps'][step_name] = {}
-    receipt['steps'][step_name]['task_name'] = 'export_images'
+    receipt['steps'][step_name]['task_name'] = 'reconcile_data'
     if new_params:
         for k, v in new_params.items():
             receipt['steps'][step_name][k] = v
@@ -62,7 +62,9 @@ def main(
 
     # save dataframe
     save_dir = receipt['dirs']['results_dir']
-    master_df.to_csv(os.path.join(save_dir, 'reconciled_data.csv'), index=False)
+    master_df.to_csv(os.path.join(save_dir, 'cellresults_reconciled_data.csv'), index=False)
+
+    return receipt
 
 
 if __name__ == '__main__':
