@@ -36,8 +36,8 @@ class calculate_sharpness(abstract_task):
 
         args = {**data_to_send, **given_args}
 
-        args['fov'] = p
-        args['timepoint'] = t
+        args['p'] = p
+        args['t'] = t
 
         return args
 
@@ -52,16 +52,6 @@ class calculate_sharpness(abstract_task):
         sharpness_metric: Union[list,str]=None,
         **kwargs
         ):
-        if sharpness_metric is None:
-            sharpness_metric = ['derivative', 'fft', 'edge', 'tenengrad', 'laplacian', 'bayes']
-        if isinstance(sharpness_metric, str):
-            sharpness_metric = [sharpness_metric]
-
-        sharpness_results = {}
-        for z in range(zyx_image.shape[0]):
-            sharpness_results[z] = {}
-            for metric in sharpness_metric:
-                sharpness_results[z][metric] = calculate_sharpness_metric(zyx_image[z], metric)
 
         def calculate_sharpness_metric(img, sharpness_metric: str = 'fft'):
             if sharpness_metric == 'derivative':
@@ -134,10 +124,21 @@ class calculate_sharpness(abstract_task):
             else:
                 raise Exception('Sharpness metric not recognized')
 
+        if sharpness_metric is None:
+            sharpness_metric = ['derivative', 'fft', 'edge', 'tenengrad', 'laplacian', 'bayes']
+        if isinstance(sharpness_metric, str):
+            sharpness_metric = [sharpness_metric]
+
+        sharpness_results = {}
+        for z in range(zyx_image.shape[0]):
+            sharpness_results[z] = {}
+            for metric in sharpness_metric:
+                sharpness_results[z][metric] = float(calculate_sharpness_metric(zyx_image[z], metric))
+
         return sharpness_results
 
     def write_results(self, results, p, t):
-        if self.sharpnesses[p] is None:
+        if self.sharpnesses.get(p, None) is None:
             self.sharpnesses[p] = {}
         self.sharpnesses[p][t] = results
 
@@ -149,7 +150,7 @@ class calculate_sharpness(abstract_task):
 
     @property
     def required_keys(self):
-        return ['FISHChannel']
+        return ['channel']
 
 
 
