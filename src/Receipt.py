@@ -6,20 +6,29 @@ import shutil
 class Receipt(UserDict):
     def __init__(self, analysis_name=None, nas_location=None, data_loader=None, local_location=None, path=None):
     
-        if path is None:    
+        if path is not None:
+            with open(path, 'r') as f:
+                data = json.load(f)
+        else:
             data = {
                 'meta_arguments': {
-                    'nas_location': nas_location,
-                    'local_location': local_location,
-                    'data_loader': data_loader,
-                    'analysis_name': analysis_name,
+                    'nas_location': None,
+                    'local_location': None,
+                    'data_loader': None,
+                    'analysis_name': None,
                 },
                 'steps': {},
                 'step_order': []
             }
-        else:
-            with open(path, 'r') as f:
-                data = json.load(f)
+
+        if nas_location is not None:
+            data['meta_arguments']['nas_location'] = nas_location
+        if local_location is not None:
+            data['meta_arguments']['local_location'] = local_location
+        if data_loader is not None:
+            data['meta_arguments']['data_loader'] = data_loader
+        if analysis_name is not None:
+            data['meta_arguments']['analysis_name'] = analysis_name
 
         if data['meta_arguments']['nas_location'] and data['meta_arguments']['local_location'] is None: 
             # if nas-location is give we will awlays recalc the locations
