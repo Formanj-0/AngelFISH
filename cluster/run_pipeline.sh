@@ -27,7 +27,7 @@ source ../.venv/bin/activate
 export QT_QPA_PLATFORM=offscreen
 
 # Run step
-python run_step.py "$1" "$2" &
+python run_pipeline.py "$1" &
 
 wait
 
