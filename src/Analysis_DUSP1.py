@@ -2939,27 +2939,31 @@ class PostProcessingPlotter:
       - plot_time_conc_sweep(conc_list, save_dir=None, display=True)
     """
     def __init__(self, clusters_df, cellprops_df, ssit_df, is_tpl: bool):
-        # rename to lowercase for consistency
         self.clusters = clusters_df.rename(columns=str.lower).copy()
         self.cellprops = cellprops_df.rename(columns=str.lower).copy()
         self.ssit = ssit_df.rename(columns=str.lower).copy()
         self.is_tpl = is_tpl
+
         # metrics to plot
         self.metrics = ['num_nuc_spots', 'num_cyto_spots', 'num_spots']
-        # set global style
+
+        # global style
         sns.set_theme(style='whitegrid', context='paper')
         plt.rcParams['font.family'] = 'Times New Roman'
 
+        # --- new: pin colors so every plot matches ---
+        self.color_nuc  = 'tab:blue'
+        self.color_cyto = 'darkorange'
+        # TS-category bars: fixed, consistent 4-color set
+        self.ts_colors  = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # tab10 first four
+        # Ridge palettes (use same scheme for time & conc for consistency)
+        self.ridge_palette = 'Purples_r'  # one continuous palette everywhere
+
     def plot_time_sweep(self, dex_conc, save_dir=None, display=True):
-        """
-        1) TS bar at dex=0 (0 min control) + dex_conc across times
-        2) Ridge plots of metrics vs time (including 0 min control)
-        3) Line plot of mean±SD nuc/cyto spot counts vs time
-        """
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
 
-        # 1) TS bar
+        # 1) TS bar (include 0-min control)
         clusters_nuc = self.clusters[self.clusters['is_nuc'] == 1]
         ts_count = (
             clusters_nuc
@@ -2975,8 +2979,8 @@ class PostProcessingPlotter:
             ((cells['dex_conc'] == 0) & (cells['time'] == 0))
         ]
         merged = pd.merge(subset_cells, ts_count,
-                          on=['replica','h5_idx','time','fov','cell_label'],
-                          how='left').fillna({'ts_count':0})
+                        on=['replica','h5_idx','time','fov','cell_label'],
+                        how='left').fillna({'ts_count':0})
         tmp = merged.copy()
         tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x>=4 else str(int(x)))
         grp = (
@@ -2991,11 +2995,11 @@ class PostProcessingPlotter:
             grp
             .pivot(index='time', columns='ts_cat', values='fraction')
             .reindex(columns=['1','2','3','>=4'], fill_value=0)
+            .sort_index()
         )
 
         fig, ax = plt.subplots(figsize=(8,4))
-        pal = sns.color_palette("tab10", n_colors=4)
-        pivot.plot(kind='bar', ax=ax, color=pal, edgecolor='k')
+        pivot.plot(kind='bar', ax=ax, color=self.ts_colors, edgecolor='k')
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("Fraction of Cells")
         ax.set_title(f"TS categories at {dex_conc} nM Dex")
@@ -3007,18 +3011,20 @@ class PostProcessingPlotter:
             plt.show()
         plt.close(fig)
 
-        # 2) Ridge plots (include 0 min control)
-        control = self.ssit[
-            (self.ssit['dex_conc']==0) & (self.ssit['time']==0)
-        ]
+        # 2) Ridge plots (include 0-min control)
+        control = self.ssit[(self.ssit['dex_conc']==0) & (self.ssit['time']==0)]
         df_conc = self.ssit[self.ssit['dex_conc']==dex_conc]
         df = pd.concat([control, df_conc], ignore_index=True)
-        times = sorted(df['time'].unique())
+        times = sorted(df['time'].dropna().unique())
         n = len(times)
 
+        pal = sns.color_palette(self.ridge_palette, n_colors=n)
+
         for m in self.metrics:
-            xs = np.linspace(df[m].min(), df[m].max(), 200)
-            # thresholds from control
+            xs_min = df[m].min() if np.isfinite(df[m].min()) else 0
+            xs_max = df[m].max() if np.isfinite(df[m].max()) else 1
+            xs = np.linspace(xs_min, xs_max if xs_max>xs_min else xs_min+1, 200)
+
             ref = control[m].dropna()
             if len(ref) >= 2:
                 cdf  = np.arange(1,len(ref)+1)/len(ref)
@@ -3027,9 +3033,8 @@ class PostProcessingPlotter:
             else:
                 thr0 = thr1 = None
 
-            fig, ax = plt.subplots(figsize=(8, n*1.2))
+            fig, ax = plt.subplots(figsize=(8, max(1.2, n*1.2)))
             fig.suptitle(f"Time sweep — {dex_conc} nM Dex: {m}")
-            cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
 
             for i, t in enumerate(times):
                 data = df[df['time']==t][m].dropna()
@@ -3039,7 +3044,7 @@ class PostProcessingPlotter:
                 else:
                     y = np.zeros_like(xs)
                 y_off = n-1-i
-                ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
+                ax.fill_between(xs, y_off, y_off+y, color=pal[i], alpha=0.7)
 
             if thr0 is not None:
                 ax.axvline(thr0, linestyle='--', color='red')
@@ -3055,32 +3060,27 @@ class PostProcessingPlotter:
                 plt.show()
             plt.close(fig)
 
-        # 3) Line plot vs time (with control)
+        # 3) Line plot vs time (control included)
         stats = (
             df.groupby('time')
-              .agg(
-                mean_n=('num_nuc_spots','mean'),
+            .agg(mean_n=('num_nuc_spots','mean'),
                 sd_n  =('num_nuc_spots','std'),
                 mean_c=('num_cyto_spots','mean'),
-                sd_c  =('num_cyto_spots','std')
-              ).reset_index()
+                sd_c  =('num_cyto_spots','std'))
+            .reset_index()
+            .sort_values('time')
         )
         fig, ax = plt.subplots(figsize=(8,4))
         ax.errorbar(stats['time'], stats['mean_n'], yerr=stats['sd_n'],
-                    fmt='-o', color='blue', label='Nuc')
+                    fmt='-o', color=self.color_nuc,  label='Nuc')
         ax.errorbar(stats['time'], stats['mean_c'], yerr=stats['sd_c'],
-                    fmt='-o', color='darkorange', label='Cyto')
+                    fmt='-o', color=self.color_cyto, label='Cyto')
 
-        # annotate TPL addition times
         if self.is_tpl and 'time_tpl' in self.ssit.columns:
-            # unique TPL addition times for this dex_conc
-            tpls = self.ssit[
-                (self.ssit['dex_conc']==dex_conc) &
-                self.ssit['time_tpl'].notnull()
-            ]['time_tpl'].unique()
+            tpls = self.ssit[(self.ssit['dex_conc']==dex_conc) & self.ssit['time_tpl'].notnull()]['time_tpl'].unique()
             for idx, t in enumerate(sorted(tpls)):
                 ax.axvline(t, linestyle='--', color='red', alpha=0.5,
-                           label='TPL addition' if idx==0 else None)
+                        label='TPL addition' if idx==0 else None)
 
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("Mean ± SD")
@@ -3094,15 +3094,10 @@ class PostProcessingPlotter:
         plt.close(fig)
 
     def plot_conc_sweep(self, timepoint, save_dir=None, display=True):
-        """
-        1) TS bar vs dex_conc at fixed timepoint
-        2) Ridge plots of metrics vs dex_conc (including control at dex=0)
-        3) Line plot of mean±SD nuc/cyto spot counts vs dex_conc
-        """
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
 
-        # 1) TS bar
+        # 1) TS bar at fixed timepoint (0 nM included if present in data)
         clusters_nuc = self.clusters[self.clusters['is_nuc']==1]
         ts_count = (
             clusters_nuc
@@ -3115,8 +3110,8 @@ class PostProcessingPlotter:
         )
         subset_cells = cells[cells['time']==timepoint]
         merged = pd.merge(subset_cells, ts_count,
-                          on=['replica','h5_idx','time','fov','cell_label'],
-                          how='left').fillna({'ts_count':0})
+                        on=['replica','h5_idx','time','fov','cell_label'],
+                        how='left').fillna({'ts_count':0})
         tmp = merged.copy()
         tmp['ts_cat'] = tmp['ts_count'].apply(lambda x: '>=4' if x>=4 else str(int(x)))
         grp = (
@@ -3127,7 +3122,7 @@ class PostProcessingPlotter:
         tot = tmp.groupby('dex_conc').size().reset_index(name='total')
         grp = pd.merge(grp, tot, on='dex_conc')
         grp['fraction'] = grp['count']/grp['total']
-        concs = sorted(tmp['dex_conc'].unique())
+        concs = sorted(tmp['dex_conc'].dropna().unique())
         pivot = (
             grp
             .pivot(index='dex_conc', columns='ts_cat', values='fraction')
@@ -3135,8 +3130,7 @@ class PostProcessingPlotter:
         )
 
         fig, ax = plt.subplots(figsize=(8,4))
-        pal = sns.color_palette("tab10", n_colors=4)
-        pivot.plot(kind='bar', ax=ax, color=pal, edgecolor='k')
+        pivot.plot(kind='bar', ax=ax, color=self.ts_colors, edgecolor='k')
         ax.set_xlabel("Dex_Conc (nM)")
         ax.set_ylabel("Fraction of Cells")
         ax.set_title(f"TS categories at t={timepoint} min")
@@ -3147,28 +3141,28 @@ class PostProcessingPlotter:
             plt.show()
         plt.close(fig)
 
-        # 2) Ridge vs dex_conc (include control at dex=0)
-        control = self.ssit[
-            (self.ssit['dex_conc']==0) & (self.ssit['time']==timepoint)
-        ]
-        df_other = self.ssit[self.ssit['time']==timepoint]
-        df = pd.concat([control, df_other], ignore_index=True)
-        concs = sorted(df['dex_conc'].unique())
+        # 2) Ridge vs dex_conc (Control at 0 nM is included if present)
+        df = self.ssit[self.ssit['time']==timepoint].copy()
+        concs = sorted(df['dex_conc'].dropna().unique())
         n = len(concs)
+        pal = sns.color_palette(self.ridge_palette, n_colors=max(n,1))
 
         for m in self.metrics:
-            xs = np.linspace(df[m].min(), df[m].max(), 200)
-            ref = control[m].dropna()
-            if len(ref) >= 2:
-                cdf  = np.arange(1,len(ref)+1)/len(ref)
-                thr0 = np.interp(0.5,  cdf, np.sort(ref))
-                thr1 = np.interp(0.95, cdf, np.sort(ref))
+            xs_min = df[m].min() if np.isfinite(df[m].min()) else 0
+            xs_max = df[m].max() if np.isfinite(df[m].max()) else 1
+            xs = np.linspace(xs_min, xs_max if xs_max>xs_min else xs_min+1, 200)
+
+            # thresholds from 0 nM at this timepoint, if present
+            control = df[df['dex_conc']==0][m].dropna()
+            if len(control) >= 2:
+                cdf  = np.arange(1,len(control)+1)/len(control)
+                thr0 = np.interp(0.5,  cdf, np.sort(control))
+                thr1 = np.interp(0.95, cdf, np.sort(control))
             else:
                 thr0 = thr1 = None
 
-            fig, ax = plt.subplots(figsize=(8, n*1.2))
+            fig, ax = plt.subplots(figsize=(8, max(1.2, n*1.2)))
             fig.suptitle(f"Conc sweep at t={timepoint} min: {m}")
-            cmap = sns.color_palette('rocket_r', n_colors=n)[::-1]
 
             for i, c in enumerate(concs):
                 data = df[df['dex_conc']==c][m].dropna()
@@ -3178,7 +3172,7 @@ class PostProcessingPlotter:
                 else:
                     y = np.zeros_like(xs)
                 y_off = n-1-i
-                ax.fill_between(xs, y_off, y_off+y, color=cmap[i], alpha=0.7)
+                ax.fill_between(xs, y_off, y_off+y, color=pal[i], alpha=0.7)
 
             if thr0 is not None:
                 ax.axvline(thr0, linestyle='--', color='red')
@@ -3194,23 +3188,28 @@ class PostProcessingPlotter:
                 plt.show()
             plt.close(fig)
 
-        # 3) Line vs dex_conc
+        # 3) Line vs dex_conc (fixed colors, symlog with 0 handled)
         stats = (
             df.groupby('dex_conc')
-              .agg(mean_n=('num_nuc_spots','mean'),
-                   sd_n  =('num_nuc_spots','std'),
-                   mean_c=('num_cyto_spots','mean'),
-                   sd_c  =('num_cyto_spots','std'))
-              .reset_index()
+            .agg(mean_n=('num_nuc_spots','mean'),
+                sd_n  =('num_nuc_spots','std'),
+                mean_c=('num_cyto_spots','mean'),
+                sd_c  =('num_cyto_spots','std'))
+            .reset_index()
+            .sort_values('dex_conc')
         )
         fig, ax = plt.subplots(figsize=(8,4))
         ax.errorbar(stats['dex_conc'], stats['mean_n'], yerr=stats['sd_n'],
-                    fmt='-o', color='blue', label='Nuc')
+                    fmt='-o', color=self.color_nuc,  label='Nuc')
         ax.errorbar(stats['dex_conc'], stats['mean_c'], yerr=stats['sd_c'],
-                    fmt='-o', color='darkorange', label='Cyto')
-        ax.set_xscale('symlog', linthresh=1e-3)
-        ax.set_xticks([0, 1e-2,1e-1,1,10,100,1000,10000])
+                    fmt='-o', color=self.color_cyto, label='Cyto')
+
+        # symlog supports 0; keep ticks consistent across runs
+        ax.set_xscale('symlog', linthresh=1e-2)
+        xticks = [0, 1e-2, 1e-1, 1, 10, 100, 1000, 10000]
+        ax.set_xticks(xticks)
         ax.set_xticklabels(['0','0.01','0.1','1','10','100','1000','10000'])
+
         ax.set_xlabel("Dex_Conc (nM)")
         ax.set_ylabel("Mean ± SD")
         ax.set_title(f"Conc sweep at t={timepoint} min")
