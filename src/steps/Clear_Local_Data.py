@@ -1,10 +1,11 @@
 import shutil
 import os
 import time
-
-from src import abstract_task, load_data, close_data
 import psutil
 import sys
+
+from AngelFISH.src import abstract_task, load_data, close_data
+
 
 
 class clear_local_data(abstract_task):

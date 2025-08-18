@@ -12,7 +12,7 @@ from magicgui import magicgui
 import pathlib
 
 
-from src import abstract_task, load_data
+from AngelFISH.src import abstract_task, load_data
 import re
 
 

@@ -10,7 +10,7 @@ import time
 from luigi.contrib.ssh import RemoteTarget
 import subprocess
 
-from src import Receipt
+from AngelFISH.src import Receipt
 
 
 class AngelFISHLuigiTask(luigi.Task):

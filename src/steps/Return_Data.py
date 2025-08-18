@@ -1,9 +1,9 @@
 import os
 from datetime import datetime
-from src.NASConnection import NASConnection
 import time
 
-from src import abstract_task
+from AngelFISH.src import abstract_task
+from AngelFISH.src.NASConnection import NASConnection
 
 class return_data(abstract_task):
 

@@ -1,9 +1,10 @@
 import os
 import pathlib
-from src.NASConnection import NASConnection
 import time
 
-from src import abstract_task, load_data
+from AngelFISH.src import abstract_task, load_data
+from AngelFISH.src.NASConnection import NASConnection
+
 
 
 class download_data(abstract_task):

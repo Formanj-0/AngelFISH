@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import QApplication
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 
-from src import abstract_task, load_data
+from AngelFISH.src import abstract_task, load_data
 
 
 class filter_csv(abstract_task):

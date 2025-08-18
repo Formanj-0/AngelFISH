@@ -1,6 +1,6 @@
 
 
-from src.steps import segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots, match_masks, filter_csv, export_images, reconcile_data
+from AngelFISH.src.Steps import segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots, match_masks, filter_csv, export_images, reconcile_data
 
 # Function wrappers
 class ExportImagesTask:

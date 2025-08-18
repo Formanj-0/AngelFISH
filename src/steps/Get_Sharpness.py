@@ -19,7 +19,7 @@ from scipy.stats import norm, entropy
 from scipy import ndimage as ndi
 
 
-from src import abstract_task, load_data
+from AngelFISH.src import abstract_task, load_data
 import json
 
 
@@ -47,8 +47,6 @@ class calculate_sharpness(abstract_task):
     @staticmethod
     def image_processing_function(
         zyx_image: np.array,
-        p:int,
-        t:int,
         sharpness_metric: Union[list,str]=None,
         **kwargs
         ):
@@ -133,7 +131,7 @@ class calculate_sharpness(abstract_task):
         for z in range(zyx_image.shape[0]):
             sharpness_results[z] = {}
             for metric in sharpness_metric:
-                sharpness_results[z][metric] = float(calculate_sharpness_metric(zyx_image[z], metric))
+                sharpness_results[z][metric] = float(calculate_sharpness_metric(zyx_image[z, :, :], metric))
 
         return sharpness_results
 

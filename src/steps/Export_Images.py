@@ -1,8 +1,10 @@
 
-from src import load_data
 import os
 import numpy as np
 from tifffile import imwrite
+
+
+from AngelFISH.src import load_data
 
 
 def main(

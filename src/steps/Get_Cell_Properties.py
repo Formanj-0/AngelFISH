@@ -7,7 +7,7 @@ from copy import copy
 
 
 
-from src import abstract_task, load_data
+from AngelFISH.src import abstract_task, load_data
 import re
 
 

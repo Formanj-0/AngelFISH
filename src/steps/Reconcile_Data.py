@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 
-from src import load_data
+from AngelFISH.src import load_data
 
 def main(
         receipt, 

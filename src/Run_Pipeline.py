@@ -3,8 +3,8 @@ import paramiko
 import os
 import time
 
-from src import Receipt
-from src.steps import get_task
+from AngelFISH.src import Receipt
+from AngelFISH.src.Steps import get_task
 
 
 def run_step(receipt_path, step_name):
@@ -18,6 +18,7 @@ def run_pipeline(receipt_path):
     receipt = Receipt(path=receipt_path)
     for sn in receipt['step_order']:
         run_step(receipt_path, sn)
+    return receipt
 
 
 def wait_for_job_completion(ssh, job_id, poll_interval=60):

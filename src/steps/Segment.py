@@ -1,4 +1,3 @@
-from src import abstract_task, load_data
 
 import os
 import pathlib
@@ -33,6 +32,9 @@ from scipy.ndimage import distance_transform_edt
 import zarr
 import shutil
 import napari
+
+from AngelFISH.src import abstract_task, load_data
+
 
 class segment(abstract_task):
 

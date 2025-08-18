@@ -40,8 +40,9 @@ class Receipt(UserDict):
             local_location = os.path.join(database_loc, name)
 
             data['meta_arguments']['local_location'] = local_location
-            
+        
         super().__init__(data)
+        self.recalc_dirs()
 
     def __setitem__(self, key, value):
         # Intercept changes to meta_arguments['local_location']
@@ -76,6 +77,12 @@ class Receipt(UserDict):
         dirs['fig_dir'] = fig_dir
 
         self['dirs'] = dirs
+        if os.path.exists(local_location):
+            os.makedirs(analysis_dir, exist_ok=True)
+            os.makedirs(results_dir, exist_ok=True)
+            os.makedirs(status_dir, exist_ok=True)
+            os.makedirs(mask_dir, exist_ok=True)
+            os.makedirs(fig_dir, exist_ok=True)
 
     def save(self, filepath):
         data_to_save = {}
