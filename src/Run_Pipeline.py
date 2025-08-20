@@ -12,6 +12,7 @@ def run_step(receipt_path, step_name):
     receipt = Receipt(path=receipt_path)
     task_class = get_task(receipt['steps'][step_name]['task_name'])
     task = task_class(receipt, step_name)
+    print(f'=================== {step_name} ===================')
     task.process()
 
 
