@@ -62,7 +62,7 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc:str=None, new_loc
         receipt_path = os.path.join(new_dir, f'{filename_without_ext}_{current_time}.json')
         receipt.save(receipt_path)
 
-        config_path = os.path.join(os.path.dirname(__file__), 'config_cluster.yml')
+        config_path = os.path.join(__file__,'..', '..', 'config_cluster.yml')
 
         conf = yaml.safe_load(open(config_path))
         usr = str(conf['user']['username'])
