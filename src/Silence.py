@@ -7,3 +7,4 @@ def silence():
     logging.getLogger('numcodecs').setLevel(logging.WARNING)
     logging.getLogger('numba').setLevel(logging.WARNING)
     logging.getLogger('paramiko').setLevel(logging.WARNING)
+

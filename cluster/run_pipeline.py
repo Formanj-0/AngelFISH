@@ -1,5 +1,6 @@
 import sys
-sys.path.append('..')
+import os
+sys.path.append(os.path.join(os.getcwd(), '..', '..'))
 
 from src import Receipt, run_pipeline, silence
 silence()
