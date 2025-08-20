@@ -19,17 +19,6 @@ def run_step(receipt_path, step_name):
 
 def run_pipeline(receipt_path, new_nas_loc:str=None, new_loc_loc:str=None):
     receipt = Receipt(path=receipt_path)
-    if new_nas_loc is not None:
-        receipt['meta_arguments']['nas_location'] = new_nas_loc # only update nas location if it given
-
-    if new_nas_loc is not None:
-        receipt['meta_arguments']['local_location'] = new_loc_loc
-
-    rand_num = random.randint(1000, 9999)
-    receipt_path = os.path.join(new_dir, f'{filename_without_ext}_{current_time}_{rand_num}.json')
-    receipt.save(receipt_path)
-    receipt.save(receipt_path)
-    receipt = Receipt(path=receipt_path)
     for sn in receipt['step_order']:
         run_step(receipt_path, sn)
     return receipt_path
