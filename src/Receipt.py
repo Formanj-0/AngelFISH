@@ -30,7 +30,7 @@ class Receipt(UserDict):
         if analysis_name is not None:
             data['meta_arguments']['analysis_name'] = analysis_name
 
-        if data['meta_arguments']['nas_location'] and data['meta_arguments']['local_location'] is None: 
+        if data['meta_arguments']['nas_location']: # and data['meta_arguments']['local_location'] is None: 
             # if nas-location is give we will awlays recalc the locations
             # this gives the nas location dominate 
             database_loc = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
