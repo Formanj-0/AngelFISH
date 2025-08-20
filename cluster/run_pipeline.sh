@@ -4,8 +4,8 @@
 #SBATCH --partition=all             # Use the GPU partition
 #SBATCH --job-name=Image_Processing # Job name
 #SBATCH --ntasks=1                  # Number of tasks
-#SBATCH --output=job_output_%j.log  # Redirect output to a file with job ID
-#SBATCH --error=job_error_%j.log    # Redirect errors to a file with job ID
+#SBATCH --output=pipelines/job_output_%j.log  # Redirect output to pipelines directory with job ID
+#SBATCH --error=pipelines/job_error_%j.log    # Redirect errors to pipelines directory with job ID
 #SBATCH --no-requeue
 #SBATCH --exclusive                 # Limit to one job per node
 
