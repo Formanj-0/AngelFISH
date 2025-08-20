@@ -168,7 +168,7 @@ class segment(abstract_task):
     def handle_previous_run(self):
         output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
         if os.path.exists(output_path):
-            return not self.receipt['meta_arguments'].get('load_masks', True)
+            return not self.receipt['steps'][self.step_name].get('load_masks', True)
         else:
             return True # means execute the step
 
