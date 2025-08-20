@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.getcwd(), '..', '..'))
 
-from AngelFIHS.src import Receipt, run_pipeline, silence
+from AngelFISH.src import Receipt, run_pipeline, silence
 silence()
 
 receipt_path = sys.argv[1]
