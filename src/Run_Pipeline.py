@@ -2,6 +2,7 @@ import yaml
 import paramiko
 import os
 import time
+from datetime import datetime
 
 from AngelFISH.src import Receipt
 from AngelFISH.src.Steps import get_task
@@ -14,11 +15,23 @@ def run_step(receipt_path, step_name):
     task.process()
 
 
-def run_pipeline(receipt_path):
+def run_pipeline(receipt_path, new_nas_loc:str=None, new_loc_loc:str=None):
+    receipt = Receipt(path=receipt_path)
+    if new_nas_loc is not None:
+        receipt['meta_arguments']['nas_location'] = new_nas_loc # only update nas location if it given
+
+    if new_nas_loc is not None:
+        receipt['meta_arguments']['local_location'] = new_loc_loc
+
+    new_dir = os.path.dirname(receipt_path)
+    filename_without_ext = os.path.splitext(os.path.basename(receipt_path))[0]
+    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+    new_receipt_path = os.path.join(new_dir, f'{filename_without_ext}_{current_time}.json')
+    receipt.save(new_receipt_path)
     receipt = Receipt(path=receipt_path)
     for sn in receipt['step_order']:
-        run_step(receipt_path, sn)
-    return receipt
+        run_step(new_receipt_path, sn)
+    return new_receipt_path
 
 
 def wait_for_job_completion(ssh, job_id, poll_interval=60):
@@ -36,7 +49,19 @@ def wait_for_job_completion(ssh, job_id, poll_interval=60):
             time.sleep(poll_interval)
 
 
-def run_pipeline_remote(receipt_path, remote_path):
+def run_pipeline_remote(receipt_path, remote_path, new_nas_loc:str=None, new_loc_loc:str=None):
+        receipt = Receipt(path=receipt_path)
+        if new_nas_loc is not None:
+            receipt['meta_arguments']['nas_location'] = new_nas_loc
+        if new_loc_loc is not None:
+            receipt['meta_arguments']['local_location'] = new_loc_loc
+
+        new_dir = os.path.dirname(receipt_path)
+        filename_without_ext = os.path.splitext(os.path.basename(receipt_path))[0]
+        current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+        receipt_path = os.path.join(new_dir, f'{filename_without_ext}_{current_time}.json')
+        receipt.save(receipt_path)
+
         config_path = os.path.join(os.path.dirname(__file__), 'config_cluster.yml')
 
         conf = yaml.safe_load(open(config_path))
