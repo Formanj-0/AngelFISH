@@ -224,11 +224,10 @@ class NASConnection():
     
     def copy_folder(self, remote_folder_path, local_folder_path, timeout=600):
         '''
-        This method downloads all files from a NAS directory. 
-        Will not download directories.
-        
+        This method downloads all files and subdirectories from a NAS directory recursively.
+
         Parameters
-        
+
         remote_folder_path : str, Pathlib obj
             The path in the remote folder to download.
         local_folder_path : str, Pathlib obj
@@ -236,30 +235,38 @@ class NASConnection():
         timeout : int, optional
             Time in seconds to maintain a connection with the NAS. The default is 60 seconds.
         '''
+        def _download_recursive(remote_path, local_path):
+            # Ensure local directory exists
+            if not os.path.exists(local_path):
+                os.makedirs(str(local_path))
+            # List files and directories in remote_path
+            list_dir = self.conn.listPath(self.share_name, str(remote_path))
+            for file in list_dir:
+                if file.filename in ['.', '..']:
+                    continue
+                remote_file_path = pathlib.Path(remote_path) / file.filename
+                local_file_path = pathlib.Path(local_path) / file.filename
+                if file.isDirectory:
+                    _download_recursive(remote_file_path, local_file_path)
+                else:
+                    print('File Downloaded :', file.filename)
+                    with open(local_file_path, 'wb') as fileobj:
+                        self.conn.retrieveFile(self.share_name, str(remote_file_path), fileobj, timeout=timeout)
+
         # Connecting to NAS
-        is_connected = self.conn.connect(str(self.server_name),timeout=timeout)
-        if is_connected == True:
+        is_connected = self.conn.connect(str(self.server_name), timeout=timeout)
+        if is_connected:
             print('Connection established')
         else:
             print('Connection failed')
-        # Converting the paths to a Pathlib object
-        if type(local_folder_path) == str:
+            return None
+
+        # Convert paths to Pathlib objects
+        if isinstance(local_folder_path, str):
             local_folder_path = pathlib.Path(local_folder_path)
-        if type(remote_folder_path)==str:
+        if isinstance(remote_folder_path, str):
             remote_folder_path = pathlib.Path(remote_folder_path)
-        # Making the local directory
-        if not (os.path.exists(local_folder_path)) :
-            os.makedirs(str(local_folder_path))
-        # Iterate in the folder to download all tif files
-        list_dir = self.conn.listPath(self.share_name, str(remote_folder_path))
-        for file in list_dir:
-            if (file.filename not in ['.', '..'] and not file.isDirectory):
-                print ('File Downloaded :', file.filename)
-                fileobj = open(file.filename,'wb')
-                self.conn.retrieveFile(self.share_name, str( pathlib.Path(remote_folder_path).joinpath(file.filename) ),fileobj, timeout=timeout)
-                fileobj.close()
-                # moving files in the local computer
-                shutil.move(pathlib.Path().absolute().joinpath(file.filename), local_folder_path.joinpath(file.filename))
+
+        _download_recursive(remote_folder_path, local_folder_path)
         print('Files downloaded to: ' + str(local_folder_path))
         return None
-        
