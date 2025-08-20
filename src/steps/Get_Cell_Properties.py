@@ -23,6 +23,7 @@ class get_cell_properties(abstract_task):
         data_to_send['image'] = self.data['images'][p, t].compute()
         data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
         nuc_masks = self.data.get('nuc_masks', None)
+        data_to_send['sharpnesses'] = self.data.get('sharpnesses', None)
         if nuc_masks is not None:
             data_to_send['nuc_mask'] = nuc_masks[p,t]
 
@@ -42,16 +43,35 @@ class get_cell_properties(abstract_task):
         os.makedirs(self.temp_dir, exist_ok=True)
 
     @staticmethod
-    def image_processing_function(image, fov, timepoint, cell_mask=None, nuc_mask=None, middle_zs:int = None,
-             props_to_measure= ['label', 'bbox', 'area', 'centroid', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std'], **kwargs):
+    def image_processing_function(
+            image, 
+            fov, 
+            timepoint, 
+            cell_mask=None, 
+            nuc_mask=None, 
+            middle_zs:int = None,
+            props_to_measure= ['label', 'bbox', 'area', 'centroid', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std'], 
+            sharpnesses:dict=None, 
+            sharpness_metric:str=None,
+            **kwargs):
         
         if middle_zs is not None and isinstance(middle_zs, int) and image.ndim >= 3:
+            if sharpness_metric is not None:
+                z_sharpnesses = [sharpnesses[f'{fov}'][f'{timepoint}'][k][sharpness_metric] for k in sharpnesses[f'{fov}'][f'{timepoint}'].keys()]
             z_dim = image.shape[1]
-            if middle_zs > z_dim:
-                middle_zs = z_dim
-            start = (z_dim - middle_zs) // 2
-            end = start + middle_zs
-            image = np.max(image[:, start:end, ...], axis=1)
+            if sharpness_metric is not None and z_sharpnesses:
+                # Find the z index with the maximum sharpness
+                max_z = np.argmax(z_sharpnesses)
+                half = middle_zs // 2
+                start = max(0, min(z_dim - middle_zs, max_z - half))
+                end = start + middle_zs
+                image = np.max(image[:, start:end, ...], axis=1) # This will always include middle_zs slices
+            else:
+                if middle_zs > z_dim:
+                    middle_zs = z_dim
+                start = (z_dim - middle_zs) // 2
+                end = start + middle_zs
+                image = np.max(image[:, start:end, ...], axis=1)
         else:
             image = np.max(image, axis=1)
 
