@@ -53,7 +53,9 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc:str=None, new_loc
         receipt_path = os.path.join(new_dir, f'{filename_without_ext}_{current_time}_{rand_num}.json')
         receipt.save(receipt_path)
 
-        config_path = os.path.join(__file__,'..', '..', 'config_cluster.yml')
+        config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '..', 'config_cluster.yml')
+        )
 
         conf = yaml.safe_load(open(config_path))
         usr = str(conf['user']['username'])
@@ -88,8 +90,14 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc:str=None, new_loc
             raise RuntimeError(f"SLURM job submission failed: {job_submission_error}")
 
         job_id = job_submission_output.split(';')[0]
+        if new_nas_loc:
+            print(f'{new_nas_loc}')
         print(f"Submitted SLURM job with ID: {job_id}")
 
         wait_for_job_completion(ssh, job_id, 10)
 
-        return 
+        return receipt_path
+
+
+def process_path(receipt_path, remote_path, nas_path):
+    return run_pipeline_remote(receipt_path, remote_path, nas_path, '')
