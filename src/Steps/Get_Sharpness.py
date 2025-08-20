@@ -26,7 +26,7 @@ import json
 class calculate_sharpness(abstract_task):
     @classmethod
     def task_name(cls):
-        return 'detect_spots'
+        return 'calculate_sharpness'
 
     def extract_args(self, p, t):
         given_args = self.receipt['steps'][self.step_name]

@@ -1,7 +1,9 @@
 
 
-from AngelFISH.src.Steps import segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots, match_masks, filter_csv, export_images, reconcile_data
-
+from AngelFISH.src.Steps import (segment, download_data, return_data, get_cell_properties, 
+                                 clear_local_data, detect_spots, match_masks, filter_csv, 
+                                 export_images, reconcile_data, calculate_sharpness
+)
 # Function wrappers
 class ExportImagesTask:
     @staticmethod
@@ -30,7 +32,7 @@ class ReconcileDataTask:
 
 # get tasks
 known_tasks = [segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots,
-               match_masks, filter_csv, ExportImagesTask, ReconcileDataTask]
+               match_masks, filter_csv, ExportImagesTask, ReconcileDataTask, calculate_sharpness]
 
 def get_task(task_name):
     for possible_task in known_tasks:
