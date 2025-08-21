@@ -293,18 +293,36 @@ class match_masks(abstract_task):
         single_nuc = self.receipt['steps'][self.step_name].get('single_nuc', True)
         cell_alone = self.receipt['steps'][self.step_name].get('cell_alone', False)
 
-        nuc_masks = self.data[nuc_mask_name]
-        cyto_masks = self.data[cyto_mask_name]
+        analysis_dir = self.receipt['dirs']['analysis_dir']
+        temp_nuc_zarr = os.path.join(analysis_dir, f"{nuc_mask_name}_matched.zarr")
+        temp_cyto_zarr = os.path.join(analysis_dir, f"{cyto_mask_name}_matched.zarr")
 
+        nuc_shape = self.data[nuc_mask_name].shape
+        cyto_shape = self.data[cyto_mask_name].shape
 
-        for p in range(nuc_masks.shape[0]):
-            for t in range(nuc_masks.shape[1]):
-                nuc_masks[p, t], cyto_masks[p, t] = multistack.match_nuc_cell(
-                                                            nuc_masks[p, t], 
-                                                            cyto_masks[p, t], 
-                                                            single_nuc,
-                                                            cell_alone
-                                                            )
+        nuc_zarr = zarr.open(temp_nuc_zarr, mode='w', shape=nuc_shape, dtype=np.int32)
+        cyto_zarr = zarr.open(temp_cyto_zarr, mode='w', shape=cyto_shape, dtype=np.int32)
+
+        for p in range(nuc_shape[0]):
+            for t in range(nuc_shape[1]):
+                matched_nuc, matched_cyto = multistack.match_nuc_cell(
+                    self.data[nuc_mask_name][p, t].compute(),
+                    self.data[cyto_mask_name][p, t].compute(),
+                    single_nuc,
+                    cell_alone
+                )
+            nuc_zarr[p, t] = matched_nuc
+            cyto_zarr[p, t] = matched_cyto
+
+        # Write results back to TIFF files
+        nuc_tiff_path = os.path.join(self.rseceipt['dirs']['masks_dir'], f"{nuc_mask_name}.tiff")
+        cyto_tiff_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{cyto_mask_name}.tiff")
+        tifffile.imwrite(nuc_tiff_path, nuc_zarr)
+        tifffile.imwrite(cyto_tiff_path, cyto_zarr)
+
+        # Remove temp zarr files
+        shutil.rmtree(temp_nuc_zarr)
+        shutil.rmtree(temp_cyto_zarr)
         
         self.receipt['steps'][self.step_name]['nuc_mask_name'] = nuc_mask_name
         self.receipt['steps'][self.step_name]['cyto_mask_name'] = cyto_mask_name
