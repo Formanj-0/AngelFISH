@@ -27,7 +27,7 @@ class detect_spots(abstract_task):
         data_to_send = {}
         data_to_send['fig_dir'] = self.receipt['dirs']['fig_dir']
         data_to_send['image'] = self.data['images'][p, t].compute()
-        data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
+        data_to_send['metadata'] = self.data['metadata']
         self.voxel_size_yx = self.data['metadata'](p, t)['PixelSizeUm'] * 1000
         data_to_send['voxel_size_yx'] = self.voxel_size_yx
         self.voxel_size_z = np.abs(self.data['metadata'](p, t, z=1)['ZPosition_um_Intended'] - self.data['metadata'](p, t, z=0)['ZPosition_um_Intended']) * 1000
