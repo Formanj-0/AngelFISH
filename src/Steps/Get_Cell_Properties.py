@@ -18,16 +18,20 @@ class get_cell_properties(abstract_task):
 
     def extract_args(self, p, t):
         given_args = self.receipt['steps'][self.step_name]
+        nuc_mask_name = self.receipt['steps'][self.step_name].get('nuc_mask_name', 'nuc_masks')
+        cyto_mask_name = self.receipt['steps'][self.step_name].get('cyto_mask_name', 'cyto_masks')
+
 
         data_to_send = {}
         data_to_send['image'] = self.data['images'][p, t].compute()
         data_to_send['metadata'] = self.data['metadata']
-        nuc_masks = self.data.get('nuc_masks', None)
         data_to_send['sharpnesses'] = self.data.get('sharpnesses', None)
+
+        nuc_masks = self.data.get(nuc_mask_name, None)
         if nuc_masks is not None:
             data_to_send['nuc_mask'] = nuc_masks[p,t].compute()
 
-        cyto_masks = self.data.get('cyto_masks', None)
+        cyto_masks = self.data.get(cyto_mask_name, None)
         if cyto_masks is not None:
             data_to_send['cyto_mask'] = cyto_masks[p,t].compute()
 
