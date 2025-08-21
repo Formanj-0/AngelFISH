@@ -215,7 +215,7 @@ def get_data_loader(name):
 
 
 def load_data(receipt):
-    data_loader = get_data_loader(receipt['meta_arguments']['data_loader'])
+    data_loader = get_data_loader(receipt['arguments']['data_loader'])
     data = data_loader(receipt)
     return data
 

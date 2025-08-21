@@ -13,8 +13,8 @@ def pycromanager_data_loader(receipt):
         os.makedirs(receipt['dirs'][k], exist_ok=True)
 
     # Check if local path and does a bunch with it if it does (if it doesnt exist theres not much to do)
-    local_path = receipt['meta_arguments'].get('local_location', None)
-    analysis_name = receipt['meta_arguments']['analysis_name']
+    local_path = receipt['arguments'].get('local_location', None)
+    analysis_name = receipt['arguments']['analysis_name']
 
     return load_pycromanager(local_path, analysis_name)
 

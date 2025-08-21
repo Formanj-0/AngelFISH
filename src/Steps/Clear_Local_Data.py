@@ -12,8 +12,8 @@ class clear_local_data(abstract_task):
     def __init__(self, receipt, step_name):
         self.receipt = receipt
         self.step_name = step_name
-        output_dir = os.path.dirname(self.receipt['meta_arguments']['local_location'])
-        self.output_path = os.path.join(output_dir, f'{self.receipt['meta_arguments']['local_location']}_cleared.txt')
+        output_dir = os.path.dirname(self.receipt['arguments']['local_location'])
+        self.output_path = os.path.join(output_dir, f'{self.receipt['arguments']['local_location']}_cleared.txt')
 
     @classmethod
     def task_name(cls):
@@ -34,7 +34,7 @@ class clear_local_data(abstract_task):
         # makes sure that the task_name is save (you can have multiple tasks of the same task)
         self.receipt['steps'][self.step_name]['task_name'] = self.task_name()
 
-        local_location = self.receipt['meta_arguments']['local_location']
+        local_location = self.receipt['arguments']['local_location']
 
         data = load_data(self.receipt)
         close_data(data)

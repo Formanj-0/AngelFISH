@@ -14,10 +14,10 @@ class return_data(abstract_task):
     def process(self):
         start_time = time.time() 
 
-        analysis_name = self.receipt['meta_arguments']['analysis_name']
+        analysis_name = self.receipt['arguments']['analysis_name']
         analysis_dir = self.receipt['dirs']['analysis_dir']
         masks_dir = self.receipt['dirs']['masks_dir']
-        nas_dir = self.receipt['meta_arguments']['nas_location']
+        nas_dir = self.receipt['arguments']['nas_location']
         results_dir = self.receipt['dirs']['results_dir']
         status_dir = self.receipt['dirs']['status_dir']
         figure_dir = self.receipt['dirs']['fig_dir']

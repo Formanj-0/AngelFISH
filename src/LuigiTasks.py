@@ -143,11 +143,11 @@ class AngelFISHWorkflow(sl.WorkflowTask):
 
         receipt = Receipt(path=self.receipt_path)
         step_order = receipt['step_order']
-        name = os.path.basename(receipt['meta_arguments']['nas_location'])
+        name = os.path.basename(receipt['arguments']['nas_location'])
         database_loc = os.path.dirname(self.cluster_path)
         database_loc = os.path.join(database_loc, 'database')
         remote_local_location = os.path.join(database_loc, name).replace('\\', '/')
-        remote_analysis_dir = os.path.join(remote_local_location, receipt['meta_arguments']['analysis_name'])
+        remote_analysis_dir = os.path.join(remote_local_location, receipt['arguments']['analysis_name'])
         remote_status_dir = os.path.join(remote_analysis_dir, 'status')
 
         for step_name in step_order:

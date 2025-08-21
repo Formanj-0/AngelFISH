@@ -34,7 +34,7 @@ A **receipt** is a YAML-based dictionary that captures everything about a data p
 
 ```yaml
 {
-    'meta_arguments': {       # Metadata about the dataset
+    'arguments': {       # Metadata about the dataset
         'nas_location': ...,  # Location on shared storage
         'analysis_name': ...  # Unique name for this analysis
     },
@@ -56,7 +56,7 @@ The receipt is passed from step to step, updating as tasks are run and data is p
 
 ### Data Loader
 
-The `data_loader` parameter (defined in `meta_arguments`) determines how data is accessed and saved. It must define a tree-like structure that can map across filesystems (e.g., nested folders) or HDF5 files.
+The `data_loader` parameter (defined in `arguments`) determines how data is accessed and saved. It must define a tree-like structure that can map across filesystems (e.g., nested folders) or HDF5 files.
 
 Current enforced structure:
 

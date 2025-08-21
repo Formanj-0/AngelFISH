@@ -53,7 +53,7 @@ class AngelFISHWorkflow(sl.WorkflowTask):
 
     def out_doneflag(self):
         receipt = Receipt(path=self.receipt_path)
-        return sl.TargetInfo(self, f'{receipt['meta_arguments']['analysis_name']}.txt')
+        return sl.TargetInfo(self, f'{receipt['arguments']['analysis_name']}.txt')
 
     def workflow(self):
         receipt = Receipt(path=self.receipt_path)

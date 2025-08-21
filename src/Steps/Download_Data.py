@@ -33,8 +33,8 @@ class download_data(abstract_task):
         return self.receipt
 
     def image_processing(self):
-        local_location = self.receipt['meta_arguments'].get('local_location', None)
-        nas_location = self.receipt['meta_arguments'].get('nas_location', None)
+        local_location = self.receipt['arguments'].get('local_location', None)
+        nas_location = self.receipt['arguments'].get('nas_location', None)
 
         connection_config_location = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         connection_config_location = os.path.join(connection_config_location, 'config_nas.yml')
@@ -58,7 +58,7 @@ class download_data(abstract_task):
             else:
                 self.download_file_from_NAS(nas_location, os.path.dirname(local_location), connection_config_location)
 
-        self.receipt['meta_arguments']['local_location'] = local_location
+        self.receipt['arguments']['local_location'] = local_location
 
     def download_folder_from_NAS(self, remote_path, local_folder_path, connection_config_location):
         # Downloads a folder from the NAS, confirms that the it has not already been downloaded
