@@ -315,7 +315,7 @@ class match_masks(abstract_task):
             cyto_zarr[p, t] = matched_cyto
 
         # Write results back to TIFF files
-        nuc_tiff_path = os.path.join(self.rseceipt['dirs']['masks_dir'], f"{nuc_mask_name}.tiff")
+        nuc_tiff_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{nuc_mask_name}.tiff")
         cyto_tiff_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{cyto_mask_name}.tiff")
         tifffile.imwrite(nuc_tiff_path, nuc_zarr)
         tifffile.imwrite(cyto_tiff_path, cyto_zarr)
