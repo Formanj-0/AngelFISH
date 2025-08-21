@@ -131,8 +131,6 @@ class Receipt(UserDict):
         with open(path, 'w') as f:
             json.dump(data_to_save, f, indent=4)
 
-
-
     def update_step(self, step_name, key, value):
         if step_name not in self['steps']:
             self['steps'][step_name] = {}
