@@ -21,7 +21,7 @@ class get_cell_properties(abstract_task):
 
         data_to_send = {}
         data_to_send['image'] = self.data['images'][p, t].compute()
-        data_to_send['metadata'] = self.data['metadata'](p, t).get('experimental_metadata', {})
+        data_to_send['metadata'] = self.data['metadata']
         nuc_masks = self.data.get('nuc_masks', None)
         data_to_send['sharpnesses'] = self.data.get('sharpnesses', None)
         if nuc_masks is not None:
