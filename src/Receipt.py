@@ -5,13 +5,24 @@ import shutil
 
 class Receipt(UserDict):
     def __init__(self, analysis_name=None, nas_location=None, data_loader=None, local_location=None, path=None):
-    
+        """
+        This is a formated dictionary, with a few specific properties
+        
+        The three key attributes are:
+        - arguments:dict - information concerning the pipeline
+        - steps:dict - user specified arguments of the steps
+        - step_order:list - the order the steps run
+
+        additional attributes
+        - dirs: dict of key directories (recalculated on changes to local_location)
+
+        """
         if path is not None:
             with open(path, 'r') as f:
                 data = json.load(f)
         else:
             data = {
-                'meta_arguments': {
+                'arguments': {
                     'nas_location': None,
                     'local_location': None,
                     'data_loader': None,
@@ -22,32 +33,33 @@ class Receipt(UserDict):
             }
 
         if nas_location is not None:
-            data['meta_arguments']['nas_location'] = nas_location
+            data['arguments']['nas_location'] = nas_location
         if local_location is not None:
-            data['meta_arguments']['local_location'] = local_location
+            data['arguments']['local_location'] = local_location
         if data_loader is not None:
-            data['meta_arguments']['data_loader'] = data_loader
+            data['arguments']['data_loader'] = data_loader
         if analysis_name is not None:
-            data['meta_arguments']['analysis_name'] = analysis_name
+            data['arguments']['analysis_name'] = analysis_name
 
-        if data['meta_arguments']['nas_location']: # and data['meta_arguments']['local_location'] is None: 
+        if data['arguments']['nas_location']: # and data['arguments']['local_location'] is None: 
             # if nas-location is give we will awlays recalc the locations
-            # this gives the nas location dominate 
+            # this makes the nas location dominate 
             database_loc = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             database_loc = os.path.join(database_loc, 'database')
-
-            name = os.path.basename(data['meta_arguments']['nas_location'])
+            nas_location = data['arguments']['nas_location']
+            name = os.path.basename(nas_location.replace('\\', os.sep).replace('/', os.sep))
             local_location = os.path.join(database_loc, name)
 
-            data['meta_arguments']['local_location'] = local_location
+            data['arguments']['local_location'] = local_location
         
         super().__init__(data)
         self.recalc_dirs()
 
     def __setitem__(self, key, value):
-        # Intercept changes to meta_arguments['local_location']
-        if key == 'meta_arguments' and isinstance(value, dict):
-            old_local = self['meta_arguments'].get('local_location') if 'meta_arguments' in self else None
+        # Intercept changes to ['arguments']['local_location']
+        # correct me if I am wrong, but i think this can only happen after __init__
+        if key == 'arguments' and isinstance(value, dict):
+            old_local = self['arguments'].get('local_location') if 'arguments' in self else None
             new_local = value.get('local_location')
             super().__setitem__(key, value)
             if old_local != new_local:
@@ -56,9 +68,14 @@ class Receipt(UserDict):
             super().__setitem__(key, value)
 
     def recalc_dirs(self):
-        """Recalculate key directories based on current meta_arguments."""
-        local_location = self['meta_arguments']['local_location']
-        analysis_name = self['meta_arguments']['analysis_name']
+        """
+        Recalculate key directories based on current arguments.
+        Occurs when ['arguments']['local_location'] is intercepted
+        Makes directories consistent with the local_location
+
+        """
+        local_location = self['arguments']['local_location']
+        analysis_name = self['arguments']['analysis_name']
 
         dirs = {}
         analysis_dir = os.path.join(local_location, analysis_name)
@@ -86,7 +103,7 @@ class Receipt(UserDict):
 
     def save(self, filepath):
         data_to_save = {}
-        data_to_save['meta_arguments'] = self.data['meta_arguments']
+        data_to_save['arguments'] = self.data['arguments']
         data_to_save['steps'] = self.data['steps']
         data_to_save['step_order'] = self.data['step_order']
         
@@ -101,7 +118,29 @@ class Receipt(UserDict):
     def get_step_param(self, step_name, key, default=None):
         return self['steps'].get(step_name, {}).get(key, default)
 
+    @property
+    def steps(self):
+        return self['steps']
 
+    @steps.setter
+    def steps(self, value):
+        self['steps'] = value
+
+    @property
+    def step_order(self):
+        return self['step_order']
+
+    @step_order.setter
+    def step_order(self, value):
+        self['step_order'] = value
+
+    @property
+    def arguments(self):
+        return self['arguments']
+
+    @arguments.setter
+    def arguments(self, value):
+        self['arguments'] = value
 
 
 
