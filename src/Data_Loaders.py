@@ -46,6 +46,7 @@ def load_pycromanager(location, analysis_name):
 
 
 def concate_data(x, concate_function_str:str=None):
+    """Concate list of data"""
     first_type = type(x[0])
     assert np.all([first_type == type(d) for d in x]), 'data is not the same type'
 
@@ -59,20 +60,23 @@ def concate_data(x, concate_function_str:str=None):
         return x
 
 
-def format_list_of_pyromanager_data(data, local_path, analysis_name, recursive_analysis_name, receipt):
+def format_list_of_pyromanager_data(data, local_path, receipt):
     """
     This may need to be changed in the future, or use a different recursive_pycromanager_data_loader
     use ['arguments']['data_loader_settings'] or something to make this work better cause were hitting
     a large area of possiblities that will work with different functions
     """
+    data_loader_settings = receipt['arguments'].get('data_loader_settings', {})
     first_keys = list(data[0].keys())
 
+    ## Images
     final_data = {}
     final_data['images'] = np.concatenate([d['images'] for d in data], axis=0)
     pp, tt, cc, zz, yy, xx = final_data['images'].shape
     final_data['pp'], final_data['tt'], final_data['cc'], final_data['zz'], final_data['yy'], final_data['xx'] = pp, tt, cc, zz, yy, xx
     first_keys.remove('images')
 
+    ## Metadata
     # this is a map from new p values to the os.listdir(local_path) index and p in that original image
     lengths_of_images = [d['images'].shape for d in data]
     left_inclusive_right_exlusive_indexs = np.concatenate(([0], np.cumsum(lengths_of_images), [np.inf]))
@@ -88,16 +92,19 @@ def format_list_of_pyromanager_data(data, local_path, analysis_name, recursive_a
     )(map_p2np(p))
     first_keys.remove('metadata')
 
+    ## Mask
     first_dir = os.listdir(local_path)[0]
     for mask_name in os.listdir(os.path.join(first_dir, 'masks')):
         final_data[mask_name] = np.concatenate([d[mask_name] for d in data], axis=0)
         first_keys.remove(mask_name)
 
+    ## Others
     completed_keys = ['pp', 'tt', 'cc', 'zz', 'yy', 'xx']
     for k in first_keys:
-        final_data[k] = concate_data([d[k] for d in data])
+        final_data[k] = concate_data([d[k] for d in data], concate_function_str=data_loader_settings.get(k, None))
         completed_keys.append(k)
 
+    ## checks
     for k in completed_keys:
         first_keys.remove(k)
     assert len(first_keys) == 0, 'not all keys were concatenated' # this is kinda useless but whatever
@@ -127,7 +134,7 @@ def recursive_pycromanager_data_loader(receipt):
     assert np.all([keys == d.keys() for d in data]), 'all sub pycromanager dataset dont have the same keys'
 
     # format the data from the subdirectories so that it is usable
-    subdirectories_data = format_list_of_pyromanager_data(data, local_path, analysis_name, recursive_analysis_name, receipt)
+    subdirectories_data = format_list_of_pyromanager_data(data, local_path, receipt)
 
     # get data from the parent (combined dir)
     pardirectory_data = {}
