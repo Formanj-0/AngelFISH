@@ -111,10 +111,10 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
         print(f'{new_nas_loc}')
     print(f"Submitted SLURM job with ID: {job_id}")
 
-    wait_for_job_completion(ssh, job_id, 10)
+    final_status = wait_for_job_completion(ssh, job_id, 10)
     ssh.close()
 
-    return receipt_path
+    return final_status
 
 
 def process_path(receipt_path, remote_path, nas_path):
