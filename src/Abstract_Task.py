@@ -8,6 +8,8 @@ import numpy as np
 from magicgui import magicgui
 from qtpy.QtCore import QObject
 
+from .Data_Loaders import load_data
+
 class abstract_task:
     """
     The purpose of this class is to allow for create a general outline of 
@@ -207,23 +209,7 @@ class abstract_task:
         return True
 
 
-def get_data_loader(name):
-    if name == 'pycromanager_data_loader':
-        from .Data_Loaders import pycromanager_data_loader
-        return pycromanager_data_loader
-    elif name == 'recursive_pycromanager_data_loader':
-        from .Data_Loaders import recursive_pycromanager_data_loader
-        return recursive_pycromanager_data_loader
-    raise NotImplementedError(f"Data loader '{name}' is not implemented.")
 
-
-def load_data(receipt):
-    """
-    This loads data associated with the receipt 
-    """
-    data_loader = get_data_loader(receipt['arguments']['data_loader'])
-    data = data_loader(receipt)
-    return data
 
 
 
