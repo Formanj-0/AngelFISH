@@ -146,7 +146,7 @@ class segment(abstract_task):
 
     def compress_and_release_memory(self):
         output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
-        tifffile.imwrite(output_path, self.mask.astype(np.uint16))
+        tifffile.imwrite(output_path, self.mask)
         self.remove_temp_mask()
 
     def remove_temp_mask(self):
