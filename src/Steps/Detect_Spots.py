@@ -34,11 +34,11 @@ class detect_spots(abstract_task):
         data_to_send['voxel_size_z'] = self.voxel_size_z
         nuc_masks = self.data.get('nuc_masks', None)
         if nuc_masks is not None:
-            data_to_send['nuc_mask'] = nuc_masks[p,t]
+            data_to_send['nuc_mask'] = nuc_masks[p,t].compute()
 
         cyto_masks = self.data.get('cyto_masks', None)
         if cyto_masks is not None:
-            data_to_send['cyto_mask'] = cyto_masks[p,t]
+            data_to_send['cyto_mask'] = cyto_masks[p,t].compute()
 
         args = {**data_to_send, **given_args}
 
