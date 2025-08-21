@@ -75,14 +75,14 @@ class segment(abstract_task):
         mask_shape = image_shape[:2] + image_shape[3:]  # (p, t, z, y, x)
 
         # Use DirectoryStore explicitly
-        store = zarr.DirectoryStore(self.mask_file)
+        self.mask = zarr.open_array(self.mask_file, mode='a', shape=mask_shape)
+        self.mask[:] = 0  # Initialize with zeros
 
         # Check if it already exists
-        if os.path.exists(self.mask_file) and os.path.isdir(self.mask_file):
-            self.mask = zarr.open(store, mode='r+')
-        else:
-            self.mask = zarr.open(store, mode='w-', shape=mask_shape, dtype=np.int32)
-            self.mask[:] = 0  # Initialize with zeros
+        # if os.path.exists(self.mask_file) and os.path.isdir(self.mask_file):
+        #     self.mask = zarr.open(store, mode='r+')
+        # else:
+        #     self.mask = zarr.open(store, mode='w', shape=mask_shape, dtype=np.int32)
 
         return self.mask
 
