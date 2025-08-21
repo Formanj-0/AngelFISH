@@ -4,7 +4,24 @@ import json
 import numpy as np
 from tifffile import imread, memmap
 import pandas as pd
+import dask.array as da
+# from dask_image.imread import imread
+# from tifffile import imread
 
+def load_data(receipt):
+    """
+    This loads data associated with the receipt 
+    """
+    data_loader = get_data_loader(receipt['arguments']['data_loader'])
+    data = data_loader(receipt)
+    return data
+
+def get_data_loader(name):
+    if name == 'pycromanager_data_loader':
+        return pycromanager_data_loader
+    elif name == 'recursive_pycromanager_data_loader':
+        return recursive_pycromanager_data_loader
+    raise NotImplementedError(f"Data loader '{name}' is not implemented.")
 
 def pycromanager_data_loader(receipt):
     """
@@ -12,14 +29,11 @@ def pycromanager_data_loader(receipt):
     extensions are
     - masks dir 
     - analysis dirs
-
-
     """
     # Check if local path and does a bunch with it if it does (if it doesnt exist theres not much to do)
     local_path = receipt['arguments']['local_location']# the location must be local
     analysis_name = receipt['arguments']['analysis_name']
     return load_pycromanager(local_path, analysis_name)
-
 
 def load_pycromanager(location, analysis_name):
     data = {} # were gonna use this as basically a struct
@@ -44,18 +58,17 @@ def load_pycromanager(location, analysis_name):
 
     return data
 
-
 def concate_data(x, concate_function_str:str=None):
     """Concate list of data"""
     first_type = type(x[0])
     assert np.all([first_type == type(d) for d in x]), 'data is not the same type'
-
     if concate_function_str:
         return eval(concate_function_str)
     elif issubclass(first_type, pd.DataFrame):
         return pd.concat(x, axis=0, ignore_index=True)
-    elif issubclass(first_type, (np.ndarray, np.memmap)):
-        return np.concatenate(x, axis=0)
+    elif issubclass(first_type, (np.ndarray, np.memmap, da.Array, np.generic)):
+        # return np.concatenate(x, axis=0)
+        return da.concatenate(x, axis=0)
     else:
         return x
 
@@ -67,14 +80,23 @@ def format_list_of_pyromanager_data(data, local_path, receipt):
     a large area of possiblities that will work with different functions
     """
     data_loader_settings = receipt['arguments'].get('data_loader_settings', {})
-    first_keys = list(data[0].keys())
+    # first_keys = list(data[0].keys())
+    keys = list(set.intersection(*(set(d.keys()) for d in data)))
+
 
     ## Images
     final_data = {}
     final_data['images'] = np.concatenate([d['images'] for d in data], axis=0)
     pp, tt, cc, zz, yy, xx = final_data['images'].shape
     final_data['pp'], final_data['tt'], final_data['cc'], final_data['zz'], final_data['yy'], final_data['xx'] = pp, tt, cc, zz, yy, xx
-    first_keys.remove('images')
+    keys.remove('images')
+    keys.remove('pp')
+    keys.remove('tt')
+    keys.remove('cc')
+    keys.remove('zz')
+    keys.remove('yy')
+    keys.remove('xx')
+
 
     ## Metadata
     # this is a map from new p values to the os.listdir(local_path) index and p in that original image
@@ -90,24 +112,24 @@ def format_list_of_pyromanager_data(data, local_path, receipt):
     final_data['metadata'] = lambda p, t, z=0, c=0: (
         lambda n_p: data[n_p[0]]['metadata'](p=n_p[1], t=t, c=c, z=z)
     )(map_p2np(p))
-    first_keys.remove('metadata')
+    keys.remove('metadata')
 
     ## Mask
-    first_dir = os.listdir(local_path)[0]
-    for mask_name in os.listdir(os.path.join(first_dir, 'masks')):
-        final_data[mask_name] = np.concatenate([d[mask_name] for d in data], axis=0)
-        first_keys.remove(mask_name)
+    # first_dir = os.listdir(local_path)[0]
+    # for mask_name in os.listdir(os.path.join(first_dir, 'masks')):
+    #     final_data[mask_name] = np.concatenate([d[mask_name] for d in data], axis=0)
+    #     keys.remove(mask_name)
 
     ## Others
-    completed_keys = ['pp', 'tt', 'cc', 'zz', 'yy', 'xx']
-    for k in first_keys:
+    completed_keys = []
+    for k in keys:
         final_data[k] = concate_data([d[k] for d in data], concate_function_str=data_loader_settings.get(k, None))
         completed_keys.append(k)
 
     ## checks
     for k in completed_keys:
-        first_keys.remove(k)
-    assert len(first_keys) == 0, 'not all keys were concatenated' # this is kinda useless but whatever
+        keys.remove(k)
+    assert len(keys) == 0, 'not all keys were concatenated' # this is kinda useless but whatever
 
     return final_data
 
@@ -129,9 +151,16 @@ def recursive_pycromanager_data_loader(receipt):
 
     # get all the data we want
     recursive_analysis_name = receipt['arguments'].get('recursive_analysis_name', analysis_name)
-    data = [load_pycromanager(path, recursive_analysis_name) for path in os.listdir(local_path)]
-    keys = data[0].keys()
-    assert np.all([keys == d.keys() for d in data]), 'all sub pycromanager dataset dont have the same keys'
+    data = []
+    for path in os.listdir(local_path):
+        full_path = os.path.join(local_path, path)
+        if os.path.isdir(full_path):
+            try:
+                loaded = load_pycromanager(full_path, recursive_analysis_name)
+                if loaded:  # Only add if loading was successful and data is not empty
+                    data.append(loaded)
+            except Exception:
+                continue
 
     # format the data from the subdirectories so that it is usable
     subdirectories_data = format_list_of_pyromanager_data(data, local_path, receipt)
@@ -146,7 +175,7 @@ def recursive_pycromanager_data_loader(receipt):
         key, returned_data = read_data(os.path.join(os.path.join(local_path, 'masks'), file))
         pardirectory_data[key] = returned_data
 
-    shared_keys = set(data.keys()) & set(pardirectory_data.keys())
+    shared_keys = set(subdirectories_data.keys()) & set(pardirectory_data.keys())
     assert len(shared_keys) == 0, f"Shared keys found between parent directory data and sub directory data: {shared_keys}"
 
     return {**subdirectories_data, **pardirectory_data}
@@ -164,7 +193,11 @@ def read_data(file_path):
 
     # read data
     if ext in ['.tif', '.tiff']:
-        data = memmap(file_path, mode='r+')
+        # data = memmap(file_path, mode='r') 
+        # data = da.from_array(memmap(file_path, mode='r'), chunks='auto')
+        # data = da.from_array(data) # this change will probably break a lot of shit
+        # data = imread(file_path, aszarr=True)
+        data = da.from_zarr(imread(file_path, aszarr=True))
     elif ext == '.json':
         data = json.load(open(file_path, 'r'))
     elif ext == '.csv':
