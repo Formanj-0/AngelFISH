@@ -60,7 +60,7 @@ class segment(abstract_task):
         return all_args
 
     def preallocate_memmory(self):
-        if hasattr(self, 'temp_dir') and self.temp_dir is not None and os.path.exists(self.temp_dir):
+        if hasattr(self, 'mask_file') and self.mask_file is not None and os.path.exists(self.mask_file):
             # temp_dir exists
             pass
         else:
@@ -68,28 +68,21 @@ class segment(abstract_task):
 
     def create_temp_mask(self):
         """Create a temporary mask file on disk that can be accessed by multiple processes."""
-        if not hasattr(self, 'mask_file'):
-            # Get mask name from receipt
-            mask_name = self.receipt['steps'].get(self.step_name, {}).get('mask_name', 'temp_mask')
+        mask_name = self.receipt['steps'].get(self.step_name, {}).get('mask_name', 'temp_mask')
+        self.mask_file = os.path.join(self.receipt['dirs']['analysis_dir'], f"{mask_name}.zarr")
 
-            # Create mask file path
-            self.mask_file = os.path.join(self.receipt['dirs']['analysis_dir'], f"{mask_name}.zarr")
+        image_shape = self.data['images'].shape
+        mask_shape = image_shape[:2] + image_shape[3:]  # (p, t, z, y, x)
 
-            # Get shape from images, removing channel dimension
-            image_shape = self.data['images'].shape
-            mask_shape = image_shape[:2] + image_shape[3:]  # Remove channel dimension
+        # Use DirectoryStore explicitly
+        store = zarr.DirectoryStore(self.mask_file)
 
-            # Specify chunk size or use 'auto'
-            # chunks = 'auto'
-
-            # Check if mask already exists
-            if os.path.exists(self.mask_file):
-                # Load existing mask as writable
-                self.mask = zarr.open(self.mask_file, mode='r+')
-            else:
-                # Create new mask initialized with zeros and make it writable
-                self.mask = zarr.open(self.mask_file, mode='a', shape=mask_shape, dtype=np.int32)
-                self.mask[:] = 0  # Initialize with zeros
+        # Check if it already exists
+        if os.path.exists(self.mask_file) and os.path.isdir(self.mask_file):
+            self.mask = zarr.open(store, mode='r+')
+        else:
+            self.mask = zarr.open(store, mode='w-', shape=mask_shape, dtype=np.int32)
+            self.mask[:] = 0  # Initialize with zeros
 
         return self.mask
 
