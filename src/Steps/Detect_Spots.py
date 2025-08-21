@@ -527,7 +527,7 @@ class detect_spots(abstract_task):
             spots, clusters = standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, dim_3D)
 
             print('Adding Epermental Metadata')
-            expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=c) # is a dictionary 
+            expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=c)['experimental_metadata'] # is a dictionary 
             if expermental_metadata is not None:
                 for key, value in expermental_metadata.items():
                     spots[key] = [value] * len(spots)

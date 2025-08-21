@@ -137,7 +137,7 @@ class get_cell_properties(abstract_task):
         combined_df['timepoint'] = [timepoint]*len(combined_df)
         combined_df['touching_border'] = touching_border(combined_df, image)
 
-        expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=c) # is a dictionary 
+        expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=0)['experimental_metadata']
         if expermental_metadata is not None:
             for key, value in expermental_metadata.items():
                 combined_df[key] = [value] * len(combined_df)
