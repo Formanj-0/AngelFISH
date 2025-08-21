@@ -88,6 +88,7 @@ class detect_spots(abstract_task):
         use_pca: bool = False,
         sub_pixel_fitting: bool = False, 
         minDistance:Union[float, list] = None,
+        metadata:callable=None,
         **kwargs
         ):
 
@@ -524,6 +525,16 @@ class detect_spots(abstract_task):
 
             print('Standardizing Data')
             spots, clusters = standardize_df(cell_results, spots_px, spots_subpx, sub_pixel_fitting, clusters, FISHChannel[c], timepoint, fov, dim_3D)
+
+            print('Adding Epermental Metadata')
+            expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=c) # is a dictionary 
+            if expermental_metadata is not None:
+                for key, value in expermental_metadata.items():
+                    spots[key] = [value] * len(spots)
+                    clusters[key] = [value] * len(clusters)
+                    if cell_results is not None:
+                        cell_results[key] = [value] * len(cell_results)
+
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
             print('Complete Spot Detection')

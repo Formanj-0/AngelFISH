@@ -53,6 +53,7 @@ class get_cell_properties(abstract_task):
             props_to_measure= ['label', 'bbox', 'area', 'centroid', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std'], 
             sharpnesses:dict=None, 
             sharpness_metric:str=None,
+            metadata:callable=None,
             **kwargs):
         
         if middle_zs is not None and isinstance(middle_zs, int) and image.ndim >= 3:
@@ -135,6 +136,12 @@ class get_cell_properties(abstract_task):
         combined_df['fov'] = [fov]*len(combined_df)
         combined_df['timepoint'] = [timepoint]*len(combined_df)
         combined_df['touching_border'] = touching_border(combined_df, image)
+
+        expermental_metadata = metadata(p=fov, t=timepoint, z=0 ,c=c) # is a dictionary 
+        if expermental_metadata is not None:
+            for key, value in expermental_metadata.items():
+                combined_df[key] = [value] * len(combined_df)
+
 
         return {'cell_properties': combined_df}
 
