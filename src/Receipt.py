@@ -107,7 +107,7 @@ class Receipt(UserDict):
         data_to_save['steps'] = self.data['steps']
         data_to_save['step_order'] = self.data['step_order']
         
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'w') as f:
             json.dump(data_to_save, f, indent=4)
 
@@ -126,7 +126,7 @@ class Receipt(UserDict):
         data_to_save['steps'] = self.data['steps']
         data_to_save['step_order'] = self.data['step_order']
         # stores in default place if dir is none
-        path = os.path.join(dir, name) if dir is not None else os.path.abspath(os.path.join(__file__, 'default_pipelines', name))
+        path = os.path.join(dir, name) if dir is not None else os.path.abspath(os.path.join(os.path.dirname(__file__), 'default_pipelines', name))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f:
             json.dump(data_to_save, f, indent=4)
