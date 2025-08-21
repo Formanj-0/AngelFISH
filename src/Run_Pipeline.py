@@ -23,8 +23,9 @@ def create_ssh_client(host, port, username, password, retries=3, timeout=30):
         except (SSHException, NoValidConnectionsError) as e:
             print(f"Connection failed: {e}")
             if attempt < retries - 1:
-                print(f"Retrying in 5 seconds...")
-                sleep(5)
+                wait_time = random.uniform(1, 5)
+                print(f"Retrying in {wait_time:.2f} seconds...")
+                sleep(wait_time)
             else:
                 raise RuntimeError(f"SSH connection failed after {retries} attempts.")
     return None
