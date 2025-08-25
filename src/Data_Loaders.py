@@ -48,13 +48,17 @@ def load_pycromanager(location, analysis_name):
         metadata = lambda p, t, c=0, z=0: ds.read_metadata(position=p, time=t, channel=c, z=z)
         data['metadata'] = metadata
 
-        for file in os.listdir(os.path.join(location, analysis_name, 'results')):
-            key, returned_data = read_data(os.path.join(location, analysis_name, 'results', file))
-            data[key] = returned_data
+        results_dir = os.path.join(location, analysis_name, 'results')
+        if os.path.exists(results_dir):
+            for file in os.listdir(results_dir):
+                key, returned_data = read_data(os.path.join(results_dir, file))
+                data[key] = returned_data
 
-        for file in os.listdir(os.path.join(location, 'masks')):
-            key, returned_data = read_data(os.path.join(os.path.join(location, 'masks'), file))
-            data[key] = returned_data
+        masks_dir = os.path.join(location, 'masks')
+        if os.path.exists(results_dir):
+            for file in os.listdir(masks_dir):
+                key, returned_data = read_data(os.path.join(masks_dir, file))
+                data[key] = returned_data
 
     return data
 
