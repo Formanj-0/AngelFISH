@@ -13,7 +13,7 @@ class clear_local_data(abstract_task):
         self.receipt = receipt
         self.step_name = step_name
         output_dir = os.path.dirname(self.receipt['arguments']['local_location'])
-        self.output_path = os.path.join(output_dir, f'{self.receipt['arguments']['local_location']}_cleared.txt')
+        self.output_path = os.path.join(output_dir, f"{self.receipt['arguments']['local_location']}_cleared.txt")
 
     @classmethod
     def task_name(cls):
