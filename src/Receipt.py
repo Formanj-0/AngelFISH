@@ -77,29 +77,30 @@ class Receipt(UserDict):
         local_location = self['arguments']['local_location']
         analysis_name = self['arguments']['analysis_name']
 
-        dirs = {}
-        analysis_dir = os.path.join(local_location, analysis_name)
-        dirs['analysis_dir'] = analysis_dir
+        if local_location is not None:
+            dirs = {}
+            analysis_dir = os.path.join(local_location, analysis_name)
+            dirs['analysis_dir'] = analysis_dir
 
-        results_dir = os.path.join(analysis_dir, 'results')
-        dirs['results_dir'] = results_dir
+            results_dir = os.path.join(analysis_dir, 'results')
+            dirs['results_dir'] = results_dir
 
-        status_dir = os.path.join(analysis_dir, 'status')
-        dirs['status_dir'] = status_dir
+            status_dir = os.path.join(analysis_dir, 'status')
+            dirs['status_dir'] = status_dir
 
-        mask_dir = os.path.join(local_location, 'masks')
-        dirs['masks_dir'] = mask_dir
+            mask_dir = os.path.join(local_location, 'masks')
+            dirs['masks_dir'] = mask_dir
 
-        fig_dir = os.path.join(analysis_dir, 'figures')
-        dirs['fig_dir'] = fig_dir
+            fig_dir = os.path.join(analysis_dir, 'figures')
+            dirs['fig_dir'] = fig_dir
 
-        self['dirs'] = dirs
-        if os.path.exists(local_location):
-            os.makedirs(analysis_dir, exist_ok=True)
-            os.makedirs(results_dir, exist_ok=True)
-            os.makedirs(status_dir, exist_ok=True)
-            os.makedirs(mask_dir, exist_ok=True)
-            os.makedirs(fig_dir, exist_ok=True)
+            self['dirs'] = dirs
+            if os.path.exists(local_location):
+                os.makedirs(analysis_dir, exist_ok=True)
+                os.makedirs(results_dir, exist_ok=True)
+                os.makedirs(status_dir, exist_ok=True)
+                os.makedirs(mask_dir, exist_ok=True)
+                os.makedirs(fig_dir, exist_ok=True)
 
     def save(self, filepath):
         data_to_save = {}
