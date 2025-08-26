@@ -68,7 +68,7 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
     if new_loc_loc is not None:
         receipt['arguments']['local_location'] = new_loc_loc
 
-    new_dir = os.path.dirname(receipt_path)
+    new_dir = os.getcwd()
     filename_without_ext = os.path.splitext(os.path.basename(receipt_path))[0]
     current_time = datetime.now().strftime('%Y%m%d')
     rand_num = random.randint(1000, 9999)
@@ -118,4 +118,4 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
 
 
 def process_path(receipt_path, remote_path, nas_path):
-    return run_pipeline_remote(receipt_path, remote_path, nas_path, '')
+    return run_pipeline_remote(receipt_path, remote_path, nas_path, None)
