@@ -60,8 +60,10 @@ def wait_for_job_completion(ssh, job_id, poll_interval=60):
             time.sleep(poll_interval)
 
 
-def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc=None):
+def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc=None, use_default:bool=True):
     """Runs the pipeline remotely, handling SSH, file transfer, and SLURM submission."""
+    if use_default:
+        receipt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'default_pipelines', receipt_path))
     receipt = Receipt(path=receipt_path)
     if new_nas_loc is not None:
         receipt['arguments']['nas_location'] = new_nas_loc
@@ -93,6 +95,7 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
     sftp = ssh.open_sftp()
     sftp.put(receipt_path, remote_receipt_path)
     sftp.close()
+    os.remove(receipt_path)
 
     # Submit the SLURM job and capture job ID
     sbatch_command = f'sbatch --parsable run_pipeline.sh {remote_receipt_path}'
