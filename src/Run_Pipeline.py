@@ -30,8 +30,7 @@ def create_ssh_client(host, port, username, password, retries=3, timeout=30):
                 raise RuntimeError(f"SSH connection failed after {retries} attempts.")
     return None
 
-def run_step(receipt_path, step_name):
-    receipt = Receipt(path=receipt_path)
+def run_step(receipt, step_name):
     task_class = get_task(receipt['steps'][step_name]['task_name'])
     task = task_class(receipt, step_name)
     print(f'=================== {step_name} ===================')
@@ -39,9 +38,13 @@ def run_step(receipt_path, step_name):
 
 
 def run_pipeline(receipt_path, new_nas_loc:str=None, new_loc_loc:str=None):
-    receipt = Receipt(path=receipt_path)
+    receipt = Receipt(
+        nas_location=new_nas_loc,
+        local_location=new_loc_loc,
+        path=receipt_path
+        )
     for sn in receipt['step_order']:
-        run_step(receipt_path, sn)
+        run_step(receipt, sn)
     return receipt_path
 
 
@@ -64,11 +67,12 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
     """Runs the pipeline remotely, handling SSH, file transfer, and SLURM submission."""
     if use_default:
         receipt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'default_pipelines', receipt_path))
-    receipt = Receipt(path=receipt_path)
-    if new_nas_loc is not None:
-        receipt['arguments']['nas_location'] = new_nas_loc
-    if new_loc_loc is not None:
-        receipt['arguments']['local_location'] = new_loc_loc
+
+    receipt = Receipt(
+        nas_location=new_nas_loc,
+        local_location=new_loc_loc,
+        path=receipt_path
+        )
 
     new_dir = os.getcwd()
     filename_without_ext = os.path.splitext(os.path.basename(receipt_path))[0]
@@ -118,7 +122,3 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
     ssh.close()
 
     return final_status
-
-
-def process_path(receipt_path, remote_path, nas_path):
-    return run_pipeline_remote(receipt_path, remote_path, nas_path, None)
