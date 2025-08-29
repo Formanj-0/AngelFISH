@@ -2,7 +2,8 @@
 
 from AngelFISH.src.Steps import (segment, download_data, return_data, get_cell_properties, 
                                  clear_local_data, detect_spots, match_masks, filter_csv, 
-                                 export_images, reconcile_data, calculate_sharpness
+                                 export_images, reconcile_data, calculate_sharpness,
+                                 identify_spots, decompose_dense_regions
 )
 # Function wrappers
 class ExportImagesTask:
@@ -28,11 +29,36 @@ class ReconcileDataTask:
 
     def process(self):
         return reconcile_data(self.receipt, self.step_name)
+    
+class IdentifySpots:
+    @staticmethod
+    def task_name():
+        return "identify_spots"
+
+    def __init__(self, receipt, step_name):
+        self.receipt = receipt
+        self.step_name = step_name
+
+    def process(self):
+        return identify_spots(self.receipt, self.step_name)
+    
+class DecomposeDenseRegions:
+    @staticmethod
+    def task_name():
+        return "decompose_dense_regions"
+
+    def __init__(self, receipt, step_name):
+        self.receipt = receipt
+        self.step_name = step_name
+
+    def process(self):
+        return reconcile_data(self.receipt, self.step_name)
 
 
 # get tasks
 known_tasks = [segment, download_data, return_data, get_cell_properties, clear_local_data, detect_spots,
-               match_masks, filter_csv, ExportImagesTask, ReconcileDataTask, calculate_sharpness]
+               match_masks, filter_csv, ExportImagesTask, ReconcileDataTask, calculate_sharpness,
+               DecomposeDenseRegions, IdentifySpots]
 
 def get_task(task_name):
     for possible_task in known_tasks:
