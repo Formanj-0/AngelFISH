@@ -81,7 +81,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                                             minimum_distance=spot_radius_px if use_log_hook else None,)
     
             # calc snr and signal 
-            snr_spots, max_signal = compute_snr_spots(
+            snr_spots, signal = compute_snr_spots(
                 image=rna_image.astype(np.float64), 
                 spots=canidate_spots.astype(np.float64), 
                 voxel_size=voxel_size_nm, 
@@ -89,8 +89,8 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             
             # concate results into dataframe
             snr_spots = np.array(snr_spots).reshape(-1, 1)
-            max_signal = np.array(max_signal).reshape(-1, 1)
-            spots_df = pd.DataFrame(np.hstack([canidate_spots, snr_spots, max_signal]), columns=['z (px)', 'y (px)', 'x (px)', 'snr', 'max signal'] if is_3d else ['y (px)', 'x (px)', 'snr', 'max signal'])
+            signal = np.array(signal).reshape(-1, 1)
+            spots_df = pd.DataFrame(np.hstack([canidate_spots, snr_spots, signal]), columns=['z (px)', 'y (px)', 'x (px)', 'snr', 'max signal'] if is_3d else ['y (px)', 'x (px)', 'snr', 'max signal'])
 
             # filter canidate spots
             spots_df = spots_df[
