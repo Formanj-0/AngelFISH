@@ -8,5 +8,6 @@ from .Filter_CSV import filter_csv
 from .Export_Images import main as export_images
 from .Reconcile_Data import main as reconcile_data
 from .Get_Sharpness import calculate_sharpness
+from .BigFishSpotDetection import identify_spots, decompose_dense_regions
 
 from .Get_Task import get_task

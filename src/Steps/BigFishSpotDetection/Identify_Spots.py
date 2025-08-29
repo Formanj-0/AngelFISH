@@ -11,13 +11,12 @@ from AngelFISH.src import load_data
 
 
 def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False):
-
     # required updates to the receipt
     if step_name not in receipt['step_order']:
         receipt['step_order'].append(step_name)
     if step_name not in receipt['steps'].keys():
         receipt['steps'][step_name] = {}
-    receipt['steps'][step_name]['task_name'] = 'reconcile_data'
+    receipt['steps'][step_name]['task_name'] = 'identify_spots' # make sure to change this for different steps 
     if new_params:
         for k, v in new_params.items():
             receipt['steps'][step_name][k] = v
@@ -32,7 +31,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
     voxel_size_z = np.abs(metadata(p=0, t=0, z=1)['ZPosition_um_Intended'] - metadata(p=0, t=0, z=0)['ZPosition_um_Intended']) * 1000
 
     # Preallocate memmory
-    temp_dir = os.path.join(receipt['dirs']['analysis_dir'], spot_name)
+    temp_dir = os.path.join(receipt['dirs']['analysis_dir'], f'{spot_name}_CanidentSpots')
     os.makedirs(temp_dir, exist_ok=True)
     thresholds = {}
 
@@ -42,14 +41,15 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         spot_yx = args['spot_yx']
         spot_z = args['spot_z']
         images = data['images']
-        is_3d = len(images.shape[3]) > 1
-        voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if is_3d else (int(voxel_size_yx), int(voxel_size_yx))
-        spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if is_3d else (int(spot_yx), int(spot_yx))
-        threshold = args['threshold']
-        use_log_hook = args.get('use_log_hook', False)
-        minimum_distance = args.get('minDistance', None)
         channel = args['channel']
         spot_name = args['spot_name']
+
+        is_3d = images.shape[3] > 1
+        voxel_size_nm = (int(voxel_size_z), int(voxel_size_yx), int(voxel_size_yx)) if is_3d else (int(voxel_size_yx), int(voxel_size_yx))
+        spot_size_nm = (int(spot_z), int(spot_yx), int(spot_yx)) if is_3d else (int(spot_yx), int(spot_yx))
+        threshold = args.get('threshold', None)
+        use_log_hook = args.get('use_log_hook', False)
+        minimum_distance = args.get('minDistance', None)
         fig_dir = receipt['dirs']['fig_dir']
         display_plots = args.get('display_plots', False)
 
@@ -91,7 +91,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             # add additional information
             spots_df['timepoint'] = [t]*len(spots_df)
             spots_df['fov'] = [p]*len(spots_df)
-            spots_df['FISH_Channel'] = [channel]*len(spots_df)
+            spots_df['channel'] = [channel]*len(spots_df)
             expermental_metadata = metadata(p=p, t=t, z=0 ,c=channel).get('experimental_metadata', None)
             if expermental_metadata is not None:
                 for key, value in expermental_metadata.items():
@@ -116,6 +116,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             for t in range(data['tt']) if t_range is None else t_range:
                 rna_image = images[p, t, channel]
                 rna_image = np.squeeze(rna_image)
+                rna_image = rna_image.compute()
                 run_frame(rna_image, p, t)
 
     def compress_data(save_data:bool=True):
@@ -154,59 +155,40 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         compress_data()
         release_memory()
     else:
+        viewer = napari.Viewer()
+        viewer.add_image(data['images'], name="images", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+                        scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1])
+
         @magicgui(
                 call_button='Run'
         )
         def interface( 
-                    spot_name: str, 
-                    FISHChannel: int,  
-                    nucChannel: int,
-                    spot_yx: float, 
-                    spot_z: float, 
-                    p:int=0, 
-                    t:int=0, 
-                    threshold: Union[int, str] = None, 
-                    snr_threshold: float = None, 
-                    snr_ratio: float = None,
-                    alpha: float = 0.7, 
-                    beta:float = 1, 
-                    gamma:float = 5, 
-                    cluster_radius:int = 500, 
-                    min_num_spot_per_cluster:int = 4, 
-                    use_log_hook:bool = False, 
-                    verbose:bool = False, 
-                    display_plots: bool = False, 
-                    use_pca: bool = False,
-                    sub_pixel_fitting: bool = False, 
-                    minDistance:float = None,):
+                Channel: int = args.get('channel', 0),  
+                nucChannel: int = args.get('nucChannel', 0),
+                spot_yx: float = args.get('spot_yx', 1.0), 
+                spot_z: float = args.get('spot_z', 1.0),  
+                threshold: Union[int, str] = args.get('threshold', None), 
+                use_log_hook: bool = args.get('use_log_hook', False),  
+                display_plots: bool = args.get('display_plots', False), 
+                minDistance: float = args.get('minDistance', None),
+                ):
             try:
                 receipt['steps'][step_name]['spot_name'] = spot_name
-                receipt['steps'][step_name]['FISHChannel'] = FISHChannel
+                receipt['steps'][step_name]['channel'] = Channel
                 receipt['steps'][step_name]['nucChannel'] = nucChannel
                 receipt['steps'][step_name]['spot_yx'] = spot_yx
                 receipt['steps'][step_name]['spot_z'] = spot_z
-                receipt['steps'][step_name]['p'] = p
-                receipt['steps'][step_name]['t'] = t
                 receipt['steps'][step_name]['threshold'] = threshold
-                receipt['steps'][step_name]['snr_threshold'] = snr_threshold
-                receipt['steps'][step_name]['snr_ratio'] = snr_ratio
-                receipt['steps'][step_name]['alpha'] = alpha
-                receipt['steps'][step_name]['beta'] = beta
-                receipt['steps'][step_name]['gamma'] = gamma
-                receipt['steps'][step_name]['cluster_radius'] = cluster_radius
-                receipt['steps'][step_name]['min_num_spot_per_cluster'] = min_num_spot_per_cluster
                 receipt['steps'][step_name]['use_log_hook'] = use_log_hook
-                receipt['steps'][step_name]['verbose'] = verbose
                 receipt['steps'][step_name]['display_plots'] = display_plots
-                receipt['steps'][step_name]['use_pca'] = use_pca
-                receipt['steps'][step_name]['sub_pixel_fitting'] = sub_pixel_fitting
                 receipt['steps'][step_name]['minDistance'] = minDistance
-                run(receipt, data, [p], [t])
+                # Get current p and t from the viewer's dims
+                current_p = int(viewer.dims.current_step[0])
+                current_t = int(viewer.dims.current_step[1])
+                run(receipt, data, [current_p], [current_t])
             except Exception as e:
                 print(f"[Error] Exception during spot detection: {e}")
             final_df = compress_data(False)
-
-            c = receipt['steps'][step_name]['FISHChannel'] 
 
             for layer_name in ["spots"]:
                 if layer_name in viewer.layers:
@@ -214,7 +196,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
 
             # Show spots
             if final_df is not None:
-                coords = final_df[["fov", "timepoint", "channel", "z_px", "y_px", "x_px"]].values
+                coords = final_df[["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]].values
                 viewer.add_points(
                     coords,
                     name="spots",
@@ -226,9 +208,6 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             else:
                 print('no spots found')
 
-        viewer = napari.Viewer()
-        viewer.add_image(data['images'], name="images", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
-                        scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1])
         viewer.window.add_dock_widget(interface, area='right')
 
         def on_destroyed(obj=None):
