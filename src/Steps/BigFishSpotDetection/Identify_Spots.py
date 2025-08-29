@@ -52,6 +52,10 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         minimum_distance = args.get('minDistance', None)
         fig_dir = receipt['dirs']['fig_dir']
         display_plots = args.get('display_plots', False)
+        min_snr = args.get('min_snr', 0)
+        max_snr = args.get('max_snr', np.inf)
+        min_signal = args.get('min_signal', 0)
+        max_signal = args.get('max_signal', np.inf)
 
         # run image processing
         def run_frame(rna_image, p, t):
@@ -87,6 +91,17 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             snr_spots = np.array(snr_spots).reshape(-1, 1)
             max_signal = np.array(max_signal).reshape(-1, 1)
             spots_df = pd.DataFrame(np.hstack([canidate_spots, snr_spots, max_signal]), columns=['z (px)', 'y (px)', 'x (px)', 'snr', 'max signal'] if is_3d else ['y (px)', 'x (px)', 'snr', 'max signal'])
+
+            # filter canidate spots
+            spots_df = spots_df[
+                (spots_df['snr'] >= min_snr) &
+                (spots_df['snr'] <= max_snr) &
+                (spots_df['max signal'] >= min_signal) &
+                (spots_df['max signal'] <= max_signal)
+            ].reset_index(drop=True)
+
+            # filter based on cell props
+            # TODO
 
             # add additional information
             spots_df['timepoint'] = [t]*len(spots_df)
@@ -163,15 +178,19 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 call_button='Run'
         )
         def interface( 
-                Channel: int = args.get('channel', 0),  
-                nucChannel: int = args.get('nucChannel', 0),
-                spot_yx: float = args.get('spot_yx', 1.0), 
-                spot_z: float = args.get('spot_z', 1.0),  
-                threshold: Union[int, str] = args.get('threshold', None), 
-                use_log_hook: bool = args.get('use_log_hook', False),  
-                display_plots: bool = args.get('display_plots', False), 
-                minDistance: float = args.get('minDistance', None),
-                ):
+            Channel: int = args.get('channel', 0),  
+            nucChannel: int = args.get('nucChannel', 0),
+            spot_yx: float = args.get('spot_yx', 1.0), 
+            spot_z: float = args.get('spot_z', 1.0),  
+            threshold: Union[int, str] = args.get('threshold', None), 
+            use_log_hook: bool = args.get('use_log_hook', False),  
+            display_plots: bool = args.get('display_plots', False), 
+            minDistance: float = args.get('minDistance', None),
+            min_snr: float = args.get('min_snr', 0),
+            max_snr: float = args.get('max_snr', np.inf),
+            min_signal: float = args.get('min_signal', 0),
+            max_signal: float = args.get('max_signal', np.inf),
+            ):
             try:
                 receipt['steps'][step_name]['spot_name'] = spot_name
                 receipt['steps'][step_name]['channel'] = Channel
@@ -182,6 +201,10 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 receipt['steps'][step_name]['use_log_hook'] = use_log_hook
                 receipt['steps'][step_name]['display_plots'] = display_plots
                 receipt['steps'][step_name]['minDistance'] = minDistance
+                receipt['steps'][step_name]['min_snr'] = min_snr
+                receipt['steps'][step_name]['max_snr'] = max_snr
+                receipt['steps'][step_name]['min_signal'] = min_signal
+                receipt['steps'][step_name]['max_signal'] = max_signal
                 # Get current p and t from the viewer's dims
                 current_p = int(viewer.dims.current_step[0])
                 current_t = int(viewer.dims.current_step[1])
