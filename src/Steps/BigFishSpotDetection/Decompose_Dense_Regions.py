@@ -148,7 +148,7 @@ def decompose_dense_regions(receipt, step_name:str, new_params:dict=None, gui:bo
             # write data
             if save_data:
                 if df is not None:
-                    df.to_csv(os.path.join(results_dir ,f'{spot_name}_canidateSpots.csv'), index=False)
+                    df.to_csv(os.path.join(results_dir ,f'{spot_name}_{pattern}.csv'), index=False)
             return df
 
         spotsPostDecomposition = match_files_and_save('spotsPostDecomposition')
