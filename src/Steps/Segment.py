@@ -204,7 +204,6 @@ class segment(abstract_task):
                                     ]}
     )
     def interface(self, 
-                p:int=0, t:int=0, 
                 mask_name:str='default_name',
                 channel:int=0, 
                 pretrained_model_name: pathlib.Path = None,  
@@ -229,7 +228,9 @@ class segment(abstract_task):
                 cellprob_threshold
             )
             self.preallocate_memmory()
-            self.run_process(p, t)
+            current_p = int(self.viewer.dims.current_step[0])
+            current_t = int(self.viewer.dims.current_step[1])
+            self.run_process(current_p, current_t)
         except Exception as e:
             print(f"[Error] Exception during segmentation: {e}")
 
