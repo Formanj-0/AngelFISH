@@ -16,7 +16,7 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
         receipt['step_order'].append(step_name)
     if step_name not in receipt['steps'].keys():
         receipt['steps'][step_name] = {}
-    receipt['steps'][step_name]['task_name'] = 'identify_spots' # make sure to change this for different steps 
+    receipt['steps'][step_name]['task_name'] = 'get_cell_counts' # make sure to change this for different steps 
     if new_params:
         for k, v in new_params.items():
             receipt['steps'][step_name][k] = v
@@ -159,9 +159,9 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                 spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(c_list).reshape(-1, 1), np.array(n_list).reshape(-1, 1)])
 
                 spots = pd.DataFrame(spots, columns=['z (px)','y (px)','x (px)', 'cluster index', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'cluster index', 'is nuc', 'cell label', 'nuc label'])
-                clusters = pd.DataFrame(clusters, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'])
-                ts = pd.DataFrame(ts, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index'])
-                foci = pd.DataFrame(foci, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index'])
+                clusters = pd.DataFrame(clusters, columns=['z (px)','y (px)','x (px)', 'nb_rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'nb_rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'])
+                ts = pd.DataFrame(ts, columns=['z (px)','y (px)','x (px)', 'nb_rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'nb_rna', 'cluster index'])
+                foci = pd.DataFrame(foci, columns=['z (px)','y (px)','x (px)', 'nb_rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'nb_rna', 'cluster index'])
                 spots_in = pd.DataFrame(spots_in, columns=['z (px)','y (px)','x (px)', 'cluster index'] if is_3d else ['y (px)','x (px)', 'cluster index'])
                 spots_out = pd.DataFrame(spots_out, columns=['z (px)','y (px)','x (px)', 'cluster index'] if is_3d else ['y (px)','x (px)', 'cluster index'])
                 spots_no_ts = pd.DataFrame(spots_no_ts, columns=['z (px)','y (px)','x (px)', 'foci index'] if is_3d else ['y (px)','x (px)', 'foci index'])
@@ -219,7 +219,7 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
         all_files = os.listdir(temp_dir)
         def match_files_and_save(pattern):
             # Use regex to find matching files
-            re_pattern = re.compile(rf'.*_{pattern}\.csv$')
+            re_pattern = re.compile(rf'^p\d+_t\d+_{re.escape(spot_name)}_{pattern}\.csv$')
             files = [os.path.join(temp_dir, f) for f in all_files if re_pattern.match(f)]
             df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True) if files else None
             # write data
@@ -273,13 +273,13 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
             temp = np.zeros_like(data['images'])
             temp[:, :, receipt['steps'][step_name]['channel'], :, :, :] = mask
             return temp
-        if data.get('nuc_masks', False):
+        if data.get('nuc_masks', None) is not None:
             nuc_masks = add_dummy_channels(data['nuc_masks'])
-            viewer.add_image(nuc_masks, name="nuc masks", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+            viewer.add_labels(nuc_masks, name="nuc masks", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
                 scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1])
-        if data.get('cyto_masks', False):
+        if data.get('cyto_masks', None) is not None:
             cyto_masks = add_dummy_channels(data['cyto_masks'])
-            viewer.add_image(cyto_masks, name="cyto masks", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
+            viewer.add_labels(cyto_masks, name="cyto masks", axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
                     scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1])
         @magicgui(
                 call_button='Run'
@@ -300,11 +300,11 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                 print(f"[Error] Exception during spot detection: {e}")
             cellCounts, spots, clusters, ts, foci, spots_in, spots_out, spots_no_ts = compress_data(False)
 
-            for layer_name in ["spots", 'spots', 'clusters', 'ts', 'foci', 'spots_in', 'spots_out', 'spots_no_ts']:
+            for layer_name in ['spots', 'clusters', 'ts', 'foci', 'spots_in', 'spots_out', 'spots_no_ts']:
                 if layer_name in viewer.layers:
                     viewer.layers.remove(layer_name)
 
-            def display_df(df, name):
+            def display_df(df, name, color, visible:bool=True):
                 # Show spots
                 if df is not None:
                     coords = df[["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]].values
@@ -312,20 +312,21 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                         coords,
                         name=name,
                         size=5,
-                        face_color="red",
-                        scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1]
+                        face_color=color,
+                        scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1],
+                        visible=visible
                     )
                     viewer.layers[name].refresh()
                 else:
                     print(f'no {name} found')
 
-            display_df(spots, 'spots')
-            display_df(clusters, 'clusters')
-            display_df(ts, 'ts')
-            display_df(foci, 'foci')
-            display_df(spots_in, 'spots_in')
-            display_df(spots_out, 'spots_out')
-            display_df(spots_no_ts, 'spots_no_ts')
+            display_df(spots, 'spots', 'red', True)
+            display_df(clusters, 'clusters', 'cyan', False)
+            display_df(ts, 'ts', 'magenta', True)
+            display_df(foci, 'foci', 'yellow', True)
+            display_df(spots_in, 'spots_in', 'green', False)
+            display_df(spots_out, 'spots_out', 'blue', False)
+            display_df(spots_no_ts, 'spots_no_ts', 'orange', False)
 
             if cellCounts is not None:
                 mask = data.get('cyto_masks', None)
@@ -350,7 +351,7 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                         centroid = prop.centroid  # (row, col)
 
                         # Find RNA count for this cell from DataFrame
-                        row = cellCounts[(cellCounts["cell_id"] == label_id) & (spots['fov'] == current_p) & (spots['timepoint'] == current_t)]
+                        row = cellCounts[(cellCounts["cell_id"] == label_id) & (cellCounts['fov'] == current_p) & (cellCounts['timepoint'] == current_t)]
                         if not row.empty:
                             count = int(row["nb_rna"].values[0])
                             texts.append(str(count))
