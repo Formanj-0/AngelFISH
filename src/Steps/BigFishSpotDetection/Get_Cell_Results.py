@@ -140,16 +140,16 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                     return df
 
                 ##### Update spots to include cells
-                c_list = [cell_label[s[1], s[2]] for s in spots] # TODO make this work for and 3D
-                n_list = [nuc_label[s[1], s[2]] for s in spots]
+                c_list = [cell_label[int(s[1]), int(s[2])] for s in spots] # TODO make this work for and 3D
+                n_list = [nuc_label[int(s[1]), int(s[2])] for s in spots]
                 is_nuc = [(n>0 and c>0) for n,c in zip(n_list,c_list)]
                 errors = [(n>0 and c>0 and n!=c) for n,c in zip(n_list,c_list)]
                 if any(errors):
                     raise ValueError('Miss matching cell labels')
 
                 # For clusters
-                c_list_clusters = [cell_label[s[1], s[2]] for s in clusters] # TODO make this work for and 3D
-                n_list_clusters = [nuc_label[s[1], s[2]] for s in clusters]
+                c_list_clusters = [cell_label[int(s[1]), int(s[2])] for s in clusters] # TODO make this work for and 3D
+                n_list_clusters = [nuc_label[int(s[1]), int(s[2])] for s in clusters]
                 is_nuc_clusters = [(n>0 and c>0) for n,c in zip(n_list_clusters,c_list_clusters)]
                 errors_clusters = [(n>0 and c>0 and n!=c) for n,c in zip(n_list_clusters,c_list_clusters)]
                 if any(errors_clusters):
@@ -158,12 +158,12 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                 clusters = np.hstack([clusters, np.array(is_nuc_clusters).reshape(-1, 1), np.array(c_list_clusters).reshape(-1, 1), np.array(n_list_clusters).reshape(-1, 1)])
                 spots = np.hstack([spots, np.array(is_nuc).reshape(-1, 1), np.array(c_list).reshape(-1, 1), np.array(n_list).reshape(-1, 1)])
 
-                spots = pd.DataFrame(spots, columns=['z (px)','y (px)','x (px)', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'is nuc', 'cell label', 'nuc label'])
+                spots = pd.DataFrame(spots, columns=['z (px)','y (px)','x (px)', 'cluster index', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'cluster index', 'is nuc', 'cell label', 'nuc label'])
                 clusters = pd.DataFrame(clusters, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index', 'is nuc', 'cell label', 'nuc label'])
                 ts = pd.DataFrame(ts, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index'])
                 foci = pd.DataFrame(foci, columns=['z (px)','y (px)','x (px)', 'num rna', 'cluster index'] if is_3d else ['y (px)','x (px)', 'num rna', 'cluster index'])
-                spots_in = pd.DataFrame(spots_in, columns=['z (px)','y (px)','x (px)'] if is_3d else ['y (px)','x (px)'])
-                spots_out = pd.DataFrame(spots_out, columns=['z (px)','y (px)','x (px)'] if is_3d else ['y (px)','x (px)'])
+                spots_in = pd.DataFrame(spots_in, columns=['z (px)','y (px)','x (px)', 'cluster index'] if is_3d else ['y (px)','x (px)', 'cluster index'])
+                spots_out = pd.DataFrame(spots_out, columns=['z (px)','y (px)','x (px)', 'cluster index'] if is_3d else ['y (px)','x (px)', 'cluster index'])
                 spots_no_ts = pd.DataFrame(spots_no_ts, columns=['z (px)','y (px)','x (px)', 'foci index'] if is_3d else ['y (px)','x (px)', 'foci index'])
 
                 cell_counts = add_metadata_to_df(cell_counts)
