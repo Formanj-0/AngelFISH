@@ -56,9 +56,11 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         max_snr = args.get('max_snr', np.inf)
         min_signal = args.get('min_signal', 0)
         max_signal = args.get('max_signal', np.inf)
+        background_filter_min_z_score = args.get('min_z_score', -np.inf)
+        mask_name = args.get('mask_name', None)
 
         # run image processing
-        def run_frame(rna_image, p, t):
+        def run_frame(rna_image, p, t, mask=None):
             if use_log_hook:
                 if minimum_distance is None:
                     spot_radius_px = detection.get_object_radius_pixel(
@@ -101,7 +103,23 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             ].reset_index(drop=True)
 
             # filter based on cell props
-            # TODO
+            if mask is not None:
+                labels = np.unique(mask)
+                # mean_background = {l: np.mean(rna_image[mask == l]) for l in labels}
+                median_background = {l: np.median(rna_image[mask == l]) for l in labels}
+                std_background = {l: np.std(rna_image[mask == l]) for l in labels}
+                coords = spots_df[['z (px)', 'y (px)', 'x (px)'] if is_3d else ['y (px)', 'x (px)']]
+                if is_3d:
+                    spot_labels = [mask[int(c[0]), int(c[1]), int(c[2])] for c in coords.values]
+                else: 
+                    spot_labels = [mask[int(c[0]), int(c[1])] for c in coords.values]
+                spots_df['spot_labels'] = spot_labels
+                spots_df = spots_df[
+                    spots_df.apply(
+                        lambda row: row['max signal'] >= median_background[row['spot_labels']] + background_filter_min_z_score * std_background[row['spot_labels']],
+                        axis=1
+                    )
+                ].reset_index(drop=True)
 
             # add additional information
             spots_df['timepoint'] = [t]*len(spots_df)
@@ -129,10 +147,14 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         # run the data
         for p in range(data['pp']) if p_range is None else p_range:
             for t in range(data['tt']) if t_range is None else t_range:
+                if mask_name is not None:
+                    mask = data[mask_name][p, t].compute()
+                else:
+                    mask = None
                 rna_image = images[p, t, channel]
                 rna_image = np.squeeze(rna_image)
                 rna_image = rna_image.compute()
-                run_frame(rna_image, p, t)
+                run_frame(rna_image, p, t, mask)
 
     def compress_data(save_data:bool=True):
         # Compress Data 
@@ -187,9 +209,11 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             display_plots: bool = args.get('display_plots', False), 
             minDistance: float = args.get('minDistance', None),
             min_snr: float = args.get('min_snr', 0),
-            max_snr: float = args.get('max_snr', np.inf),
+            max_snr: float = args.get('max_snr', 1e6),
             min_signal: float = args.get('min_signal', 0),
-            max_signal: float = args.get('max_signal', np.inf),
+            max_signal: float = args.get('max_signal', 1e6),
+            min_z_score: float = args.get('min_z_score', -1e6),
+            mask_name: str = args.get('mask_name', '')
             ):
             try:
                 receipt['steps'][step_name]['spot_name'] = spot_name
@@ -205,6 +229,9 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 receipt['steps'][step_name]['max_snr'] = max_snr
                 receipt['steps'][step_name]['min_signal'] = min_signal
                 receipt['steps'][step_name]['max_signal'] = max_signal
+                receipt['steps'][step_name]['min_z_score'] = min_z_score
+                receipt['steps'][step_name]['mask_name'] = mask_name if len(mask_name) > 1 else None
+
                 # Get current p and t from the viewer's dims
                 current_p = int(viewer.dims.current_step[0])
                 current_t = int(viewer.dims.current_step[1])
@@ -235,6 +262,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
 
         def on_destroyed(obj=None):
             print('cleaning up')
+            run(receipt, data)
             compress_data()
             release_memory()
 
