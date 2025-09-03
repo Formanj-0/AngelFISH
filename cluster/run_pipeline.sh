@@ -7,7 +7,7 @@
 #SBATCH --output=pipelines/job_output_%j.log  # Redirect output to pipelines directory with job ID
 #SBATCH --error=pipelines/job_error_%j.log    # Redirect errors to pipelines directory with job ID
 #SBATCH --no-requeue
-#SBATCH --exclusive                 # Limit to one job per node
+# #SBATCH --exclusive                 # Limit to one job per node
 
 # Load environment (edit to match your cluster)
 module load gnu9/9.4.0
