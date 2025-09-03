@@ -105,15 +105,51 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             # filter based on cell props
             if mask is not None:
                 labels = np.unique(mask)
-                # mean_background = {l: np.mean(rna_image[mask == l]) for l in labels}
-                median_background = {l: np.median(rna_image[mask == l]) for l in labels}
-                std_background = {l: np.std(rna_image[mask == l]) for l in labels}
-                coords = spots_df[['z (px)', 'y (px)', 'x (px)'] if is_3d else ['y (px)', 'x (px)']]
+
+                # Create a mask of the same shape, marking spot areas as True
+                spot_coords = spots_df[['z (px)', 'y (px)', 'x (px)']] if is_3d else spots_df[['y (px)', 'x (px)']]
+                spot_mask = np.zeros_like(mask, dtype=bool)
+                
+                # Define a radius around each spot (in pixels) to exclude
+                radius_yx = int(spot_yx // voxel_size_yx)
+                radius_z = int(spot_z // voxel_size_z) if is_3d else 0
+
+                # Mark region around each spot
+                for coord in spot_coords.values:
+                    if is_3d:
+                        z, y, x = map(int, coord)
+                        z_start, z_end = max(0, z - radius_z), min(mask.shape[0], z + radius_z + 1)
+                        y_start, y_end = max(0, y - radius_yx), min(mask.shape[1], y + radius_yx + 1)
+                        x_start, x_end = max(0, x - radius_yx), min(mask.shape[2], x + radius_yx + 1)
+                        spot_mask[z_start:z_end, y_start:y_end, x_start:x_end] = True
+                    else:
+                        y, x = map(int, coord)
+                        y_start, y_end = max(0, y - radius_yx), min(mask.shape[0], y + radius_yx + 1)
+                        x_start, x_end = max(0, x - radius_yx), min(mask.shape[1], x + radius_yx + 1)
+                        spot_mask[y_start:y_end, x_start:x_end] = True
+
+                median_background = {}
+                std_background = {}
+                for l in labels:
+                    cell_mask = (mask == l)
+                    background_mask = cell_mask & (~spot_mask)
+                    if np.any(background_mask):
+                        median_background[l] = np.median(rna_image[background_mask])
+                        std_background[l] = np.std(rna_image[background_mask])
+                    else:
+                        # Fallback in case no background pixels are left
+                        median_background[l] = 0
+                        std_background[l] = 1
+
+                # Label each spot with corresponding mask
+                coords = spots_df[['z (px)', 'y (px)', 'x (px)']] if is_3d else spots_df[['y (px)', 'x (px)']]
                 if is_3d:
                     spot_labels = [mask[int(c[0]), int(c[1]), int(c[2])] for c in coords.values]
-                else: 
+                else:
                     spot_labels = [mask[int(c[0]), int(c[1])] for c in coords.values]
                 spots_df['spot_labels'] = spot_labels
+
+                # Filter spots based on z-score relative to spot-excluded background
                 spots_df = spots_df[
                     spots_df.apply(
                         lambda row: row['max signal'] >= median_background[row['spot_labels']] + background_filter_min_z_score * std_background[row['spot_labels']],
