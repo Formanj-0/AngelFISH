@@ -55,7 +55,7 @@ def load_pycromanager(location, analysis_name):
                 data[key] = returned_data
 
         masks_dir = os.path.join(location, 'masks')
-        if os.path.exists(results_dir):
+        if os.path.exists(masks_dir):
             for file in os.listdir(masks_dir):
                 key, returned_data = read_data(os.path.join(masks_dir, file))
                 data[key] = returned_data
