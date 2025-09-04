@@ -93,6 +93,17 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             snr_spots = np.array(snr_spots).reshape(-1, 1)
             signal = np.array(signal).reshape(-1, 1)
             spots_df = pd.DataFrame(np.hstack([canidate_spots, snr_spots, signal]), columns=['z (px)', 'y (px)', 'x (px)', 'snr', 'max signal'] if is_3d else ['y (px)', 'x (px)', 'snr', 'max signal'])
+            spots_df['timepoint'] = [t]*len(spots_df)
+            spots_df['fov'] = [p]*len(spots_df)
+            spots_df['channel'] = [channel]*len(spots_df)
+            expermental_metadata = metadata(p=p, t=t, z=0 ,c=channel).get('experimental_metadata', None)
+            if expermental_metadata is not None:
+                for key, value in expermental_metadata.items():
+                    spots_df[key] = [value] * len(spots_df)
+
+            # save data to temp 
+            path = os.path.join(temp_dir, f'p{p}_t{t}_{spot_name}_canidateSpotPreFilter.csv')
+            spots_df.to_csv(path, index=False)
 
             # filter canidate spots
             spots_df = spots_df[
@@ -128,17 +139,17 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                         x_start, x_end = max(0, x - radius_yx), min(mask.shape[1], x + radius_yx + 1)
                         spot_mask[y_start:y_end, x_start:x_end] = True
 
-                median_background = {}
+                mean_background = {}
                 std_background = {}
                 for l in labels:
                     cell_mask = (mask == l)
                     background_mask = cell_mask & (~spot_mask)
                     if np.any(background_mask):
-                        median_background[l] = np.median(rna_image[background_mask])
+                        mean_background[l] = np.mean(rna_image[background_mask])
                         std_background[l] = np.std(rna_image[background_mask])
                     else:
                         # Fallback in case no background pixels are left
-                        median_background[l] = 0
+                        mean_background[l] = 0
                         std_background[l] = 1
 
                 # Label each spot with corresponding mask
@@ -152,7 +163,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 # Filter spots based on z-score relative to spot-excluded background
                 spots_df = spots_df[
                     spots_df.apply(
-                        lambda row: row['max signal'] >= median_background[row['spot_labels']] + background_filter_min_z_score * std_background[row['spot_labels']],
+                        lambda row: row['max signal'] >= mean_background[row['spot_labels']] + background_filter_min_z_score * std_background[row['spot_labels']],
                         axis=1
                     )
                 ].reset_index(drop=True)
@@ -197,15 +208,20 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
         results_dir = receipt['dirs']['results_dir']
         # List all files in the temp_dir
         all_files = os.listdir(temp_dir)
-        # Use regex to find matching files
-        pattern = re.compile(r'.*_canidateSpots\.csv$')
-        files = [os.path.join(temp_dir, f) for f in all_files if pattern.match(f)]
-        final_df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True) if files else None
-        # write data
-        if save_data:
-            if final_df is not None:
-                final_df.to_csv(os.path.join(results_dir ,f'{spot_name}_canidateSpots.csv'), index=False)
-        return final_df
+        def match_files_and_save(pattern):
+            # Use regex to find matching files
+            re_pattern = re.compile(rf'^p\d+_t\d+_{re.escape(spot_name)}_{pattern}\.csv$')
+            files = [os.path.join(temp_dir, f) for f in all_files if re_pattern.match(f)]
+            df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True) if files else None
+            # write data
+            if save_data:
+                if df is not None:
+                    df.to_csv(os.path.join(results_dir ,f'{spot_name}_{pattern}.csv'), index=False)
+            return df
+        canidateSpots = match_files_and_save('canidateSpots')
+        canidateSpotPreFilter = match_files_and_save('canidateSpotPreFilter')
+        
+        return canidateSpots, canidateSpotPreFilter
 
     def release_memory():
         all_files = os.listdir(temp_dir)
@@ -233,13 +249,14 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                         scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1])
 
         @magicgui(
-                call_button='Run'
+                call_button='Run',
+                spot_z={'min': 0, 'max': 1e6, 'step': 1.0}  
         )
         def interface( 
             Channel: int = args.get('channel', 0),  
             nucChannel: int = args.get('nucChannel', 0),
-            spot_yx: float = args.get('spot_yx', 1.0), 
-            spot_z: float = args.get('spot_z', 1.0),  
+            spot_yx: int = args.get('spot_yx', 130), 
+            spot_z: int = args.get('spot_z', 500),  
             threshold: Union[int, str] = args.get('threshold', None), 
             use_log_hook: bool = args.get('use_log_hook', False),  
             display_plots: bool = args.get('display_plots', False), 
@@ -274,15 +291,15 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 run(receipt, data, [current_p], [current_t])
             except Exception as e:
                 print(f"[Error] Exception during spot detection: {e}")
-            final_df = compress_data(False)
+            canidateSpots, canidateSpotPreFilter = compress_data(False)
 
-            for layer_name in ["spots"]:
+            for layer_name in ["spots", 'filtered_spots']:
                 if layer_name in viewer.layers:
                     viewer.layers.remove(layer_name)
 
             # Show spots
-            if final_df is not None:
-                coords = final_df[["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]].values
+            if canidateSpots is not None:
+                coords = canidateSpots[["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]].values
                 viewer.add_points(
                     coords,
                     name="spots",
@@ -293,6 +310,31 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
                 viewer.layers['spots'].refresh()
             else:
                 print('no spots found')
+
+            if canidateSpotPreFilter is not None:
+                # Find entries in canidateSpotPreFilter that are not in canidateSpots
+                # Drop based on spot coordinates and metadata columns
+                key_cols = ["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]
+                diff = pd.merge(
+                    canidateSpotPreFilter,
+                    canidateSpots[key_cols].drop_duplicates(),
+                    on=key_cols,
+                    how="left",
+                    indicator=True
+                )
+                diff = diff[diff["_merge"] == "left_only"].drop(columns=["_merge"])
+                if not diff.empty:
+                    coords = diff[["fov", "timepoint", "channel", "z (px)", "y (px)", "x (px)"]].values
+                    viewer.add_points(
+                        coords,
+                        name="filtered_spots",
+                        size=5,
+                        face_color="blue",
+                        scale=[1, 1, 1, voxel_size_z/voxel_size_yx, 1, 1]
+                    )
+                    viewer.layers['filtered_spots'].refresh()
+                else:
+                    print('no filtered spots found')
 
         viewer.window.add_dock_widget(interface, area='right')
 
