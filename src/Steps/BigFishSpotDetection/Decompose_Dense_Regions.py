@@ -142,7 +142,7 @@ def decompose_dense_regions(receipt, step_name:str, new_params:dict=None, gui:bo
         all_files = os.listdir(temp_dir)
         def match_files_and_save(pattern):
             # Use regex to find matching files
-            re_pattern = re.compile(rf'.*_{pattern}\.csv$')
+            re_pattern = re.compile(rf'^p\d+_t\d+_{re.escape(spot_name)}_{pattern}\.csv$')
             files = [os.path.join(temp_dir, f) for f in all_files if re_pattern.match(f)]
             df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True) if files else None
             # write data
