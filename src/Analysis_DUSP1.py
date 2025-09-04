@@ -616,21 +616,6 @@ class DUSP1Measurement:
                             .reindex(cell_ids, fill_value=0)
         num_cyto_spots = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id').size()\
                              .reindex(cell_ids, fill_value=0)
-        
-        # Random Forest prediction count:
-        if 'rf_prediction' in self.spots.columns:
-            RF_count = self.spots.groupby('unique_cell_id')['rf_prediction'] \
-                                .sum().reindex(cell_ids, fill_value=0)
-            nuc_RF_count = self.spots[self.spots['is_nuc'] == 1] \
-                                .groupby('unique_cell_id')['rf_prediction'] \
-                                .sum().reindex(cell_ids, fill_value=0)
-            cyto_RF_count = self.spots[self.spots['is_nuc'] == 0] \
-                                .groupby('unique_cell_id')['rf_prediction'] \
-                                .sum().reindex(cell_ids, fill_value=0)
-        else:
-            RF_count = pd.Series(index=cell_ids, data=np.nan)
-            nuc_RF_count = pd.Series(index=cell_ids, data=np.nan)
-            cyto_RF_count = pd.Series(index=cell_ids, data=np.nan)
 
         # Other cell properties from props:
         nuc_area = self.cellprops['nuc_area']
@@ -659,9 +644,6 @@ class DUSP1Measurement:
             'MG_count': mg_count.values,
             'nuc_MG_count': nuc_mg_count.values,
             'cyto_MG_count': cyto_mg_count.values,
-            'RF_count': RF_count.values,
-            'nuc_RF_count': nuc_RF_count.values,
-            'cyto_RF_count': cyto_RF_count.values,
             'num_spots': num_spots.values,
             'num_nuc_spots': num_nuc_spots.values,
             'num_cyto_spots': num_cyto_spots.values,
