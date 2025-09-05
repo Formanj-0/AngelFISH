@@ -513,6 +513,8 @@ class DUSP1Measurement:
         is_tpl: bool = False,
         tpl_time_list: List[int] = None,
         dex_rel2_tpl_time: List[int] = None,
+        drop_mismatch_cells: bool = False,
+        max_spots_per_cell: Optional[int] = None,
     ):
         self.spots = spots.copy()
         self.clusters = clusters.copy()
@@ -520,6 +522,9 @@ class DUSP1Measurement:
         self.is_tpl = is_tpl
         self.tpl_time_list = tpl_time_list
         self.dex_rel2_tpl_time = dex_rel2_tpl_time
+
+        self.drop_mismatch_cells = bool(drop_mismatch_cells)
+        self.max_spots_per_cell = max_spots_per_cell
 
         # Optional Random Forest classifier:
         # - If you pass in an estimator, just grab it
@@ -538,13 +543,6 @@ class DUSP1Measurement:
             else:
                 print(f"Model file not found at: {model}. Continuing without RF.")    
 
-    @staticmethod
-    def second_largest(series):
-        """Return the second-largest unique value in the series; if not available, return 0."""
-        unique_vals = np.sort(series.dropna().unique())
-        if len(unique_vals) < 2:
-            return 0
-        return unique_vals[-2]
     
     def measure(self, abs_threshold: float, mg_threshold: float) -> pd.DataFrame:
         """
@@ -604,10 +602,14 @@ class DUSP1Measurement:
         # Metrics from clusters:
         num_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
         num_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        second_largest_ts = (
+            self.clusters[self.clusters['is_nuc'] == 1]
+            .groupby('unique_cell_id')['nb_spots']
+            .apply(lambda s: (np.sort(s.dropna().unique())[-2] if s.dropna().nunique() >= 2 else 0))
+            .reindex(cell_ids, fill_value=0)
+        )        
         num_spots_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
         largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots'].max().reindex(cell_ids, fill_value=0)
-        second_largest_ts = self.clusters[self.clusters['is_nuc'] == 1].groupby('unique_cell_id')['nb_spots']\
-                              .apply(DUSP1Measurement.second_largest).reindex(cell_ids, fill_value=0)
         num_spots_foci = self.clusters[self.clusters['is_nuc'] == 0].groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
 
         # Left from original method:
@@ -724,6 +726,15 @@ class DUSP1Measurement:
         self.spots     = self.spots.sort_values(by='unique_cell_id')
         self.clusters  = self.clusters.sort_values(by='unique_cell_id')
         self.cellprops = self.cellprops.sort_values(by='unique_cell_id')
+        
+        # Normalize compartment labels to {1 (nucleus), 0 (cytoplasm)}
+        self.spots['is_nuc'] = self.spots['is_nuc'].map({1:1, 0:0, -1:0, True:1, False:0}).astype('Int64')
+        self.clusters['is_nuc'] = self.clusters['is_nuc'].map({1:1, 0:0, -1:0, True:1, False:0}).astype('Int64')
+        # Ensure dtype alignment for cluster_index across tables
+        if 'cluster_index' in self.spots.columns:
+            self.spots['cluster_index'] = self.spots['cluster_index'].astype('Int64')
+        if 'cluster_index' in self.clusters.columns:
+            self.clusters['cluster_index'] = self.clusters['cluster_index'].astype('Int64')       
         cell_ids = self.cellprops['unique_cell_id']
 
         # Spot-based counts
@@ -733,16 +744,60 @@ class DUSP1Measurement:
         num_cyto_spots = (self.spots[self.spots['is_nuc'] == 0]
                         .groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0))
 
-        # Cluster-based counts
-        ts = self.clusters[self.clusters['is_nuc'] == 1]
-        fc = self.clusters[self.clusters['is_nuc'] == 0]
-        num_ts         = ts.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
-        num_foci       = fc.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
-        num_spots_ts   = ts.groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
-        largest_ts     = ts.groupby('unique_cell_id')['nb_spots'].max().reindex(cell_ids, fill_value=0)
-        second_largest_ts = (ts.groupby('unique_cell_id')['nb_spots']
-                            .apply(self.second_largest).reindex(cell_ids, fill_value=0))
-        num_spots_foci = fc.groupby('unique_cell_id')['nb_spots'].sum().reindex(cell_ids, fill_value=0)
+        # Cluster-based counts (deduplicated by (cell, cluster_index))
+        clu_dedup = (
+            self.clusters.dropna(subset=['cluster_index'])
+                         .drop_duplicates(['unique_cell_id','cluster_index'])
+                         [['unique_cell_id','cluster_index','is_nuc']]
+                         .copy()
+        )
+        ts = clu_dedup[clu_dedup['is_nuc'] == 1]
+        fc = clu_dedup[clu_dedup['is_nuc'] == 0]
+        num_ts   = ts.groupby('unique_cell_id')['cluster_index'].nunique().reindex(cell_ids, fill_value=0)
+        num_foci = fc.groupby('unique_cell_id')['cluster_index'].nunique().reindex(cell_ids, fill_value=0)
+
+        # Merge cluster compartment onto each filtered spot (many-to-one guaranteed by dedup)
+        sp_clu = (
+            self.spots[['unique_cell_id','cluster_index','is_nuc']]
+                .rename(columns={'is_nuc':'spot_is_nuc'})
+                .merge(
+                    clu_dedup.rename(columns={'is_nuc':'clu_is_nuc'}),
+                    on=['unique_cell_id','cluster_index'],
+                    how='left'
+                )
+        )
+
+        # TS/foci spots = INTERSECTION of spot and cluster compartments
+        ts_mask   = sp_clu['spot_is_nuc'].eq(1) & sp_clu['clu_is_nuc'].eq(1)
+        foci_mask = sp_clu['spot_is_nuc'].eq(0) & sp_clu['clu_is_nuc'].eq(0)
+        # Count filtered TS/foci spots per cell from intersection masks
+        num_spots_ts = (
+            ts_mask.groupby(sp_clu['unique_cell_id']).sum()
+                   .reindex(cell_ids, fill_value=0)
+        )
+        num_spots_foci = (
+            foci_mask.groupby(sp_clu['unique_cell_id']).sum()
+                     .reindex(cell_ids, fill_value=0)
+        )
+
+        # Compute TS sizes from FILTERED spots per (cell, cluster) for nuclear clusters
+        nuc_sizes = (
+            sp_clu.loc[ts_mask]
+                 .groupby(['unique_cell_id','cluster_index'])
+                 .size()
+                 .rename('cluster_size')
+                 .reset_index()
+        )
+        largest_ts = (
+            nuc_sizes.groupby('unique_cell_id')['cluster_size']
+                     .max()
+                     .reindex(cell_ids, fill_value=0)
+        )
+        second_largest_ts = (
+            nuc_sizes.groupby('unique_cell_id')['cluster_size']
+                     .apply(lambda s: (np.sort(s.dropna().unique())[-2] if s.dropna().nunique() >= 2 else 0))
+                     .reindex(cell_ids, fill_value=0)
+        )
 
         # Assemble (keep your existing names for areas)
         data = {
@@ -787,6 +842,27 @@ class DUSP1Measurement:
                 data[f'tryptCond{idx}'] = (time_tpl.values == t).astype(int)
 
         results = pd.DataFrame(data)
+
+        # ---- Defensive QC: detect and optionally drop mismatch cells ----
+        mism_nuc  = results['num_spots_ts']  > results['num_nuc_spots']
+        mism_cyto = results['num_spots_foci'] > results['num_cyto_spots']
+        too_many  = pd.Series(False, index=results.index)
+        if self.max_spots_per_cell is not None:
+            too_many = results['num_spots'] > int(self.max_spots_per_cell)
+
+        bad_mask = mism_nuc | mism_cyto | too_many
+        n_bad = int(bad_mask.sum())
+        if n_bad > 0:
+            print(f"[WARN] Found {n_bad} cells with TS/foci subset mismatches or extreme totals.")
+            # show a few examples for traceability
+            showcase = results.loc[bad_mask, ['unique_cell_id','time','dex_conc','num_spots',
+                                              'num_nuc_spots','num_spots_ts','num_cyto_spots','num_spots_foci']].head(10)
+            print(showcase.to_string(index=False))
+
+            if getattr(self, 'drop_mismatch_cells', False):
+                results = results.loc[~bad_mask].reset_index(drop=True)
+                print(f"[INFO] Dropped {n_bad} mismatch/extreme cells as requested (drop_mismatch_cells=True).")
+
         return results        
 
 #############################
@@ -2911,6 +2987,335 @@ class DUSP1DisplayManager(DUSP1AnalysisManager):
                         _maybe_crop(self.regular_cyto_spot, 'CYTO_REG')
 
 
+# ================================
+# PostProcessingPlotter Class
+# ================================
+
+class PostProcessingPlotterDUSP1:
+    """
+    Plotting utilities for DUSP1 post-processing across multiple experimental designs.
+
+    This first version implements **time sweep at a single concentration** with:
+      • TS frequency bar plot (0 min control first, then ascending times)
+      • Ridgeline plots of per‑cell spot counts:
+          - Nuclear spots (colored self.color_nuc)
+          - Cytoplasmic spots (colored self.color_cyto)
+          - Total cell spots (colored purple)
+      • Histograms (instead of ridges) for nuclear, cytoplasmic, and cell totals
+      • Line plot (mean ± SEM) across time for nuclear & cytoplasmic spot counts
+
+    Design goals:
+      • Consistent x ticks for time across comparable plots (including the 0‑min control).
+      • Shared y-axis scales across **like** plots (e.g., all nuc line plots share the same y‑range).
+      • Save names include replica codes present in the subset used for plotting.
+
+    Inputs (lowercase columns expected):
+      ['unique_cell_id','dex_conc','time','replica',
+       'num_ts','num_nuc_spots','num_cyto_spots','num_spots']
+    """
+    def __init__(self, clusters_df: pd.DataFrame, cellprops_df: pd.DataFrame, ssit_df: pd.DataFrame, is_tpl: bool = False):
+        # Store copies with lowercase columns for consistency
+        self.clusters = clusters_df.rename(columns=str.lower).copy()
+        self.cellprops = cellprops_df.rename(columns=str.lower).copy()
+        self.ssit = ssit_df.rename(columns=str.lower).copy()
+        self.is_tpl = bool(is_tpl)
+
+        # Default colors (override these attributes after construction if you have project-standard colors)
+        self.color_nuc = getattr(self, "color_nuc", "#1f77b4")   # blue-ish
+        self.color_cyto = getattr(self, "color_cyto", "#d62728") # red-ish
+        self.color_cell = "#6a3d9a"  # purple for cell totals
+
+        # ---- Axis management caches (computed per dataset to keep like-plots consistent) ----
+        # Y-lims are computed lazily from data used within this instance.
+        self._ylims = {
+            "nuc_count": None,
+            "cyto_count": None,
+            "cell_count": None,
+            "ts_freq": None,
+        }
+
+    # --------------------------
+    # ---- Utility Helpers  ----
+    # --------------------------
+    def _order_times_with_zero_first(self, times: pd.Series) -> list:
+        """Return sorted unique times with 0 first, then ascending nonzero times."""
+        arr = pd.unique(times.astype(float))
+        nonzero = sorted([t for t in arr if t != 0])
+        return [0.0] + nonzero if 0.0 in arr or 0 in arr else nonzero
+
+    def _subset_time_sweep(self, dex_conc: float) -> pd.DataFrame:
+        """
+        Subset to a **time sweep at a single concentration**:
+          - keep all rows where dex_conc == chosen value
+          - plus the 0‑min control (time==0 AND dex_conc==0)
+        """
+        df = self.ssit.copy()
+        mask = (df['dex_conc'] == dex_conc) | ((df['time'] == 0) & (df['dex_conc'] == 0))
+        out = df.loc[mask].copy()
+        # enforce numeric types
+        out['time'] = out['time'].astype(float)
+        out['dex_conc'] = out['dex_conc'].astype(float)
+        return out
+
+    def _replica_suffix(self, df: pd.DataFrame) -> str:
+        """Build a short suffix like _rep-DEF or _rep-GHI based on unique replica values present."""
+        if 'replica' not in df.columns or df['replica'].isna().all():
+            return "_rep-NA"
+        reps = sorted(pd.unique(df['replica'].astype(str)))
+        # Keep letters/numbers only, join without delimiter
+        reps_clean = ["".join(ch for ch in r if ch.isalnum()) for r in reps]
+        return f"_rep-{''.join(reps_clean)}" if reps_clean else "_rep-NA"
+
+    def _common_time_ticks(self, df: pd.DataFrame) -> list:
+        """Compute the ordered list of time tick values (0 first if present)."""
+        return self._order_times_with_zero_first(df['time'])
+
+    def _ensure_ylim(self, key: str, values: pd.Series, pad: float = 0.05):
+        """Cache and return a consistent y-limit tuple for the given metric key."""
+        vmax = float(values.max()) if len(values) else 1.0
+        # guard for zero-only distributions
+        if vmax <= 1:
+            vmax = 1.0
+        ymax = vmax * (1 + pad)
+        if (self._ylims.get(key) is None) or (ymax > self._ylims[key][1]):
+            self._ylims[key] = (0.0, ymax)
+        return self._ylims[key]
+
+    def _apply_common_time_axis(self, ax: plt.Axes, ticks: list, xlabel: str = "time (min)"):
+        ax.set_xticks(ticks)
+        ax.set_xlabel(xlabel)
+
+    def _apply_common_ylim(self, ax: plt.Axes, key: str):
+        if self._ylims.get(key) is not None:
+            ax.set_ylim(self._ylims[key])
+
+    def _savefig(self, fig: plt.Figure, save_dir: Optional[str], base: str, df_for_suffix: pd.DataFrame):
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+            suffix = self._replica_suffix(df_for_suffix)
+            path = os.path.join(save_dir, f"{base}{suffix}.png")
+            fig.savefig(path, dpi=300, bbox_inches='tight')
+            print(f"Saved: {path}")
+
+    # -------------------------------
+    # ---- Plotting Primitives   ----
+    # -------------------------------
+    def _ts_frequency(self, df: pd.DataFrame, times_order: list, title: str):
+        """
+        Bar plot of fraction of cells with >=1 TS.
+        """
+        tmp = df.copy()
+        tmp['has_ts'] = (tmp['num_ts'] >= 1).astype(int)
+        agg = tmp.groupby('time')['has_ts'].mean().reindex(times_order, fill_value=0.0)
+        y_vals = agg.values
+        # register y-lim for TS frequency (0..1)
+        self._ylims['ts_freq'] = (0.0, 1.05)
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        ax.bar(times_order, y_vals, width=6, edgecolor='black')
+        ax.set_ylabel("TS frequency (fraction)")
+        ax.set_title(title)
+        self._apply_common_time_axis(ax, times_order)
+        self._apply_common_ylim(ax, 'ts_freq')
+        fig.tight_layout()
+        return fig, ax
+
+    def _ridgeline_counts(self, df: pd.DataFrame, value_col: str, group_col: str, groups_order: list, color: str, title: str):
+        """
+        Simple ridgeline: stack KDEs by group with vertical offsets, consistent axes.
+        """
+        # Prepare figure
+        n = len(groups_order)
+        fig, ax = plt.subplots(figsize=(6, 0.9 * n + 1.5))
+
+        # Compute a common y-limit key based on the raw counts (used for hist counterpart)
+        key_map = {
+            'num_nuc_spots': "nuc_count",
+            'num_cyto_spots': "cyto_count",
+            'num_spots': "cell_count"
+        }
+        key = key_map.get(value_col, "cell_count")
+        # For KDE display, set an internal density ylim but register a count-based y‑lim for hist/line plots
+        self._ensure_ylim(key, df[value_col])
+
+        # Build stacked KDEs
+        offset = 0.0
+        gap = 1.0
+        for g in groups_order:
+            sub = df.loc[df[group_col] == g, value_col].dropna()
+            if len(sub) == 0:
+                offset += gap
+                continue
+            # Use gaussian_kde if variance>0, else draw a small spike at the single value
+            try:
+                kde = gaussian_kde(sub.astype(float))
+                xs = np.linspace(sub.min(), sub.max() if sub.max() > sub.min() else sub.min() + 1, 200)
+                ys = kde(xs)
+            except Exception:
+                xs = np.array([float(sub.iloc[0])])
+                ys = np.array([1.0])
+
+            ax.fill_between(xs, offset, ys + offset, alpha=0.6)
+            ax.plot(xs, ys + offset, linewidth=1.0)
+            ax.text(xs.min(), offset + ys.max() + 0.05, f"{g:g}" if isinstance(g, (int, float)) else str(g), fontsize=8)
+            offset += gap
+
+        ax.set_title(title)
+        ax.set_yticks([])  # hide y-axis for ridgeline
+        ax.set_xlabel(value_col)
+        # enforce consistent group ordering (0 on top)
+        ax.invert_yaxis()
+        # Apply requested color
+        for coll in ax.collections:
+            coll.set_facecolor(color)
+            coll.set_edgecolor(color)
+        for line in ax.lines:
+            line.set_color(color)
+
+        fig.tight_layout()
+        return fig, ax
+
+    def _hist_counts_by_group(self, df: pd.DataFrame, value_col: str, group_col: str, groups_order: list, color: str, title: str):
+        """
+        Multi-panel histograms stacked vertically for each group (0 on top).
+        """
+        n = len(groups_order)
+        fig, axes = plt.subplots(nrows=n, ncols=1, figsize=(6, 1.6 * n + 1.0), sharex=True, sharey=True)
+        if n == 1:
+            axes = [axes]
+        # Register common y-lim based on counts (used by line/ridge y-scale sync)
+        key_map = {
+            'num_nuc_spots': "nuc_count",
+            'num_cyto_spots': "cyto_count",
+            'num_spots': "cell_count"
+        }
+        key = key_map.get(value_col, "cell_count")
+        self._ensure_ylim(key, df[value_col])
+
+        for ax, g in zip(axes, groups_order):
+            sub = df.loc[df[group_col] == g, value_col].dropna().astype(float)
+            ax.hist(sub, bins=20, edgecolor='black', alpha=0.7)
+            ax.set_ylabel(str(g))
+            for p in ax.patches:
+                p.set_facecolor(color)
+        axes[-1].set_xlabel(value_col)
+        fig.suptitle(title, y=0.995)
+        fig.tight_layout()
+        return fig, axes
+
+    def _line_mean_sem(self, df: pd.DataFrame, times_order: list, title: str):
+        """
+        Mean ± SEM across time for nuclear and cytoplasmic counts (0 included).
+        Enforces shared y-lims per metric across calls.
+        """
+        agg = (
+            df.groupby('time')
+              .agg(nuc_mean=('num_nuc_spots','mean'),
+                   nuc_sem =('num_nuc_spots', lambda x: x.std(ddof=1)/np.sqrt(len(x)) if len(x)>1 else 0.0),
+                   cyto_mean=('num_cyto_spots','mean'),
+                   cyto_sem =('num_cyto_spots', lambda x: x.std(ddof=1)/np.sqrt(len(x)) if len(x)>1 else 0.0))
+              .reindex(times_order, fill_value=0.0)
+        )
+        # Register y-lims
+        ynuc = self._ensure_ylim("nuc_count", df['num_nuc_spots'])
+        ycyt = self._ensure_ylim("cyto_count", df['num_cyto_spots'])
+        ymax = max(ynuc[1], ycyt[1])
+        self._ylims["nuc_count"] = (0.0, ymax)
+        self._ylims["cyto_count"] = (0.0, ymax)
+
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        # Nuclear
+        ax.errorbar(times_order, agg['nuc_mean'], yerr=agg['nuc_sem'], marker='o', linewidth=1.5, label='nuc', color=self.color_nuc)
+        # Cytoplasmic
+        ax.errorbar(times_order, agg['cyto_mean'], yerr=agg['cyto_sem'], marker='o', linewidth=1.5, label='cyto', color=self.color_cyto)
+
+        self._apply_common_time_axis(ax, times_order)
+        self._apply_common_ylim(ax, "nuc_count")  # both share the same ymax
+        ax.set_ylabel("spots per cell")
+        ax.set_title(title)
+        ax.legend(frameon=False)
+        fig.tight_layout()
+        return fig, ax
+
+    # --------------------------------------------
+    # ---- Public: Time Sweep @ Single Conc   ----
+    # --------------------------------------------
+    def plot_time_sweep(self, dex_conc: float, save_dir: Optional[str] = None, display: bool = True):
+        """
+        Generate the full panel set for a **time sweep at one concentration**:
+          1) TS frequency bar plot
+          2) Nuc ridge
+          3) Cyto ridge
+          4) Cell ridge
+          5) Nuc histogram (instead of ridge)
+          6) Cyto histogram (instead of ridge)
+          7) Cell histogram (instead of ridge)
+          8) Line plot (nuc & cyto mean±SEM) with 0 included
+
+        The 0‑min control is always included and ordered first.
+        All saved filenames include the replica code(s).
+        """
+        df = self._subset_time_sweep(dex_conc)
+        if df.empty:
+            print(f"[WARN] No rows for dex_conc={dex_conc} (including 0‑min control). Nothing to plot.")
+            return
+
+        # Determine time order (0 first)
+        times_order = self._common_time_ticks(df)
+
+        # ---- 1) TS frequency
+        title = f"TS frequency — Time sweep @ {dex_conc} nM"
+        fig, ax = self._ts_frequency(df, times_order, title)
+        self._savefig(fig, save_dir, f"TSfreq_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        # ---- 2–4) Ridgelines
+        # Nuc
+        fig, ax = self._ridgeline_counts(df, "num_nuc_spots", "time", times_order, self.color_nuc,
+                                         f"Nuclear spots — ridgeline — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Ridge_Nuc_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+        # Cyto
+        fig, ax = self._ridgeline_counts(df, "num_cyto_spots", "time", times_order, self.color_cyto,
+                                         f"Cytoplasmic spots — ridgeline — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Ridge_Cyto_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+        # Cell
+        fig, ax = self._ridgeline_counts(df, "num_spots", "time", times_order, self.color_cell,
+                                         f"Cell total spots — ridgeline — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Ridge_Cell_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        # ---- 5–7) Histograms by group (instead of ridges)
+        fig, axes = self._hist_counts_by_group(df, "num_nuc_spots", "time", times_order, self.color_nuc,
+                                               f"Nuclear spots — histogram — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Hist_Nuc_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        fig, axes = self._hist_counts_by_group(df, "num_cyto_spots", "time", times_order, self.color_cyto,
+                                               f"Cytoplasmic spots — histogram — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Hist_Cyto_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        fig, axes = self._hist_counts_by_group(df, "num_spots", "time", times_order, self.color_cell,
+                                               f"Cell total spots — histogram — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Hist_Cell_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        # ---- 8) Line plot (mean±SEM), enforcing shared y scale
+        fig, ax = self._line_mean_sem(df, times_order, f"Spots per cell — line — {dex_conc} nM")
+        self._savefig(fig, save_dir, f"Line_timeSweep_{int(dex_conc)}nM", df)
+        if not display:
+            plt.close(fig)
+
+        print("Time sweep panel generation complete.")
+
 class PostProcessingPlotter:
     """
     Plotting utilities for DUSP1 post-processing across multiple days.
@@ -2939,7 +3344,7 @@ class PostProcessingPlotter:
         # TS-category bars: fixed, consistent 4-color set
         self.ts_colors  = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # tab10 first four
         # Ridge palettes (use same scheme for time & conc for consistency)
-        self.ridge_palette = 'Purples_r'  # one continuous palette everywhere
+        self.ridge_palette = 'flare'  # one continuous palette everywhere
 
     def plot_time_sweep(self, dex_conc, save_dir=None, display=True):
         if save_dir:
