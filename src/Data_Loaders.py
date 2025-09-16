@@ -69,13 +69,14 @@ def concate_data(x, concate_function_str:str=None):
     if concate_function_str:
         return eval(concate_function_str)
     elif issubclass(first_type, pd.DataFrame):
+        for i, df in enumerate(x):
+            df['concat_index'] = i
         return pd.concat(x, axis=0, ignore_index=True)
     elif issubclass(first_type, (np.ndarray, np.memmap, da.Array, np.generic)):
         # return np.concatenate(x, axis=0)
         return da.concatenate(x, axis=0)
     else:
         return x
-
 
 def format_list_of_pyromanager_data(data, local_path, receipt):
     """
@@ -104,14 +105,24 @@ def format_list_of_pyromanager_data(data, local_path, receipt):
 
     ## Metadata
     # this is a map from new p values to the os.listdir(local_path) index and p in that original image
-    lengths_of_images = [d['images'].shape for d in data]
+    lengths_of_images = [d['images'].shape[0] for d in data]
+    final_data['lengths_of_images'] = lengths_of_images
     left_inclusive_right_exlusive_indexs = np.concatenate(([0], np.cumsum(lengths_of_images), [np.inf]))
+    final_data['left_inclusive_right_exlusive_indexs'] = left_inclusive_right_exlusive_indexs
+
     # map_p2np: Given a global position index p, find the subdirectory index n and local position index p_local
     def map_p2np(p):
         # Find the index n such that left_inclusive_right_exlusive_indexs[n] <= p < left_inclusive_right_exlusive_indexs[n+1]
         n = np.searchsorted(left_inclusive_right_exlusive_indexs, p, side='right') - 1
         p_local = p - left_inclusive_right_exlusive_indexs[n]
         return n, p_local
+    final_data['map_p2np'] = map_p2np
+
+    # map_np2p: Given a subdirectory index n and local position index p_local, find the global position index p
+    def map_np2p(n, p_local):
+        return left_inclusive_right_exlusive_indexs[n] + p_local
+    final_data['map_np2p'] = map_np2p
+
     
     final_data['metadata'] = lambda p, t, z=0, c=0: (
         lambda n_p: data[n_p[0]]['metadata'](p=n_p[1], t=t, c=c, z=z)
@@ -156,6 +167,7 @@ def recursive_pycromanager_data_loader(receipt):
     # get all the data we want
     recursive_analysis_name = receipt['arguments'].get('recursive_analysis_name', analysis_name)
     data = []
+    exp_metadata = []
     for path in os.listdir(local_path):
         full_path = os.path.join(local_path, path)
         if os.path.isdir(full_path):
@@ -163,11 +175,13 @@ def recursive_pycromanager_data_loader(receipt):
                 loaded = load_pycromanager(full_path, recursive_analysis_name)
                 if loaded:  # Only add if loading was successful and data is not empty
                     data.append(loaded)
+                    exp_metadata.append(loaded['metadata'](0,0)['experimental_metadata'])
             except Exception:
                 continue
 
     # format the data from the subdirectories so that it is usable
     subdirectories_data = format_list_of_pyromanager_data(data, local_path, receipt)
+    subdirectories_data['exp_metadata'] = exp_metadata
 
     # get data from the parent (combined dir)
     pardirectory_data = {}
