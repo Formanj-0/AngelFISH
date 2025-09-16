@@ -22,6 +22,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             receipt['steps'][step_name][k] = v
 
     # Load Data and Args
+    nas_location = receipt['arguments']['nas_location']
     data = load_data(receipt)
     args = receipt['steps'][step_name]
     spot_name = args['spot_name']
@@ -100,6 +101,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             if expermental_metadata is not None:
                 for key, value in expermental_metadata.items():
                     spots_df[key] = [value] * len(spots_df)
+            spots_df['nas_location'] = nas_location
 
             # save data to temp 
             path = os.path.join(temp_dir, f'p{p}_t{t}_{spot_name}_canidateSpotPreFilter.csv')
@@ -176,6 +178,7 @@ def identify_spots(receipt, step_name:str, new_params:dict=None, gui:bool=False)
             if expermental_metadata is not None:
                 for key, value in expermental_metadata.items():
                     spots_df[key] = [value] * len(spots_df)
+            spots_df['nas_location'] = nas_location
 
             # save data to temp 
             path = os.path.join(temp_dir, f'p{p}_t{t}_{spot_name}_canidateSpots.csv')

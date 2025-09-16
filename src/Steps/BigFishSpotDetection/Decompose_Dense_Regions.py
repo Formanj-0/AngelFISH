@@ -37,6 +37,7 @@ def decompose_dense_regions(receipt, step_name:str, new_params:dict=None, gui:bo
     def run(receipt, data, p_range=None, t_range=None):
         args = receipt['steps'][step_name]
         # Extract args that will change  
+        nas_location = receipt['arguments']['nas_location']
         spot_yx = args['spot_yx']
         spot_z = args['spot_z']
         images = data['images']
@@ -103,6 +104,8 @@ def decompose_dense_regions(receipt, step_name:str, new_params:dict=None, gui:bo
                 if expermental_metadata is not None:
                     for key, value in expermental_metadata.items():
                         df[key] = [value] * len(df)
+                df['nas_location'] = nas_location
+                
                 return df
 
             dense_regions = add_metadata_to_df(dense_regions)
