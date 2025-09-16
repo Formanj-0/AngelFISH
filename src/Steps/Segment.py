@@ -161,7 +161,11 @@ class segment(abstract_task):
             del self.mask_file
 
     def write_results(self, results, p, t):
-        self.mask[p, t] = results[0]
+        # Ensure results[0] is a 3D array (z, y, x); if not, add axis to the front
+        mask_3d = results[0]
+        if mask_3d.ndim == 2:
+            mask_3d = np.expand_dims(mask_3d, axis=0)
+        self.mask[p, t] = mask_3d
 
     def handle_previous_run(self):
         output_path = os.path.join(self.receipt['dirs']['masks_dir'], f"{self.receipt['steps'][self.step_name]['mask_name']}.tiff")
