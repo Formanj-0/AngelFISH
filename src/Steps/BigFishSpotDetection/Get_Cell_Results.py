@@ -36,6 +36,7 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
 
     def run(receipt, data, p_range=None, t_range=None):
         args = receipt['steps'][step_name]
+        nas_location = receipt['arguments']['nas_location']
         # Extract args that will change  
         images = data['images']
         channel = args['channel']
@@ -133,6 +134,7 @@ def get_cell_counts(receipt, step_name:str, new_params:dict=None, gui:bool=False
                     df['timepoint'] = [t]*len(df)
                     df['fov'] = [p]*len(df)
                     df['channel'] = [channel]*len(df)
+                    df['nas_location'] = nas_location
                     expermental_metadata = metadata(p=p, t=t, z=0 ,c=channel).get('experimental_metadata', None)
                     if expermental_metadata is not None:
                         for key, value in expermental_metadata.items():

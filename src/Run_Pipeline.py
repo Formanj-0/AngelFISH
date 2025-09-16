@@ -17,14 +17,14 @@ def create_ssh_client(host, port, username, password, retries=3, timeout=30):
 
     for attempt in range(retries):
         try:
-            print(f"Attempting SSH connection... ({attempt + 1}/{retries})")
+            # print(f"Attempting SSH connection... ({attempt + 1}/{retries})")
             ssh_client.connect(host, port, username, password, timeout=timeout)
             return ssh_client
         except (SSHException, NoValidConnectionsError) as e:
             print(f"Connection failed: {e}")
             if attempt < retries - 1:
-                wait_time = random.uniform(1, 5)
-                print(f"Retrying in {wait_time:.2f} seconds...")
+                wait_time = random.uniform(0, 2)
+                # print(f"Retrying in {wait_time:.2f} seconds...")
                 sleep(wait_time)
             else:
                 raise RuntimeError(f"SSH connection failed after {retries} attempts.")
@@ -115,7 +115,7 @@ def run_pipeline_remote(receipt_path, remote_path, new_nas_loc=None, new_loc_loc
 
     job_id = job_submission_output.split(';')[0]
     if new_nas_loc:
-        print(f'{new_nas_loc}')
+        print(f'{os.path.basename(new_nas_loc)}')
     print(f"Submitted SLURM job with ID: {job_id}")
 
     final_status = wait_for_job_completion(ssh, job_id, 10)
