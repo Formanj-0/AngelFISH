@@ -713,50 +713,47 @@ class DUSP1Measurement:
         results.to_csv(csv_path, index=False)
         print(f"Saved cell-level results to {csv_path}")
 
-    def summarize_filtered_cells(self) -> pd.DataFrame:
+    def summarize_filtered_cells(self, min_ts_size: int = 4, min_foci_size: int = 4) -> pd.DataFrame:
         """
-        Generate cell-level summary metrics based on already-filtered spots, clusters, and cellprops.
-        Assumes all inputs have already been filtered for a specific thresholding method.
+        Cell-level summary from *already-filtered* spots/clusters/cellprops.
+        Enforces minimum sizes for TS (nuclear) and foci (cytoplasmic) clusters.
+        TS/foci are computed from the intersection of spot+cluster compartments,
+        with clusters deduplicated per cell.
 
-        Returns:
-            pd.DataFrame: One row per cell with counts of nuclear/cytoplasmic spots,
-                        clusters, intensity stats, and metadata.
+        Adds diagnostics:
+        - n_ts_lt_min, spots_in_ts_lt_min
+        - n_foci_lt_min, spots_in_foci_lt_min
         """
         # deterministic order
         self.spots     = self.spots.sort_values(by='unique_cell_id')
         self.clusters  = self.clusters.sort_values(by='unique_cell_id')
         self.cellprops = self.cellprops.sort_values(by='unique_cell_id')
-        
-        # Normalize compartment labels to {1 (nucleus), 0 (cytoplasm)}
-        self.spots['is_nuc'] = self.spots['is_nuc'].map({1:1, 0:0, -1:0, True:1, False:0}).astype('Int64')
+        cell_ids = self.cellprops['unique_cell_id']
+
+        # Normalize compartments
+        self.spots['is_nuc']    = self.spots['is_nuc'].map({1:1, 0:0, -1:0, True:1, False:0}).astype('Int64')
         self.clusters['is_nuc'] = self.clusters['is_nuc'].map({1:1, 0:0, -1:0, True:1, False:0}).astype('Int64')
-        # Ensure dtype alignment for cluster_index across tables
+
+        # Ensure aligned dtype for cluster_index
         if 'cluster_index' in self.spots.columns:
             self.spots['cluster_index'] = self.spots['cluster_index'].astype('Int64')
         if 'cluster_index' in self.clusters.columns:
-            self.clusters['cluster_index'] = self.clusters['cluster_index'].astype('Int64')       
-        cell_ids = self.cellprops['unique_cell_id']
+            self.clusters['cluster_index'] = self.clusters['cluster_index'].astype('Int64')
 
-        # Spot-based counts
+        # Spot totals
         num_spots      = self.spots.groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
-        num_nuc_spots  = (self.spots[self.spots['is_nuc'] == 1]
-                        .groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0))
-        num_cyto_spots = (self.spots[self.spots['is_nuc'] == 0]
-                        .groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0))
+        num_nuc_spots  = self.spots[self.spots['is_nuc'] == 1].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
+        num_cyto_spots = self.spots[self.spots['is_nuc'] == 0].groupby('unique_cell_id').size().reindex(cell_ids, fill_value=0)
 
-        # Cluster-based counts (deduplicated by (cell, cluster_index))
+        # Dedup clusters (for compartment labels)
         clu_dedup = (
             self.clusters.dropna(subset=['cluster_index'])
-                         .drop_duplicates(['unique_cell_id','cluster_index'])
-                         [['unique_cell_id','cluster_index','is_nuc']]
-                         .copy()
+                        .drop_duplicates(['unique_cell_id','cluster_index'])
+                        [['unique_cell_id','cluster_index','is_nuc']]
+                        .copy()
         )
-        ts = clu_dedup[clu_dedup['is_nuc'] == 1]
-        fc = clu_dedup[clu_dedup['is_nuc'] == 0]
-        num_ts   = ts.groupby('unique_cell_id')['cluster_index'].nunique().reindex(cell_ids, fill_value=0)
-        num_foci = fc.groupby('unique_cell_id')['cluster_index'].nunique().reindex(cell_ids, fill_value=0)
 
-        # Merge cluster compartment onto each filtered spot (many-to-one guaranteed by dedup)
+        # Merge per spot ← cluster (many-to-one via dedup)
         sp_clu = (
             self.spots[['unique_cell_id','cluster_index','is_nuc']]
                 .rename(columns={'is_nuc':'spot_is_nuc'})
@@ -767,44 +764,62 @@ class DUSP1Measurement:
                 )
         )
 
-        # TS/foci spots = INTERSECTION of spot and cluster compartments
-        ts_mask   = sp_clu['spot_is_nuc'].eq(1) & sp_clu['clu_is_nuc'].eq(1)
-        foci_mask = sp_clu['spot_is_nuc'].eq(0) & sp_clu['clu_is_nuc'].eq(0)
-        # Count filtered TS/foci spots per cell from intersection masks
-        num_spots_ts = (
-            ts_mask.groupby(sp_clu['unique_cell_id']).sum()
-                   .reindex(cell_ids, fill_value=0)
-        )
-        num_spots_foci = (
-            foci_mask.groupby(sp_clu['unique_cell_id']).sum()
-                     .reindex(cell_ids, fill_value=0)
-        )
+        # Intersection masks
+        ts_mask   = sp_clu['spot_is_nuc'].eq(1) & sp_clu['clu_is_nuc'].eq(1)  # nuclear
+        foci_mask = sp_clu['spot_is_nuc'].eq(0) & sp_clu['clu_is_nuc'].eq(0)  # cytoplasmic
 
-        # Compute TS sizes from FILTERED spots per (cell, cluster) for nuclear clusters
+        # Per-(cell, cluster) sizes from intersection
         nuc_sizes = (
             sp_clu.loc[ts_mask]
-                 .groupby(['unique_cell_id','cluster_index'])
-                 .size()
-                 .rename('cluster_size')
-                 .reset_index()
+                .groupby(['unique_cell_id','cluster_index'])
+                .size().rename('cluster_size').reset_index()
         )
-        largest_ts = (
-            nuc_sizes.groupby('unique_cell_id')['cluster_size']
-                     .max()
-                     .reindex(cell_ids, fill_value=0)
-        )
-        second_largest_ts = (
-            nuc_sizes.groupby('unique_cell_id')['cluster_size']
-                     .apply(lambda s: (np.sort(s.dropna().unique())[-2] if s.dropna().nunique() >= 2 else 0))
-                     .reindex(cell_ids, fill_value=0)
+        cyto_sizes = (
+            sp_clu.loc[foci_mask]
+                .groupby(['unique_cell_id','cluster_index'])
+                .size().rename('cluster_size').reset_index()
         )
 
-        # Assemble (keep your existing names for areas)
+        # Enforce min sizes
+        nuc_valid      = nuc_sizes.loc[nuc_sizes['cluster_size']  >= min_ts_size]
+        nuc_too_small  = nuc_sizes.loc[nuc_sizes['cluster_size']  <  min_ts_size]
+        cyto_valid     = cyto_sizes.loc[cyto_sizes['cluster_size'] >= min_foci_size]
+        cyto_too_small = cyto_sizes.loc[cyto_sizes['cluster_size'] <  min_foci_size]
+
+        # Diagnostics
+        diag_ts = (nuc_too_small.groupby('unique_cell_id')
+                .agg(n_ts_lt_min=('cluster_index','nunique'),
+                        spots_in_ts_lt_min=('cluster_size','sum'))
+                .reindex(cell_ids, fill_value=0))
+        diag_fc = (cyto_too_small.groupby('unique_cell_id')
+                .agg(n_foci_lt_min=('cluster_index','nunique'),
+                        spots_in_foci_lt_min=('cluster_size','sum'))
+                .reindex(cell_ids, fill_value=0))
+
+        # TS metrics (valid only)
+        num_ts = (nuc_valid.groupby('unique_cell_id')['cluster_index']
+                .nunique().reindex(cell_ids, fill_value=0))
+        num_spots_ts = (nuc_valid.groupby('unique_cell_id')['cluster_size']
+                        .sum().reindex(cell_ids, fill_value=0))
+        largest_ts = (nuc_valid.groupby('unique_cell_id')['cluster_size']
+                    .max().reindex(cell_ids, fill_value=0))
+        second_largest_ts = (nuc_valid.groupby('unique_cell_id')['cluster_size']
+                            .apply(lambda s: (np.sort(s.dropna().unique())[-2] if s.dropna().nunique() >= 2 else 0))
+                            .reindex(cell_ids, fill_value=0))
+
+        # Foci metrics (valid only)
+        num_foci = (cyto_valid.groupby('unique_cell_id')['cluster_index']
+                    .nunique().reindex(cell_ids, fill_value=0))
+        num_spots_foci = (cyto_valid.groupby('unique_cell_id')['cluster_size']
+                        .sum().reindex(cell_ids, fill_value=0))
+
+        # Assemble
         data = {
             'unique_cell_id': cell_ids.values,
             'num_spots': num_spots.values,
             'num_nuc_spots': num_nuc_spots.values,
             'num_cyto_spots': num_cyto_spots.values,
+
             'num_ts': num_ts.values,
             'num_foci': num_foci.values,
             'num_spots_ts': num_spots_ts.values,
@@ -812,38 +827,42 @@ class DUSP1Measurement:
             'second_largest_ts': second_largest_ts.values,
             'num_spots_foci': num_spots_foci.values,
 
-            # areas 
             'nuc_area_px':  self.cellprops['nuc_area'].values,
             'cyto_area_px': self.cellprops['cyto_area'].values,
 
-            # intensity stats (channel “-0” as in your measure())
             'avg_nuc_int':  self.cellprops['nuc_intensity_mean-0'].values,
             'avg_cyto_int': self.cellprops['cyto_intensity_mean-0'].values,
             'avg_cell_int': self.cellprops['cell_intensity_mean-0'].values,
             'std_cell_int': self.cellprops['cell_intensity_std-0'].values,
 
-            # metadata
             'time': self.cellprops['time'].values,
             'dex_conc': self.cellprops['Dex_Conc'].values,
-            'replica': self.cellprops['replica'].values if 'replica' in self.cellprops.columns
-                    else self.spots.groupby('unique_cell_id')['replica'].first().reindex(cell_ids).values,
+            'replica': (self.cellprops['replica'].values
+                        if 'replica' in self.cellprops.columns
+                        else self.spots.groupby('unique_cell_id')['replica'].first().reindex(cell_ids).values),
             'fov': self.cellprops['fov'].values,
-            'nas_location': self.cellprops['NAS_location'].values if 'NAS_location' in self.cellprops.columns else np.nan,
+            'nas_location': (self.cellprops['NAS_location'].values
+                            if 'NAS_location' in self.cellprops.columns else np.nan),
             'h5_idx': self.cellprops['h5_idx'].values,
             'touching_border': self.cellprops['touching_border'].values,
+
+            # diagnostics
+            'n_ts_lt_min': diag_ts['n_ts_lt_min'].values,
+            'spots_in_ts_lt_min': diag_ts['spots_in_ts_lt_min'].values,
+            'n_foci_lt_min': diag_fc['n_foci_lt_min'].values,
+            'spots_in_foci_lt_min': diag_fc['spots_in_foci_lt_min'].values,
         }
 
-        # Only for TPL experiments, inject the extra columns
+        # Optional TPL flags
         if self.is_tpl and 'time_TPL' in self.cellprops.columns:
-            time_tpl = (self.cellprops.set_index('unique_cell_id')['time_TPL']
-                                .reindex(cell_ids))
+            time_tpl = self.cellprops.set_index('unique_cell_id')['time_TPL'].reindex(cell_ids)
             data['time_tpl'] = time_tpl.values
             for idx, t in enumerate((0, 20, 75, 150, 180), start=1):
                 data[f'tryptCond{idx}'] = (time_tpl.values == t).astype(int)
 
         results = pd.DataFrame(data)
 
-        # ---- Defensive QC: detect and optionally drop mismatch cells ----
+        # Defensive QC (still valid under min-size enforcement)
         mism_nuc  = results['num_spots_ts']  > results['num_nuc_spots']
         mism_cyto = results['num_spots_foci'] > results['num_cyto_spots']
         too_many  = pd.Series(False, index=results.index)
@@ -854,14 +873,18 @@ class DUSP1Measurement:
         n_bad = int(bad_mask.sum())
         if n_bad > 0:
             print(f"[WARN] Found {n_bad} cells with TS/foci subset mismatches or extreme totals.")
-            # show a few examples for traceability
             showcase = results.loc[bad_mask, ['unique_cell_id','time','dex_conc','num_spots',
-                                              'num_nuc_spots','num_spots_ts','num_cyto_spots','num_spots_foci']].head(10)
+                                            'num_nuc_spots','num_spots_ts','num_cyto_spots','num_spots_foci']].head(10)
             print(showcase.to_string(index=False))
-
             if getattr(self, 'drop_mismatch_cells', False):
                 results = results.loc[~bad_mask].reset_index(drop=True)
-                print(f"[INFO] Dropped {n_bad} mismatch/extreme cells as requested (drop_mismatch_cells=True).")
+                print(f"[INFO] Dropped {n_bad} mismatch/extreme cells (drop_mismatch_cells=True).")
+
+        # Invariants
+        assert (results['num_spots_ts']  <= results['num_nuc_spots']).all(), "TS ⊆ nuclear spots"
+        assert (results['num_spots_foci'] <= results['num_cyto_spots']).all(), "Foci ⊆ cytoplasmic spots"
+        assert ((results['num_ts']   == 0) | (results['largest_ts']   >= min_ts_size)).all(),   f"TS must be ≥ {min_ts_size}"
+        # For foci, we don't have largest/second for now; subset and totals are enforced by size-filtering
 
         return results        
 
@@ -3570,7 +3593,7 @@ class PostProcessingPlotter:
             ax.set_xlabel("mRNA Count")
             plt.tight_layout(rect=[0,0,1,0.95])
             if save_dir:
-                fig.savefig(os.path.join(save_dir, f"ridge_conc_{timepoint}_{m}.png"), dpi=300)
+                fig.savefig(os.path.join(save_dir, f"ridge_concsweep_{timepoint}_{m}.png"), dpi=300)
             if display:
                 plt.show()
             plt.close(fig)
