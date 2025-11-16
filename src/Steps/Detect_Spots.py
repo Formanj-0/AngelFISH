@@ -505,6 +505,8 @@ class detect_spots(abstract_task):
         for c in range(len(FISHChannel)):
             rna = image[FISHChannel[c], :, :, :]
             rna = rna.squeeze()
+            p1, p99 = np.percentile(rna.flatten(), (1, 99))
+            rna = np.clip(rna, p1, p99)
             dim_3D = len(rna.shape) == 3
 
             # detect spots
@@ -535,9 +537,14 @@ class detect_spots(abstract_task):
                     if cell_results is not None:
                         cell_results[key] = [value] * len(cell_results)
 
+            print('Additional Filtering')
+
+
+            print('')
+
 
             # output = SpotDetectionOutputClass(cell_results, spots, clusters, threshold)
-            print('Complete Spot Detection')
+            print(f'Complete Spot Detection p:{fov}, t:{timepoint}')
         return {'cellresults': cell_results, 'spotresults': spots, 'clusterresults': clusters, 'individual_spotdetection_thresholds': threshold}
 
     def write_results(self, results, p, t):
@@ -728,36 +735,6 @@ class detect_spots(abstract_task):
         final_cluster_df = pd.concat([pd.read_csv(f) for f in cluster_files], ignore_index=True) if cluster_files else None
 
         c = self.receipt['steps'][self.step_name]['FISHChannel'] 
-
-        # if self.data.get('cyto_masks', None) is not None and not 'cyto_masks' in self.viewer.layers:
-        #     print('cyto_masks')
-        #     mask = np.array(self.data['cyto_masks'])
-        #     temp = np.zeros_like(self.data['images'])
-        #     cyto_key = next((k for k in self.receipt['steps'].keys() if 'cyto' in k), None) # this is dirty but should work
-        #     print(cyto_key)
-        #     temp[:, :, self.receipt['steps'][cyto_key]['channel'], :, :, :] = mask
-        #     self.viewer.add_labels(
-        #         temp,
-        #         name='cyto_masks',
-        #         axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
-        #         scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
-        #     )
-
-        # print('did it fail while adding')
-        # if self.data.get('nuc_masks', None) is not None and not 'nuc_masks' in self.viewer.layers:
-        #     print('nuc_masks')
-        #     mask = np.array(self.data['nuc_masks'])
-        #     temp = np.zeros_like(self.data['images'])
-        #     nuc_key = next((k for k in self.receipt['steps'].keys() if 'nuc' in k), None)
-        #     print(nuc_key)
-        #     temp[:, :, self.receipt['steps'][nuc_key]['channel'], :, :, :] = mask
-        #     self.viewer.add_labels(
-        #         temp,
-        #         name='nuc_masks',
-        #         axis_labels=('p', 't', 'c', 'z', 'y', 'x'),
-        #         scale=[1, 1, 1, self.voxel_size_z/self.voxel_size_yx, 1, 1]
-        #     )
-        # print('here?')
 
         for layer_name in ["spots", "clusters"]:
             if layer_name in self.viewer.layers:
