@@ -471,19 +471,19 @@ class GR_Confirmation:
         cyto_vals_corr = corrected_image[pseudo_cyto > 0]
         nuc_vals_corr = corrected_image[nuc_mask > 0]
 
-        axs[1, 1].hist(nuc_vals_corr, bins=bins, color='purple', alpha=0.6, label='Nucleus (Corr)')
-        axs[1, 1].hist(cyto_vals_corr, bins=bins, color='orange', alpha=0.6, label='Pseudo-cyto (Corr)')
-        axs[1, 1].set_title("Corrected Intensity by Region")
+        cyto_vals_raw = raw_2d[pseudo_cyto > 0]
+        nuc_vals_raw = raw_2d[nuc_mask > 0]
+
+        axs[1, 1].hist(nuc_vals_raw, bins=bins, color='purple', alpha=0.6, label='Nucleus (Raw)')
+        axs[1, 1].hist(nuc_vals_corr, bins=bins, color='royalblue', alpha=0.6, label='Nucleus (Corr)')
+        axs[1, 1].set_title("Raw vs Corrected Nuclear Intensity")
         axs[1, 1].set_xlabel("Intensity")
         axs[1, 1].set_ylabel("Pixel Count")
         axs[1, 1].legend()
 
-        cyto_vals_raw = raw_2d[pseudo_cyto > 0]
-        nuc_vals_raw = raw_2d[nuc_mask > 0]
-
-        axs[1, 2].hist(nuc_vals_raw, bins=bins, color='purple', alpha=0.6, label='Nucleus (Raw)')
-        axs[1, 2].hist(cyto_vals_raw, bins=bins, color='orange', alpha=0.6, label='Pseudo-cyto (Raw)')
-        axs[1, 2].set_title("Raw Intensity by Region")
+        axs[1, 2].hist(cyto_vals_raw, bins=bins, color='firebrick', alpha=0.6, label='Pseudo-cyto (Raw)')
+        axs[1, 2].hist(cyto_vals_corr, bins=bins, color='orange', alpha=0.6, label='Pseudo-cyto (Corr)')
+        axs[1, 2].set_title("Raw vs Corrected Cytoplasmic Intensity")
         axs[1, 2].set_xlabel("Intensity")
         axs[1, 2].set_ylabel("Pixel Count")
         axs[1, 2].legend()
